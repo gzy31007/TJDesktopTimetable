@@ -58,7 +58,7 @@ docs/                 架构、数据模型、适配器指南
 
 ## 易错知识点
 
-- **已移除**「专业培养计划（`timetable/major`）适配器」与「教学班勾选」流程：现在只支持个人课表导入即用。若用户误把培养计划数据导进来（同一门课多个教学班），适配器会给 `tongji.looksLikePlan` 警告。
+- **已移除**「专业培养计划（`timetable/major`）适配器」与「教学班勾选」流程：现在只支持个人课表导入即用。若用户误把培养计划数据导进来（同一门课多个教学班），会表现为导入结果异常（**没有** `tongji.looksLikePlan` 这类专门警告——2026-09-15 全仓 grep 确认该标识在 TS/C# 源码里都不存在，旧文档此条不准；适配器层里真正的诊断码是 `tongji.personal` / `tongji.flat` / `tongji.noSchedule` / `tongji.schedule.missing` / `tongji.term.unknown` / `tongji.term.startDate` / `tongji.summary`）。
 - 个人课表与培养计划是**同一套后端字段**（`dayOfWeek` / `weekState` / `timeStart` / `roomName` …），区别只在数据范围，所以字段映射逻辑可复用。
 - `weekState` 是 16 位周次掩码，bit0 = 第 1 周；单双周掩码不要硬编码 `0x5555/0xAAAA`（只对 16 周成立），按 `term.totalWeeks` 生成。
 - `dayOfWeek` 取值 1–7，**7 = 周日**（注意与 JS `Date.getDay()` 的 0=周日 区分）。

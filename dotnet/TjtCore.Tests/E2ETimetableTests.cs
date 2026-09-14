@@ -10,9 +10,9 @@ namespace Tjt.Core.Tests;
 /// 逐条对齐 TS 侧 <c>packages/core/test/e2e-timetable.spec.ts</c>。fixture 来自一次真实抓包，
 /// 已脱敏（剔除学生姓名/学号与无关字段），由 csproj 复制到 <c>AppContext.BaseDirectory/fixtures</c>。
 ///
-/// **阶段一**（本文件当前内容）：只做不依赖 <c>Time</c> / <c>Layout</c> 的断言。
-/// **阶段二**（等布局/时间模块落地后补齐，见文件末尾待办）：导入 → <c>BuildBoard</c> →
-/// <c>TermWeekAt</c> / <c>SessionsOnDate</c> → 单双周过滤。
+/// **阶段一**：不依赖 <c>Time</c> / <c>Layout</c> 的断言（导入 → 学期 → 课程字段 → 落成课表）。
+/// **阶段二**：导入 → <c>MaterializeTimetable</c> → <c>BuildBoard</c> → <c>TermWeekAt</c> /
+/// <c>SessionsOnDate</c> → 单双周过滤 → 同格并排（含 <c>WeeksLabel</c> / <c>Special</c> / 几何矩形）。
 /// </summary>
 public class E2ETimetableTests
 {
@@ -207,12 +207,154 @@ public class E2ETimetableTests
         Assert.Equal("tongji-student", imported.AdapterId);
     }
 
-    // ── 阶段二待办（依赖 Time / Layout，等模块落地后补）────────────────────────────
-    //
-    // 1. 落成课表 → BuildBoard(TrimEmptySlots: true)：
-    //    board.Blocks.Count == Σcourses[].Sessions.Count、board.CurrentWeek == 1、board.Days.Count == 7。
-    // 2. Time.TermWeekAt(term, "2026-09-14") == 1、Time.TermWeekAt(term, "2026-08-31") == null。
-    // 3. Time.SessionsOnDate(courses, term, "2026-09-14").Length > 0。
-    // 4. 单双周过滤：BuildBoard(WeekFilter: Even).Blocks.Count < BuildBoard(默认).Blocks.Count。
-    // 5. 并排：BuildBoard().Blocks 全部 ColCount >= 1（专业导论合并后仍是单块）。
+    // ── 阶段二：导入 → 布局 → 时间 → 过滤（依赖 Time / Layout）─────────────────────
+
+    [Fact]
+    public void 落成课表到网格布局到当日课程与教学周()
+    {
+        var timetable = ImportPipeline.MaterializeTimetable(Personal);
+        var sessionTotal = timetable.Courses.Sum(course => course.Sessions.Count);
+
+        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions
+        {
+            Today = "2026-09-16",
+            TrimEmptySlots = true,
+        });
+
+        // 每个上课时段都落成一个色块（fixture 里没有 weeks=0 的脏数据，也没有被过滤掉的块）
+        Assert.Equal(sessionTotal, board.Blocks.Count);
+        Assert.Equal(0, board.HiddenSessions);
+        Assert.Equal(14, timetable.Courses.Count);
+        Assert.Equal("tongji-student", timetable.Source.AdapterId);
+
+        // 2026-09-16 是第 1 周三 → 当前第 1 教学周
+        Assert.Equal(1, board.CurrentWeek!.Value);
+        Assert.Equal("2026-09-16", board.Today);
+        Assert.Equal(7, board.Days.Count);   // 默认展示全周
+
+        // TrimEmptySlots：行范围收窄到实际有课的节次
+        Assert.Equal(board.Blocks.Min(block => block.StartSlot), board.Rows[0].Index);
+        Assert.Equal(board.Blocks.Max(block => block.EndSlot), board.Rows[^1].Index);
+
+        // 时间推算：开学日 2026-09-14 是第 1 周周一，8-31 在开学前
+        Assert.Equal(1, Time.TermWeekAt(timetable.Term, "2026-09-14")!.Value);
+        Assert.Null(Time.TermWeekAt(timetable.Term, "2026-08-31"));
+
+        var monday = Time.SessionsOnDate(timetable.Courses, timetable.Term, "2026-09-14");
+        Assert.True(monday.Length > 0);
+        Assert.All(monday, occurrence => Assert.Equal(Weekday.Monday, occurrence.Session.Day));
+        Assert.All(monday, occurrence => Assert.Equal(1, occurrence.Week));
+        Assert.Contains(timetable.Courses, course => ReferenceEquals(course, monday[0].Course));
+        // 开学前那天没有任何课
+        Assert.Empty(Time.SessionsOnDate(timetable.Courses, timetable.Term, "2026-08-31"));
+    }
+
+    [Fact]
+    public void 单双周过滤生效()
+    {
+        var timetable = ImportPipeline.MaterializeTimetable(Personal);
+        var all = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { Today = "2026-09-16" });
+        var even = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions
+        {
+            Today = "2026-09-16",
+            WeekFilter = WeekFilter.Even,
+        });
+
+        Assert.True(even.Blocks.Count < all.Blocks.Count);
+        Assert.Equal(0, all.HiddenSessions);
+        // 被隐藏的时段数 = 总时段数 - 双周仍显示的块数（且至少隐藏了单周课）
+        Assert.Equal(all.Blocks.Count - even.Blocks.Count, even.HiddenSessions);
+        Assert.True(even.HiddenSessions > 0);
+        // 双周视图里不该出现"只在单周上课"的块
+        Assert.All(even.Blocks, block => Assert.True((block.Weeks & Weeks.EvenMask(timetable.Term.TotalWeeks)) != 0));
+        // 全周上课的块（专业导论）在两种过滤下都在
+        Assert.Contains(all.Blocks, block => !block.Special);
+        Assert.Contains(even.Blocks, block => !block.Special);
+    }
+
+    [Fact]
+    public void 同一格多门课并排且矩形不重叠()
+    {
+        var timetable = ImportPipeline.MaterializeTimetable(Personal);
+        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { Today = "2026-09-16" });
+        var geometry = Layout.FitGeometry(1280, board.Rows.Count, board.Days.Count);
+
+        Assert.All(board.Blocks, block => Assert.True(block.ColCount >= 1));
+
+        foreach (var group in board.Blocks.GroupBy(block => (block.Day, block.StartSlot, block.EndSlot)))
+        {
+            // 同格的并排块共享同一个 colCount，col 取 0..n-1
+            Assert.Single(group.Select(block => block.ColCount).Distinct());
+            Assert.Equal(group.Count(), group.First().ColCount);
+            Assert.Equal(
+                Enumerable.Range(0, group.Count()),
+                group.Select(block => block.Col).OrderBy(col => col));
+            Assert.All(group, block => Assert.Equal(group.Count() > 1, block.Stacked));
+
+            var rects = group.Select(block => Layout.BlockRect(board, block, geometry)).ToList();
+            for (var i = 0; i < rects.Count; i += 1)
+            {
+                Assert.True(rects[i].Width > 0);
+                Assert.True(rects[i].Height > 0);
+                for (var j = i + 1; j < rects.Count; j += 1)
+                {
+                    var disjoint = rects[i].Left + rects[i].Width <= rects[j].Left ||
+                                   rects[j].Left + rects[j].Width <= rects[i].Left;
+                    Assert.True(disjoint, $"同格并排块 {i}/{j} 的矩形重叠");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void 布局块的周次标签与全周标记()
+    {
+        var timetable = ImportPipeline.MaterializeTimetable(Personal);
+        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { Today = "2026-09-16" });
+
+        Assert.All(board.Blocks, block =>
+        {
+            Assert.Equal(Weeks.FormatLabel(block.Weeks, timetable.Term.TotalWeeks), block.WeeksLabel);
+            Assert.Equal(!Weeks.IsAll(block.Weeks, timetable.Term.TotalWeeks), block.Special);
+        });
+
+        // 大学物理B2(I) 单周上课 → 条纹特殊块；专业导论并集后是全周 → 普通块
+        var physics = board.Blocks.First(block => block.Name == "大学物理B2(I)");
+        Assert.True(physics.Special);
+        Assert.Equal("1, 3, 5, 7, 9, 11, 13, 15", physics.WeeksLabel);
+        Assert.Equal(Weeks.OddMask(16), physics.Weeks);
+
+        var intro = board.Blocks.First(block => block.Name.Contains("专业导论", StringComparison.Ordinal));
+        Assert.False(intro.Special);
+        Assert.Equal("1-16", intro.WeeksLabel);
+        Assert.Equal(Weeks.FullMask(16), intro.Weeks);
+        Assert.Equal("北201", intro.Room);
+        Assert.Equal(9, intro.Teachers.Count);
+    }
+
+    [Fact]
+    public void 布局尺寸与色块矩形()
+    {
+        var timetable = ImportPipeline.MaterializeTimetable(Personal);
+        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { Today = "2026-09-16" });
+        var geometry = Layout.FitGeometry(1280, board.Rows.Count, board.Days.Count);
+
+        Assert.Equal(board.Days.Count, geometry.Cols);
+        Assert.Equal(board.Rows.Count, geometry.Rows);
+        Assert.Equal(7, geometry.Cols);
+
+        var size = Layout.BoardSize(board, geometry);
+        Assert.Equal(geometry.GutterWidth + (geometry.CellWidth * board.Days.Count), size.Width, 6);
+        Assert.Equal(geometry.HeaderHeight + (geometry.RowHeight * board.Rows.Count), size.Height, 6);
+
+        // 每个块都落在自己那一列里（列宽不越界）
+        var lastDayRight = geometry.GutterWidth + (geometry.CellWidth * board.Days.Count);
+        Assert.All(board.Blocks, block =>
+        {
+            var rect = Layout.BlockRect(board, block, geometry);
+            Assert.True(rect.Left >= geometry.GutterWidth);
+            Assert.True(rect.Left + rect.Width <= lastDayRight);
+            Assert.True(rect.Top >= geometry.HeaderHeight);
+        });
+    }
 }
