@@ -16,6 +16,9 @@ namespace Tjt.App;
 /// </summary>
 public partial class App : Application
 {
+    /// <summary>自检硬超时（毫秒）：比 CI 侧的 WaitForExit 短，好让日志先落盘。</summary>
+    private const int SmokeTimeout = 45_000;
+
     private readonly List<MainWindow> _windows = [];
 
     /// <summary>
@@ -43,7 +46,11 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         var options = Startup;
-        Console.WriteLine($"[start] smoke={options.Smoke} desktopLayer={options.DesktopLayer} size={options.Width}x{options.Height}");
+        Console.WriteLine($"[start] smoke={options.Smoke} desktopLayer={options.DesktopLayer} noBackdrop={options.NoBackdrop} size={options.Width}x{options.Height}");
+
+        // 自检看门狗：无 GPU 的 runner 上曾卡到 CI 只能看到"90 秒超时"，不知道卡在哪一步。
+        // 有它就能看到最后到达的阶段标记；同时给自检一个硬上限，绝不让 CI 悬着。
+        if (options.Smoke) StartSmokeWatchdog();
 
         try
         {
@@ -53,11 +60,10 @@ public partial class App : Application
             var window = new MainWindow();
             _windows.Add(window);
             window.Initialize(options, loaded);
-            Console.WriteLine($"[backdrop] mode={window.BackdropMode}");
 
             if (options.Smoke)
             {
-                SmokePassed = VerifySmoke(window, loaded);
+                SmokePassed = VerifySmoke(window, loaded, options.NoBackdrop);
                 return; // finally 里收尾
             }
 
@@ -83,8 +89,25 @@ public partial class App : Application
         }
     }
 
+    /// <summary>自检看门狗：超时即打印最后阶段并硬退出（退出码非零）。</summary>
+    private static void StartSmokeWatchdog()
+    {
+        var watchdog = new Thread(() =>
+        {
+            Thread.Sleep(SmokeTimeout);
+            Console.Error.WriteLine($"[smoke] fail: 自检 {SmokeTimeout / 1000} 秒未完成（最后阶段见上方 [stage]/[backdrop] 日志）");
+            Console.Error.Flush();
+            Environment.Exit(1);
+        })
+        {
+            IsBackground = true,
+            Name = "smoke-watchdog",
+        };
+        watchdog.Start();
+    }
+
     /// <summary>冒烟自检：布局信息必须自洽，且至少画出一块课表。</summary>
-    private static bool VerifySmoke(MainWindow window, LoadedTimetable loaded)
+    private static bool VerifySmoke(MainWindow window, LoadedTimetable loaded, bool noBackdrop)
     {
         var problems = new List<string>();
         var layout = window.Layout;
@@ -110,9 +133,10 @@ public partial class App : Application
             }
         }
 
-        if (string.Equals(window.BackdropMode, "none", StringComparison.Ordinal))
+        if (!noBackdrop && string.Equals(window.BackdropMode, "none", StringComparison.Ordinal))
         {
-            // 材质拿不到不算失败（无显卡 / 老系统的 runner 上本来就没有 Mica），但要留痕
+            // 材质拿不到不算失败（无显卡 / 老系统的 runner 上本来就没有 Mica），但要留痕。
+            // `--no-backdrop` 是调用方主动跳过的，不该在这里报"不可用"。
             Console.WriteLine("[smoke] warn: 材质不可用，退回无材质窗口");
         }
 

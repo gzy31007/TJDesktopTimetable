@@ -60,8 +60,19 @@ public sealed partial class MainWindow : Window
 
         var dark = startup.Dark ?? BackdropHelper.SystemUsesDarkTheme();
 
-        // 1) 材质：窗口创建后尽早设置（材质只影响窗口本身，与控制内容无关）
-        _backdrop = BackdropHelper.Apply(this, micaAlt: false);
+        // 1) 材质：窗口创建后尽早设置（材质只影响窗口本身，与控制内容无关）。
+        //    `--no-backdrop` 用于无 GPU 的环境：MicaController 要走 D3D 合成，
+        //    在无显卡的 CI runner 上会挂住（实测 job 卡满 90 秒没有任何输出）。
+        Console.WriteLine("[stage] window-created");
+        if (startup.NoBackdrop)
+        {
+            Console.WriteLine("[backdrop] skipped (--no-backdrop)");
+        }
+        else
+        {
+            _backdrop = BackdropHelper.Apply(this, micaAlt: false);
+            Console.WriteLine($"[backdrop] mode={_backdrop.Mode}");
+        }
 
         // 2) 用 core 布局 + widget 呈现模型算好整块课表，再量出画布尺寸（DIP）
         var state = Tjt.Core.Layout.BuildBoard(
@@ -70,9 +81,11 @@ public sealed partial class MainWindow : Window
             new Tjt.Core.BoardOptions { TrimEmptySlots = true });
         var visual = BoardVisualBuilder.Build(state, startup.Width, dark, Tjt.Core.Time.LocalMinutesOfDay());
 
+        Console.WriteLine("[stage] board-built");
         var canvas = BoardRenderer.Render(visual, dark);
         Host.Children.Clear();
         Host.Children.Add(canvas);
+        Console.WriteLine("[stage] canvas-rendered");
 
         Layout = new WindowLayoutInfo(
             canvas.Width,
