@@ -53,7 +53,7 @@ export function refreshTrayMenu(): void {
         label: '层级模式',
         submenu: [
           {
-            label: '置底可交互（推荐）',
+            label: '贴桌面层（推荐）',
             type: 'radio',
             checked: settings.mode === 'desktop',
             click: () => {

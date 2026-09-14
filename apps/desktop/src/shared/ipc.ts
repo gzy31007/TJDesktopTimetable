@@ -23,13 +23,13 @@ export type WeekFilterMode = 'all' | 'odd' | 'even';
 export type WindowMaterial = 'solid' | 'mica' | 'mica-alt' | 'acrylic';
 
 export interface WidgetSettings {
-  /** desktop = 置底可交互；wallpaper = WorkerW 壁纸层（贴桌面图标之下）。 */
+  /** desktop = 贴桌面层（owner 挂桌面图标视图，静息落点按前台三选一）；wallpaper = WorkerW 壁纸层（贴桌面图标之下）。 */
   mode: WidgetMode;
   /**
    * 把窗口 Owner 设为桌面图标层（`SHELLDLL_DefView`）。
    *
    * 开启后：浮在桌面图标之上（不被图标遮挡），且 Win+D / "显示桌面" 不会把它隐藏。
-   * 关掉则退化为普通顶层置底窗口（Win+D 会隐藏，由保险定时器恢复）。
+   * 关掉则退化为普通顶层窗口（Win+D 会隐藏，由窗口的 hide/minimize 事件恢复）。
    */
   desktopLayer: boolean;
   /** 窗口位置与大小（缺省时由主进程放到右下角）。 */
