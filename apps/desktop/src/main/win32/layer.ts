@@ -51,6 +51,9 @@ interface Win32 {
   GetAsyncKeyState: AnyFn;
   GetShellWindow: AnyFn;
   GetForegroundWindow: AnyFn;
+  SetForegroundWindow: AnyFn;
+  GetLastActivePopup: AnyFn;
+  GetWindowThreadProcessId: AnyFn;
   GetClassNameW: AnyFn;
   GetWindowTextW: AnyFn;
   WindowFromPoint: AnyFn;
@@ -138,6 +141,12 @@ function loadWin32(): Win32 | null {
       ]) as AnyFn,
       GetAsyncKeyState: user32.func('__stdcall', 'GetAsyncKeyState', 'int16', ['int32']) as AnyFn,
       GetShellWindow: user32.func('__stdcall', 'GetShellWindow', 'void *', []) as AnyFn,
+      SetForegroundWindow: user32.func('__stdcall', 'SetForegroundWindow', 'int32', ['void *']) as AnyFn,
+      GetLastActivePopup: user32.func('__stdcall', 'GetLastActivePopup', 'void *', ['void *']) as AnyFn,
+      GetWindowThreadProcessId: user32.func('__stdcall', 'GetWindowThreadProcessId', 'uint32', [
+        'void *',
+        'void *',
+      ]) as AnyFn,
       GetForegroundWindow: user32.func('__stdcall', 'GetForegroundWindow', 'void *', []) as AnyFn,
       GetClassNameW: user32.func('__stdcall', 'GetClassNameW', 'int32', ['void *', 'void *', 'int32']) as AnyFn,
       GetWindowTextW: user32.func('__stdcall', 'GetWindowTextW', 'int32', ['void *', 'void *', 'int32']) as AnyFn,
@@ -274,6 +283,38 @@ function topLevelWindows(api: Win32, limit = 20): { hwnd: number; cls: string; t
     api.koffi.unregister(cb);
   }
   return ranked;
+}
+
+/**
+ * 修复 Shell 的 "last active popup" 指针（移植自 WitchDrawer 的 `RepairShellLastActivePopup`）。
+ *
+ * 桌面挂件必须是 Progman 的 owned 窗口才能在 Win+D 后存活；但一旦**点击挂件或点击桌面**，
+ * Explorer 会把挂件登记成 Progman 的 last active popup —— 此后 Win+D 不再是"显示桌面"，
+ * 而变成"激活那个挂件"，表现为挂件被藏起来/层级错乱（NVIDIA 的 overlay 也会被同一机制
+ * 连带影响，说明这是系统对桌面级叠加层的统一行为）。
+ *
+ * 修法：把该指针改回 Progman —— 先 `SetForegroundWindow(Progman)`，随后恢复原前台窗口，
+ * 使这个"激活"对用户不可见。
+ */
+function repairShellLastActivePopup(api: Win32): boolean {
+  try {
+    const shell = hwndOrNull(api.GetShellWindow());
+    if (shell === null) return false;
+    const popup = hwndOrNull(api.GetLastActivePopup(shell));
+    if (popup === null || popup === shell) return false;
+
+    const pidBuffer = Buffer.alloc(4);
+    api.GetWindowThreadProcessId(popup, pidBuffer);
+    if (pidBuffer.readUInt32LE(0) !== process.pid) return false;
+
+    const previous = hwndOrNull(api.GetForegroundWindow());
+    if (api.SetForegroundWindow(shell) === 0) return false;
+    if (previous !== null && previous !== shell) api.SetForegroundWindow(previous);
+    return true;
+  } catch (error) {
+    log('[win32] 修复 last active popup 异常', String(error));
+    return false;
+  }
 }
 
 export function isWin32Available(): boolean {
@@ -547,6 +588,11 @@ export function attachToDesktop(window: BrowserWindow, options: LayerOptions): L
     if (snapshot !== lastState) {
       lastState = snapshot;
       log('[win32] 窗口状态变化', { state: snapshot });
+    }
+
+    // 每 2 拍修一次 shell 的 last active popup（点过桌面/挂件之后它会被指到我们身上）
+    if (zorderTicks % 2 === 0 && repairShellLastActivePopup(api)) {
+      log('[win32] 已修复 shell last active popup 指针');
     }
 
     // 鼠标交互：按下时摘 owner，松开后挂回（owner 由 keepAlive 轮询检测，不依赖渲染层事件）
