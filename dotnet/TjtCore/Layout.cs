@@ -157,19 +157,26 @@ public sealed record BlockRect(double Left, double Top, double Width, double Hei
 /// 7 列（周一…周日），节次从上到下；同一格（同一天 + 同起止节次）的多门课横向并排、宽度 1/n；
 /// 非全周上课的课打 <see cref="BoardBlock.Special"/> 标记（渲染层画条纹虚线）。
 ///
-/// 本文件同时内联了 <c>time.ts</c> 里 <c>buildBoard</c> 需要的 4 个纯函数
-/// （<c>isoToWeekday</c> / <c>localTodayIso</c> / <c>localMinutesOfDay</c> / <c>termWeekAt</c>），
-/// 全部是 private：这样布局移植不依赖并行进行的 time.ts 移植，公开 API 也只保留 layout.ts 的那 6 个导出。
+/// <para><b>日期推算复用 <see cref="Time"/></b>：几何与"今日/当前周/当前节次"用的
+/// <see cref="Time.IsoToWeekday"/> / <see cref="Time.LocalTodayIso"/> /
+/// <see cref="Time.LocalMinutesOfDay"/> / <see cref="Time.TermWeekAt"/> 全部来自 <see cref="Time"/>，
+/// 本文件不再内联任何时间实现（TS 侧 layout.ts 从 <c>time.ts</c> import 也是这个形状）。</para>
+///
+/// <para>唯一有意的语义差异在<b>畸形输入</b>上：<see cref="Time.IsoToDayNumber"/> 对
+/// "越界到 <see cref="DateOnly"/> 范围之外"的日期抛 <see cref="ArgumentOutOfRangeException"/>，
+/// 而布局绝不该因为一个坏日期就整个崩掉 —— 所以 <see cref="SafeDayNumber"/> /
+/// <see cref="SafeWeekday"/> 把异常收敛成 <c>null</c>，等价 TS 侧拿到 <c>NaN</c> 后
+/// <c>dayNumberToWeekday(NaN) → null</c> / <c>termWeekAt → null</c> 的表现。</para>
+///
+/// <para><b>刻意<b>不</b>复用</b> <see cref="Time.ToMinutes"/> 的那一处：节次表时间解析要走
+/// TS 侧 layout.ts 私有 <c>toMin</c> 的宽松语义（不校验 23/59 上限），
+/// <see cref="Time.ToMinutes"/> 则是 <c>time.ts</c> 的严格语义。两者在
+/// <c>"25:00"</c> 这类输入上结果不同，保持各自一致。</para>
 /// </summary>
 public static partial class Layout
 {
     /// <summary>默认几何（TS 侧 <c>DEFAULT_GEOMETRY</c>，行列留 0）。</summary>
     public static readonly BoardGeometry DefaultGeometry = new(74, 118, 52, 28);
-
-    private const double MsPerDay = 86_400_000d;
-
-    /// <summary>UTC 日序号 0 = 1970-01-01（与 TS 的 <c>Date.UTC</c> 基准一致）。</summary>
-    private static readonly DateTime UnixEpoch = new(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     /// <summary>
     /// 按可用宽度自适应列宽（桌面挂件用；列宽不低于 <paramref name="minCellWidth"/>）。
@@ -230,8 +237,8 @@ public static partial class Layout
 
         // 注意：TS 这里写的是 localTodayIso()（无参），**不读** options.now / options.tzOffsetMinutes，
         // 即"今日"永远按系统时间 + 默认北京时区算。C# 照抄这个既有行为，避免两端"今日"高亮不一致。
-        var today = opts.Today ?? LocalTodayIso(DateTimeOffset.UtcNow, TimetableModel.DefaultTzOffsetMinutes);
-        var todayWeekday = IsoToWeekday(today);
+        var today = opts.Today ?? Time.LocalTodayIso(DateTimeOffset.UtcNow, TimetableModel.DefaultTzOffsetMinutes);
+        var todayWeekday = SafeWeekday(today);
         var filterMask = Weeks.ResolveFilter(opts.WeekFilter, term.TotalWeeks);
         var colorOf = opts.ColorOf ?? (course => Colors.ColorForCourse(course.Name));
         var shortName = opts.ShortName ?? DefaultShortName;
@@ -273,8 +280,8 @@ public static partial class Layout
                 ? slotNumbers.Max()
                 : Math.Max(11, slotNumbers.Count > 0 ? slotNumbers.Max() : 0));
 
-        var currentWeek = TermWeekAt(term, today);
-        var nowSlot = CurrentSlotIndex(term, LocalMinutesOfDay(opts.Now ?? DateTimeOffset.UtcNow, opts.TzOffsetMinutes));
+        var currentWeek = SafeTermWeekAt(term, today);
+        var nowSlot = CurrentSlotIndex(term, Time.LocalMinutesOfDay(opts.Now ?? DateTimeOffset.UtcNow, opts.TzOffsetMinutes));
 
         var rows = new List<BoardRow>();
         for (var index = minSlot; index <= maxSlot; index++)
@@ -422,79 +429,58 @@ public static partial class Layout
         return -1;
     }
 
-    /* ---------------------------------------- 时间推算（time.ts 的最小自足子集，全部 private） */
+    /* ------------------------------------------------ 时间推算：全部委托给 Time（见类文档） */
 
-    /// <summary><c>YYYY-MM-DD</c> → UTC 日序号（无时区的纯日期）；解析失败返回 <see cref="double.NaN"/>。</summary>
-    /// <remarks>
-    /// 复现 JS <c>Date.UTC</c> 的两个细节：0..99 的年份映射到 1900+year；月/日越界自动进位
-    /// （<see cref="DateTime.AddMonths(int)"/>/<see cref="DateTime.AddDays(double)"/> 同样会进位）。
-    /// </remarks>
-    private static double IsoToDayNumber(string iso)
+    /// <summary>
+    /// <c>YYYY-MM-DD</c> → UTC 日序号；解析失败<b>或越界</b>返回 <c>null</c>
+    /// （把 <see cref="Time.IsoToDayNumber"/> 的 <see cref="ArgumentOutOfRangeException"/> 收敛掉）。
+    /// </summary>
+    private static int? SafeDayNumber(string iso)
     {
-        var match = IsoDatePattern().Match(iso.Trim());
-        if (!match.Success) return double.NaN;
-        var year = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
-        var month = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
-        var day = int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
-        if (year is >= 0 and <= 99) year += 1900;
-        var date = UnixEpoch.AddMonths(month - 1).AddDays(day - 1);
-        return Math.Floor((date - UnixEpoch).TotalMilliseconds / MsPerDay);
-    }
-
-    /// <summary>日序号 → 星期（1 = 周一 … 7 = 周日）；<see cref="double.NaN"/> 返回 <c>null</c>。</summary>
-    /// <remarks>1970-01-01 是周四，所以 <c>(day + 4) mod 7</c> 就是 JS <c>getUTCDay()</c>（0 = 周日）。</remarks>
-    private static Weekday? DayNumberToWeekday(double day)
-    {
-        if (double.IsNaN(day)) return null;
-        var js = (int)((((day + 4) % 7) + 7) % 7);
-        return (Weekday)(js == 0 ? 7 : js);
-    }
-
-    private static Weekday? IsoToWeekday(string iso) => DayNumberToWeekday(IsoToDayNumber(iso));
-
-    /// <summary>某天所在周的周一（按周一为一周起点）；解析失败返回 <see cref="double.NaN"/>。</summary>
-    private static double MondayOfDayNumber(double day)
-    {
-        var weekday = DayNumberToWeekday(day);
-        return weekday is null ? double.NaN : day - ((int)weekday.Value - 1);
-    }
-
-    /// <summary>某个 <see cref="DateTimeOffset"/> 在指定时区（分钟）下的日历日。</summary>
-    private static string LocalTodayIso(DateTimeOffset now, int tzOffsetMinutes)
-    {
-        var shifted = now.ToUniversalTime().AddMinutes(tzOffsetMinutes);
-        return string.Create(CultureInfo.InvariantCulture, $"{shifted.Year}-{shifted.Month:00}-{shifted.Day:00}");
-    }
-
-    /// <summary>指定时区下的当前时刻分钟数（0..1439）。</summary>
-    private static int LocalMinutesOfDay(DateTimeOffset now, int tzOffsetMinutes)
-    {
-        var shifted = now.ToUniversalTime().AddMinutes(tzOffsetMinutes);
-        return (shifted.Hour * 60) + shifted.Minute;
+        try
+        {
+            return Time.IsoToDayNumber(iso);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
-    /// 当前是第几教学周；开学前或学期结束后返回 <c>null</c>（TS 侧 <c>termWeekAt</c>）。
+    /// 日期 → 星期；解析失败<b>或越界</b>返回 <c>null</c>。
     ///
-    /// <c>term.StartDate</c> 必须是第 1 周周一：TS 先 <c>mondayOf(startDate)</c> 归一化，
-    /// 这里对日序号做同样的归一化（不经过字符串往返，NaN 语义一致）。
+    /// 走 <see cref="SafeDayNumber"/> 而不是 <see cref="Time.IsoToWeekday"/>，唯一的区别就是
+    /// 越界输入在这里不抛异常（同 TS 的 <c>NaN</c> → <c>null</c>）。
     /// </summary>
-    private static int? TermWeekAt(Term term, string iso)
+    private static Weekday? SafeWeekday(string iso)
     {
-        if (string.IsNullOrEmpty(term.StartDate)) return null;
-        var start = MondayOfDayNumber(IsoToDayNumber(term.StartDate));
-        var today = IsoToDayNumber(iso);
-        if (double.IsNaN(start) || double.IsNaN(today)) return null;
-        var diff = today - start;
-        if (diff < 0) return null;
-        var week = (int)Math.Floor(diff / 7) + 1;
-        if (term.TotalWeeks > 0 && week > term.TotalWeeks) return null;
-        return week;
+        var day = SafeDayNumber(iso);
+        return day is null ? null : Time.DayNumberToWeekday(day.Value);
+    }
+
+    /// <summary>
+    /// 当前是第几教学周；开学前、学期结束后、日期畸形/越界都返回 <c>null</c>。
+    ///
+    /// 归一化与判定逻辑<b>完全</b>走 <see cref="Time.TermWeekAt"/>（包括 <c>StartDate</c> 空值判定），
+    /// 这里只负责把它对越界日期的异常收敛成 <c>null</c> —— 布局不该因为一个坏日期整个崩掉。
+    /// </summary>
+    private static int? SafeTermWeekAt(Term term, string iso)
+    {
+        try
+        {
+            return Time.TermWeekAt(term, iso);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
     /// <c>HH:mm</c> → 当天分钟数；不匹配返回 <c>null</c>。
-    /// 只做 layout.ts 私有 <c>toMin</c> 的宽松解析（不校验 23/59 上限）。
+    /// 只做 layout.ts 私有 <c>toMin</c> 的宽松解析（不校验 23/59 上限），**有意**不复用
+    /// <see cref="Time.ToMinutes"/>（那是严格语义，见类文档）。
     /// </summary>
     private static int? LenientMinutes(string hhmm)
     {
@@ -503,9 +489,6 @@ public static partial class Layout
         return (int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) * 60)
             + int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
     }
-
-    [GeneratedRegex(@"^(\d{4})-(\d{2})-(\d{2})")]
-    private static partial Regex IsoDatePattern();
 
     [GeneratedRegex(@"^(\d{1,2}):(\d{2})")]
     private static partial Regex HhmmPattern();

@@ -356,4 +356,59 @@ public class LayoutTests
         Assert.Equal<int?>(2, Layout.CurrentSlotIndex(sparse, (9 * 60) + 10));
         Assert.Null(Layout.CurrentSlotIndex(sparse, 8 * 60));
     }
+
+    // ── 时间推算复用 Time（见 Layout 类文档）─────────────────────────────────────
+
+    [Fact]
+    public void 当前周与开学日判定复用Time的语义()
+    {
+        // 直接对齐 Time.TermWeekAt：同一组输入在布局与时间模块里必须给出同一个答案。
+        // 这里只覆盖"开学日 + 开学前"两极：往后的周次推算由 TimeTests 铺满。
+        // （不测"学期结束后"——那需要构造 TotalWeeks 比实际跨度小的学期，属于 Time 的职责。）
+        foreach (var iso in new[] { "2026-08-31", "2026-09-07", "2026-09-14", "2026-09-20", "2026-09-21" })
+        {
+            var expected = Time.TermWeekAt(TestTerm, iso);
+            Assert.Equal(expected, Layout.BuildBoard([MathCourse], TestTerm, new BoardOptions { Today = iso }).CurrentWeek);
+        }
+
+        // 开学前的周日（09-13）与开学当天同属"第 1 周之前"
+        Assert.Null(Time.TermWeekAt(TestTerm, "2026-09-13"));
+        // 开学日 2026-09-14 正是第 1 周周一
+        Assert.Equal(1, Time.TermWeekAt(TestTerm, "2026-09-14"));
+    }
+
+    [Fact]
+    public void 今日高亮按星期复用Time的解析()
+    {
+        // 2026-09-16 是周三 → 只有周三被标今日（与教学周无关）
+        var board = Layout.BuildBoard([MathCourse], TestTerm, new BoardOptions { Today = "2026-09-16" });
+        Assert.Equal(Weekday.Wednesday, Assert.Single(board.Days, d => d.IsToday).Day);
+    }
+
+    [Fact]
+    public void 畸形与越界日期不会让布局抛异常()
+    {
+        // 语义差异点：Time.IsoToDayNumber 对越界日期抛 ArgumentOutOfRangeException，
+        // 但布局把异常收敛成 null  —— 等价 TS 侧拿到 NaN 后的表现，绝不能因为一个坏日期整个崩掉。
+        foreach (var bad in new[] { "not-a-date", "", "2026-9-14", "9999-99-99" })
+        {
+            var board = Layout.BuildBoard([MathCourse], TestTerm, new BoardOptions { Today = bad });
+            Assert.Null(board.CurrentWeek);
+            Assert.DoesNotContain(board.Days, d => d.IsToday);
+            // 课表内容本身照常渲染（今日解析失败不影响色块）
+            Assert.Single(board.Blocks);
+        }
+    }
+
+    [Fact]
+    public void 同一日历日在两端给出同一个答案()
+    {
+        // 布局的"今日/星期"与 Time 的公开 API 必须逐条一致（含闰年 2 月）
+        foreach (var iso in new[] { "2026-09-14", "2026-02-29", "2024-02-29", "1999-12-31", "2026-01-04" })
+        {
+            var board = Layout.BuildBoard([MathCourse], TestTerm, new BoardOptions { Today = iso });
+            Assert.Equal(Time.IsoToWeekday(iso), board.Days.SingleOrDefault(d => d.IsToday)?.Day);
+            Assert.Equal(Time.TermWeekAt(TestTerm, iso), board.CurrentWeek);
+        }
+    }
 }

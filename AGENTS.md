@@ -28,7 +28,7 @@ docs/                 架构、数据模型、适配器指南
 ## 任务规范
 
 - 提交：Conventional Commits（英文类型 + 中文简述），例：`feat(core): 增加同济专业课表适配器`；推送前必须 `pnpm test && pnpm typecheck`。
-- 测试：core 的每个公开函数都要有单测；同济个人课表适配器由 `test/e2e-timetable.spec.ts` 端到端覆盖（导入 → 布局 → 时间 → 单双周过滤）。
+- 测试：core 的每个公开函数都要有单测；同济个人课表适配器由 `test/e2e-timetable.spec.ts` 端到端覆盖（导入 → 布局 → 时间 → 单双周过滤）；**同格撞车**由 `fixtures/tongji-2026-1-collision.json`（构造数据，非抓包）覆盖，TS 与 C# 两侧共用这一份（C# 侧 `CollisionE2ETests.cs`）。
 - 视觉规范：Win11 Fluent / 亚克力玻璃。设计令牌与基础控件在 `apps/desktop/src/renderer/shared/fluent.css`（色彩分级、圆角、阴影、明暗主题、`.f-btn`/`.f-pill`/`.f-switch`/`.f-card`），课表皮肤在 `shared/board.css`，挂件外壳在 `widget/widget.css`，管理窗口在 `manage/`。改渲染先读这几份，不要再引入一次性硬编码色值。
   - 历史基准（网格参数、色板、条纹特殊块、单双周并排）仍可对照 `/root/trivial/tongji-timetable/select_preview.html`，但视觉语言以 Fluent 令牌为准。
   - **挂件窗口材质（2026-09-14 四次定稿：材质回归成功，改成可选设置）**：`settings.material` = `solid`（默认，不透明实色底）/ `mica` / `mica-alt` / `acrylic`，在「设置 → 显示与行为 → 窗口材质」里切。映射见 `windows/widget.ts` 的 `resolveMaterial()`：
@@ -62,6 +62,9 @@ docs/                 架构、数据模型、适配器指南
 - 个人课表与培养计划是**同一套后端字段**（`dayOfWeek` / `weekState` / `timeStart` / `roomName` …），区别只在数据范围，所以字段映射逻辑可复用。
 - `weekState` 是 16 位周次掩码，bit0 = 第 1 周；单双周掩码不要硬编码 `0x5555/0xAAAA`（只对 16 周成立），按 `term.totalWeeks` 生成。
 - `dayOfWeek` 取值 1–7，**7 = 周日**（注意与 JS `Date.getDay()` 的 0=周日 区分）。
+- **并排分组键是「同天 + 同起止节次」，不是"时间段相交"**：周一 1-2 节与周一 1-3 节算两格，各自独占整列（视觉上互相压住）。布局不做跨块几何排布，这是与 `select_preview.html` 一致的既有语义。
+- **并排 ≠ 冲突**：单双周错开的两门课（如 1-8 周 / 9-16 周）在 `conflict.ts` 里不算冲突，但布局照样把同一格的两块并排（`colCount = 2`）。改布局时别把 `colCount` 和 `coursesConflict` 混为一谈；两端都有黄金用例钉住（`fixtures/tongji-2026-1-collision.json`）。
+- **同格多条 times 的合并键含教室**（适配器层：同天 + 同起止节次 + 同教室才合并、周次取并集）；同格不同教室不合并，成为并排的两块。
 - 教学班去重键用 `teachingClassId`（数字），`code` 是教学班代码字符串（如 `00213702`），`courseCode` 是课程代码（如 `002137`），三者不可混用。
 - 校历时间戳是毫秒（如 `beginDay: 1820160000000`），且 `weekBenginDay` 表示"周从周几开始"（同济为 2 = 周一），不是开学日。
 - `koffi` 的平台二进制走 `optionalDependencies`（`@koromix/koffi-win32-x64`），在 WSL 上依赖 `pnpm-workspace.yaml` 的 `supportedArchitectures`，打包时必须 `asarUnpack: ["**/*.node"]`。
