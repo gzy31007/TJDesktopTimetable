@@ -51,6 +51,22 @@ body {
   opacity: var(--shell-alpha, 1);
 }
 
+/*
+ * 系统材质（云母 / 云母 Alt / 亚克力）开启时，底板由 DWM 绘制。这里把主题底板压到
+ * 约 6 成再叠上去：
+ * - 全留（原来的 0.94 白）= 材质被整块盖住，等于白开；
+ * - 全交给材质 = 对比度失控 —— 材质明暗跟**壁纸**走，实测深色壁纸上 mica 是深色的，
+ *   而 crystal 是浅色主题（深字），文字与网格线直接糊掉。
+ * 所以材质在挂件上定位为"色调层"：主题底板仍是可读性的保证，材质负责把壁纸的颜色与
+ * 模糊带进来；边界用 1px 内描边表达（inset 阴影不改布局）。
+ */
+.widget-shell[data-material='mica'],
+.widget-shell[data-material='mica-alt'],
+.widget-shell[data-material='acrylic'] {
+  background-color: color-mix(in srgb, var(--glass-shell) 62%, transparent);
+  box-shadow: inset 0 0 0 1px var(--stroke);
+}
+
 /* 内容层压在噪声之上 */
 .widget-bar,
 .widget-content {
@@ -62,7 +78,7 @@ body {
   opacity: calc(0.55 + 0.45 * var(--shell-alpha, 1));
 }
 
-/* ------------------------------------------------------------------ 命令条 */
+/* ------------------------------------------------------------------ 卡片头 */
 .widget-bar {
   position: relative;
   z-index: 3;
@@ -80,6 +96,8 @@ body {
   border-bottom: 1px solid var(--divider);
   /* 交给 Chromium 原生拖动（WM_NCHITTEST → HTCAPTION），跟手且不丢鼠标事件 */
   -webkit-app-region: drag;
+  /* 卡片头略高一点，给"品牌块 + 标题 + 操作区"留呼吸（DeskBox 的卡片头也是这个比例） */
+  padding: 8px 12px 7px;
 }
 
 /* 交互控件必须排除在拖动区之外，否则点不动 */
@@ -88,6 +106,16 @@ body {
 .widget-bar input,
 .widget-bar a {
   -webkit-app-region: no-drag;
+}
+
+/* 标题前的小色块：模仿卡片头的应用图标位（不引资源文件，纯 CSS） */
+.widget-bar .brand {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background-image: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 0 0 1px var(--accent-ring);
 }
 
 .widget-bar .title {
@@ -124,6 +152,27 @@ body {
   align-items: center;
   gap: 2px;
   flex: 0 0 auto;
+}
+
+/*
+ * 次级操作（周次过滤 / 含周末 / 隐藏）默认收起，悬停或键盘聚焦时才出现。
+ * 收起时 `pointer-events: none`，否则会点到看不见的按钮。
+ */
+.widget-bar .actions-hover {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transform: translateY(-1px);
+  transition: opacity 160ms var(--ease), transform 160ms var(--ease);
+  pointer-events: none;
+}
+
+.widget-shell:hover .widget-bar .actions-hover,
+.widget-bar .actions-hover:focus-within {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 
 /* 窄窗口（拖到很小）时优先保证按钮可用，隐藏摘要 */

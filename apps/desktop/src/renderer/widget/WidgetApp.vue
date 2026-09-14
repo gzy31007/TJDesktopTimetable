@@ -129,9 +129,11 @@ onBeforeUnmount(() => {
   <div
     class="widget-shell fluent-root"
     :data-theme="theme"
+    :data-material="settings.material"
     :style="{ '--shell-alpha': String(settings.opacity) }"
   >
     <div class="widget-bar" title="按住此处可拖动挂件" @pointerdown="onBarPointerDown" @pointerup="onPointerUp">
+      <span class="brand" aria-hidden="true" />
       <span class="title">{{ termName }}</span>
       <span class="meta">
         <span>{{ week ? `第 ${week} 周` : '假期' }}</span>
@@ -139,28 +141,35 @@ onBeforeUnmount(() => {
       </span>
       <span class="spacer" />
       <span class="actions">
-        <button
-          class="f-pill"
-          type="button"
-          :title="`周次过滤：${filterLabel}${hiddenSessions ? `（${hiddenSessions} 个时段被过滤）` : ''}，点击切换`"
-          @click="cycleWeekFilter"
-        >
-          {{ filterLabel }}<span v-if="hiddenSessions" class="count">{{ hiddenSessions }}</span>
-        </button>
-        <button
-          class="f-pill"
-          :class="{ 'is-on': settings.showWeekend }"
-          type="button"
-          :title="settings.showWeekend ? '当前显示周末，点击仅显示工作日' : '当前仅工作日，点击显示周末'"
-          @click="applySettings({ showWeekend: !settings.showWeekend })"
-        >
-          {{ settings.showWeekend ? '含周末' : '仅工作日' }}
-        </button>
-        <span class="divider" />
+        <!--
+          次级操作默认收起、悬停才出现（DeskBox 的卡片头就是这个语言）：
+          挂件常年贴在桌面上，"设置/隐藏/周次过滤"不属于需要一直盯着的信息。
+          收起时同时 `pointer-events: none`，避免点到看不见的按钮。
+        -->
+        <span class="actions-hover">
+          <button
+            class="f-pill"
+            type="button"
+            :title="`周次过滤：${filterLabel}${hiddenSessions ? `（${hiddenSessions} 个时段被过滤）` : ''}，点击切换`"
+            @click="cycleWeekFilter"
+          >
+            {{ filterLabel }}<span v-if="hiddenSessions" class="count">{{ hiddenSessions }}</span>
+          </button>
+          <button
+            class="f-pill"
+            :class="{ 'is-on': settings.showWeekend }"
+            type="button"
+            :title="settings.showWeekend ? '当前显示周末，点击仅显示工作日' : '当前仅工作日，点击显示周末'"
+            @click="applySettings({ showWeekend: !settings.showWeekend })"
+          >
+            {{ settings.showWeekend ? '含周末' : '仅工作日' }}
+          </button>
+          <span class="divider" />
+          <button class="f-pill" type="button" title="隐藏挂件（可从托盘恢复）" @click="api.toggleWidget(false)">
+            隐藏
+          </button>
+        </span>
         <button class="f-pill" type="button" title="打开设置" @click="api.openManage()">设置</button>
-        <button class="f-pill" type="button" title="隐藏挂件（可从托盘恢复）" @click="api.toggleWidget(false)">
-          隐藏
-        </button>
       </span>
     </div>
 
