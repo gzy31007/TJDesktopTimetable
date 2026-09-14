@@ -44,19 +44,38 @@ async function applySettings(patch: Partial<WidgetSettings>): Promise<void> {
   state.value = await api.updateSettings(patch);
 }
 
-function onBarPointerDown(event: MouseEvent): void {
+function onBarPointerDown(event: PointerEvent): void {
   if (event.button !== 0) return;
   const target = event.target as HTMLElement;
   if (target.closest('button, select, input, a')) return;
+  event.preventDefault();
   api.beginDrag();
 }
 
-function onResizePointerDown(event: MouseEvent): void {
+function onResizePointerDown(event: PointerEvent): void {
   if (event.button !== 0) return;
+  event.preventDefault();
   event.stopPropagation();
+  // 关键：捕获指针后，即使指针移出挂件（甚至移出屏幕边缘），pointerup 仍会送到这里
+  const handle = event.currentTarget as HTMLElement;
+  try {
+    handle.setPointerCapture(event.pointerId);
+  } catch {
+    /* 某些环境不支持捕获，主进程侧还有左键状态兜底 */
+  }
   api.beginResize();
 }
 
+function releaseCapture(event: PointerEvent): void {
+  const handle = event.currentTarget as HTMLElement | null;
+  try {
+    handle?.releasePointerCapture(event.pointerId);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 幂等：主进程侧对重复调用是安全的，多路兜底避免"拖动停不下来"。 */
 function onPointerUp(): void {
   api.endPointer();
 }
@@ -74,7 +93,9 @@ onMounted(async () => {
   offState = api.onStateChanged?.((next) => (state.value = next)) ?? null;
   offFallback = api.onFallback?.((reason) => showToast(reason)) ?? null;
   prefersDark.addEventListener('change', onThemeChange);
-  window.addEventListener('mouseup', onPointerUp);
+  // 兜底：即使指针事件丢失（原生拖动会吞掉 pointerup），也能收尾
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('blur', onPointerUp);
 });
 
 function onThemeChange(): void {
@@ -86,7 +107,8 @@ onBeforeUnmount(() => {
   offState?.();
   offFallback?.();
   prefersDark.removeEventListener('change', onThemeChange);
-  window.removeEventListener('mouseup', onPointerUp);
+  window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('blur', onPointerUp);
 });
 </script>
 
@@ -96,7 +118,7 @@ onBeforeUnmount(() => {
     :class="dark ? 'dark' : 'light'"
     :style="{ '--shell-alpha': String(settings.opacity) }"
   >
-    <div class="widget-bar" @mousedown="onBarPointerDown">
+    <div class="widget-bar" title="按住此处可拖动挂件" @pointerdown="onBarPointerDown" @pointerup="onPointerUp">
       <span class="title">{{ termName }}</span>
       <span>{{ week ? `第 ${week} 周` : '假期' }}</span>
       <span v-if="todayCount">今日 {{ todayCount }} 节</span>
@@ -127,7 +149,14 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div class="resize-handle" @mousedown="onResizePointerDown" />
+    <div
+      class="resize-handle"
+      title="拖动可缩放挂件"
+      @pointerdown="onResizePointerDown"
+      @pointerup="releaseCapture($event); onPointerUp()"
+      @pointercancel="releaseCapture($event); onPointerUp()"
+      @lostpointercapture="onPointerUp"
+    />
     <div class="toast" :class="{ show: !!toast }">{{ toast }}</div>
   </div>
 </template>

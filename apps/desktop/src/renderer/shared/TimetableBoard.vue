@@ -46,6 +46,8 @@ const emit = defineEmits<{ (event: 'pick', courseId: string): void }>();
 const host = ref<HTMLElement | null>(null);
 const availableWidth = ref(720);
 let observer: ResizeObserver | null = null;
+let pendingWidth = 0;
+let rafId: number | null = null;
 
 const board = computed(() =>
   buildBoard(props.courses, props.term, {
@@ -93,9 +95,16 @@ onMounted(() => {
   const element = host.value;
   if (!element) return;
   availableWidth.value = element.clientWidth;
+  // 缩放窗口时 ResizeObserver 会连续触发；用 rAF 合并到每帧一次，避免反复重算网格
   observer = new ResizeObserver((entries) => {
     const entry = entries[0];
-    if (entry) availableWidth.value = entry.contentRect.width;
+    if (!entry) return;
+    pendingWidth = entry.contentRect.width;
+    if (rafId !== null) return;
+    rafId = window.requestAnimationFrame(() => {
+      rafId = null;
+      availableWidth.value = pendingWidth;
+    });
   });
   observer.observe(element);
 });
@@ -103,6 +112,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   observer?.disconnect();
   observer = null;
+  if (rafId !== null) {
+    window.cancelAnimationFrame(rafId);
+    rafId = null;
+  }
 });
 </script>
 

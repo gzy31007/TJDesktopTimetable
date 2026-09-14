@@ -46,6 +46,9 @@ interface Win32 {
   SetWindowPos: AnyFn;
   IsIconic: AnyFn;
   IsWindowVisible: AnyFn;
+  ReleaseCapture: AnyFn;
+  SendMessageW: AnyFn;
+  GetAsyncKeyState: AnyFn;
 }
 
 const GWL_EXSTYLE = -20;
@@ -64,6 +67,11 @@ const SWP_NOMOVE = 0x0002;
 const SWP_NOACTIVATE = 0x0010;
 const SWP_NOOWNERZORDER = 0x0200;
 const SWP_NOSENDCHANGING = 0x0400;
+
+const WM_NCLBUTTONDOWN = 0x00a1;
+/** 命中测试码：标题栏（用于原生拖动）。 */
+const HTCAPTION = 2;
+const VK_LBUTTON = 0x01;
 
 let cached: Win32 | null | undefined;
 let loadFailed = false;
@@ -109,6 +117,14 @@ function loadWin32(): Win32 | null {
       ]) as AnyFn,
       IsIconic: user32.func('__stdcall', 'IsIconic', 'int32', ['void *']) as AnyFn,
       IsWindowVisible: user32.func('__stdcall', 'IsWindowVisible', 'int32', ['void *']) as AnyFn,
+      ReleaseCapture: user32.func('__stdcall', 'ReleaseCapture', 'int32', []) as AnyFn,
+      SendMessageW: user32.func('__stdcall', 'SendMessageW', 'intptr_t', [
+        'void *',
+        'uint32',
+        'uintptr_t',
+        'intptr_t',
+      ]) as AnyFn,
+      GetAsyncKeyState: user32.func('__stdcall', 'GetAsyncKeyState', 'int16', ['int32']) as AnyFn,
     };
   } catch (error) {
     loadFailed = true;
@@ -116,6 +132,44 @@ function loadWin32(): Win32 | null {
     log('[win32] koffi/user32 加载失败，退化为普通置底窗口：', error);
   }
   return cached;
+}
+
+/**
+ * 交给 Windows 自己拖动窗口（原生 move loop）。
+ *
+ * 为什么不用"轮询光标 + setPosition"：那种做法有三个硬伤——
+ * 1. 松开鼠标必须靠渲染层收到 `mouseup`，指针一移出窗口就丢事件，拖动会"粘住"；
+ * 2. 每 16ms 一次 `setPosition` 要等 DWM 合成，肉眼可见的滞后、橡皮筋感；
+ * 3. 与置底定时器抢 z-order，拖动中会跳。
+ *
+ * `SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)` 让系统进入自己的模态拖动循环：
+ * 跟手性 = 系统窗口拖动，且自动处理鼠标捕获、多屏、DPI 与松手结束。
+ * 代价是该调用会阻塞到用户松手（主进程在拖动期间不处理其它消息，可接受）；
+ * WorkerW 壁纸层模式下窗口是子窗口，原生拖动坐标会错乱，因此只在置底模式使用。
+ */
+export function beginNativeMove(window: BrowserWindow): boolean {
+  const api = loadWin32();
+  if (!api) return false;
+  const hwnd = toHwnd(window);
+  try {
+    api.ReleaseCapture();
+    api.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    return true;
+  } catch (error) {
+    log('[win32] 原生拖动失败，回退自实现：', error);
+    return false;
+  }
+}
+
+/** 左键当前是否按下（自实现拖动/缩放的兜底：即使丢了 pointerup 也能收尾）。 */
+export function isLeftButtonDown(): boolean {
+  const api = loadWin32();
+  if (!api) return false;
+  try {
+    return (Number(api.GetAsyncKeyState(VK_LBUTTON)) & 0x8000) !== 0;
+  } catch {
+    return false;
+  }
 }
 
 export function isWin32Available(): boolean {

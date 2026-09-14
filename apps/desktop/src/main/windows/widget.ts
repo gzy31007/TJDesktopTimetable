@@ -1,7 +1,7 @@
 import { BrowserWindow, screen } from 'electron';
 import { join } from 'node:path';
 import type { WidgetSettings } from '../../shared/ipc.js';
-import { attachToDesktop, isWin32Available, type LayerHandle } from '../win32/layer.js';
+import { attachToDesktop, beginNativeMove, isLeftButtonDown, isWin32Available, type LayerHandle } from '../win32/layer.js';
 import { loadSettings, saveSettings } from '../store.js';
 import { log } from '../logger.js';
 
@@ -192,9 +192,19 @@ export function setWidgetVisible(visible: boolean): void {
   }
 }
 
-function startPointerLoop(onTick: () => void): void {
+/**
+ * 拖动 / 缩放。
+ *
+ * 拖动：置底模式交给 Windows 原生 move loop（跟手性 = 系统窗口拖动）；壁纸层模式是子窗口，
+ * 原生拖动坐标会错乱，退回自实现。
+ * 缩放：窗口是 `resizable: false` 的透明无边框窗口，系统缩放不可用，自实现 + 三重保险：
+ *   渲染层 `setPointerCapture`（指针移出窗口也不丢 pointerup）、主进程每 8ms 检查
+ *   `GetAsyncKeyState(VK_LBUTTON)`（左键松开即收尾）、起止时暂停/恢复置底定时器。
+ */
+
+function startPointerLoop(onTick: () => void, intervalMs = 8): void {
   stopPointerLoop();
-  pointerTimer = setInterval(onTick, 16);
+  pointerTimer = setInterval(onTick, intervalMs);
 }
 
 function stopPointerLoop(): void {
@@ -206,30 +216,55 @@ function stopPointerLoop(): void {
 
 export function beginDrag(): void {
   const win = widgetWindow;
-  if (!win || win.isDestroyed() || dragging) return;
+  if (!win || win.isDestroyed() || !win.isVisible() || dragging || resizing) return;
   dragging = true;
-  const startCursor = screen.getCursorScreenPoint();
-  const [startX = 0, startY = 0] = win.getPosition();
-  startPointerLoop(() => {
-    if (!dragging || win.isDestroyed()) return;
-    const cursor = screen.getCursorScreenPoint();
-    win.setPosition(startX + (cursor.x - startCursor.x), startY + (cursor.y - startCursor.y));
-  });
+  // 关键：拖动期间不要让置底定时器反复 SetWindowPos，否则拖到一半会被压回底部
+  layer?.pause();
+  log('[widget] 开始拖动', { mode: layer?.mode });
+
+  const native = layer?.mode === 'desktop' ? beginNativeMove(win) : false;
+  if (!native) {
+    const startCursor = screen.getCursorScreenPoint();
+    const [startX = 0, startY = 0] = win.getPosition();
+    startPointerLoop(() => {
+      if (!dragging || win.isDestroyed() || !isLeftButtonDown()) {
+        endPointer();
+        return;
+      }
+      const cursor = screen.getCursorScreenPoint();
+      win.setPosition(startX + (cursor.x - startCursor.x), startY + (cursor.y - startCursor.y));
+    });
+    return;
+  }
+
+  // 原生拖动：SendMessage 返回时用户已松手
+  endPointer();
 }
 
 export function beginResize(): void {
   const win = widgetWindow;
-  if (!win || win.isDestroyed() || resizing) return;
+  if (!win || win.isDestroyed() || !win.isVisible() || resizing || dragging) return;
   resizing = true;
+  layer?.pause();
+  log('[widget] 开始缩放');
+
   const startCursor = screen.getCursorScreenPoint();
+  const bounds = win.getBounds();
   const [startWidth = DEFAULT_WIDTH, startHeight = DEFAULT_HEIGHT] = win.getSize();
+  const area = screen.getDisplayMatching(bounds).workArea;
+  // 不允许拖出所在显示器的工作区
+  const maxWidth = Math.max(MIN_WIDTH, area.x + area.width - bounds.x);
+  const maxHeight = Math.max(MIN_HEIGHT, area.y + area.height - bounds.y);
+
   startPointerLoop(() => {
-    if (!resizing || win.isDestroyed()) return;
+    if (!resizing || win.isDestroyed() || !isLeftButtonDown()) {
+      endPointer();
+      return;
+    }
     const cursor = screen.getCursorScreenPoint();
-    win.setSize(
-      Math.max(MIN_WIDTH, startWidth + (cursor.x - startCursor.x)),
-      Math.max(MIN_HEIGHT, startHeight + (cursor.y - startCursor.y)),
-    );
+    const width = Math.min(maxWidth, Math.max(MIN_WIDTH, startWidth + (cursor.x - startCursor.x)));
+    const height = Math.min(maxHeight, Math.max(MIN_HEIGHT, startHeight + (cursor.y - startCursor.y)));
+    win.setBounds({ width, height });
   });
 }
 
@@ -238,7 +273,9 @@ export function endPointer(): void {
   dragging = false;
   resizing = false;
   stopPointerLoop();
+  layer?.resume();
   persistBounds();
+  log('[widget] 拖动/缩放结束', widgetWindow?.getBounds());
 }
 
 export function widgetFallbackMode(): void {

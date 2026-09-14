@@ -48,13 +48,14 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   font-size: 12px;
   cursor: move;
   user-select: none;
   background: rgba(37, 99, 235, 0.08);
   border-bottom: 1px solid rgba(148, 163, 184, 0.3);
   flex: 0 0 auto;
+  touch-action: none;
 }
 
 .widget-bar .title {
@@ -98,6 +99,8 @@ body {
   min-height: 0;
   overflow: auto;
   padding: 8px 10px 10px;
+  /* 缩放窗口时把重排/重绘限制在内容区内，避免整窗抖动 */
+  contain: layout paint;
 }
 
 .widget-content::-webkit-scrollbar {
@@ -114,11 +117,16 @@ body {
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 50%, rgba(37, 99, 235, 0.75) 50%);
+  touch-action: none;
+  background: linear-gradient(135deg, transparent 45%, rgba(37, 99, 235, 0.55) 45%, rgba(37, 99, 235, 0.75) 100%);
   border-bottom-right-radius: 11px;
+}
+
+.resize-handle:hover {
+  background: linear-gradient(135deg, transparent 40%, rgba(37, 99, 235, 0.75) 40%, rgba(37, 99, 235, 0.95) 100%);
 }
 
 .widget-empty {
