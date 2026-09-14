@@ -590,8 +590,12 @@ export function attachToDesktop(window: BrowserWindow, options: LayerOptions): L
       log('[win32] 窗口状态变化', { state: snapshot });
     }
 
-    // 每 2 拍修一次 shell 的 last active popup（点过桌面/挂件之后它会被指到我们身上）
-    if (zorderTicks % 2 === 0 && repairShellLastActivePopup(api)) {
+    /*
+     * 修 shell 的 last active popup，但要克制：这个函数内部会 SetForegroundWindow(Progman)
+     * 再切回，等于"抢一次前台"。之前每 2 秒无条件跑，实测日志被刷屏、并会干扰前台程序
+     * （用户观察到"别的程序有焦点时也会消失"）。现在只在**桌面是前台**且低频（每 8 拍）时修。
+     */
+    if (zorderTicks % 8 === 0 && isDesktopForeground() && repairShellLastActivePopup(api)) {
       log('[win32] 已修复 shell last active popup 指针');
     }
 
