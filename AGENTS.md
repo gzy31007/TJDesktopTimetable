@@ -35,7 +35,7 @@ docs/                 架构、数据模型、适配器指南
   - **为什么放弃 Acrylic（重要）**：Acrylic 在"Win+D 隐藏 → 恢复"之后 **DWM 合成会失效**——实测窗口 `IsWindowVisible` 为真、owner 正确、z-order 也正确（诊断字段 `coveredByShell:false`、排位在 Progman 之前），但屏幕上就是不出现，Electron 侧无法感知也修不好（`webContents.invalidate()` + bounds 抖动只能治一时）。它另有两个固有代价：失焦被 DWM 切成不活跃（变灰发蓝）、必须 `transparent: true` 而透明窗口拿不到 DWM 圆角。
   - **非透明窗口不能用透明底色**：`transparent: false` 时 `backgroundColor` 的 alpha 会被忽略，给 `#00000000` 得到黑底（材质画在黑上 = 一块死色）。必须给不透明实色。
   - **材质只在窗口创建时声明有效**：`backgroundMaterial` 写在 `new BrowserWindow({...})` 里才生效。运行时再设（Electron 的 `setBackgroundMaterial`，或 koffi 直写 `DWMWA_SYSTEMBACKDROP_TYPE`）即使 `DwmGetWindowAttribute` 读回 `accepted: 3` 也不出模糊。
-  - **备选方案（要"永远一致、不失焦变灰"时用）**：`backgroundMaterial: 'mica'`（或 `tabbed`/Mica Alt，任务管理器那套）+ 不透明深色底 `#202020`，活跃/失焦差异极小，代价是没有模糊、只有壁纸着色。切这一档时记得同时把渲染层 `--glass-shell` 设为 transparent、去掉自绘圆角（圆角归 DWM），并锁定深色主题，否则浅色系统下会深底配浅色文字。
+  - **`tabbed`（Mica Alt）备选**：任务管理器用的就是它，比 mica 对比度更高、底纹更明显。要更重的层次感时把 `backgroundMaterial` 换成 `'tabbed'` 即可（Win11 23H2+，低于该版本 DWM 会忽略并退化成 mica/纯色）。
   - **不要用 `SetWindowRgn` 给透明窗口裁圆角**：实测拖动缩放约 12 秒后主进程**无日志直接重启**（原生层崩溃）；且 `transparent: true` 本身就拿不到 DWM 圆角。对应 DeskBox（WinUI 3 `MicaController`/`DesktopAcrylicController` + `SystemBackdropConfiguration`）的等价做法就是"非透明窗口 + `backgroundMaterial` + DWM 圆角属性"。
   - 管理窗口用主进程 `backgroundMaterial: 'mica'` + 自绘标题栏（`titleBarOverlay`，右侧留 `clamp(138px, 11vw, 190px)` 给系统按钮，深浅主题经 `window:titlebar-theme` 同步）。
   - 色块染色走三个 CSS 变量（`--tint` / `--edge` / `--ink`），由 `TimetableBoard.vue` 按主题内联设置；`lift()` 必须返回 `#rrggbb`（返回 `rgb()` 会让下游混色算出 NaN，色块直接变透明）。
@@ -68,7 +68,7 @@ docs/                 架构、数据模型、适配器指南
 - **`SetWindowPos` 的 `hWndInsertAfter` 是"插到该窗口之后（z-order 更低）"，不是"上方"**：曾误把 owner 传进去想让挂件"贴着桌面之上"，结果把它插到 Progman 下面被桌面盖住。owned 窗口本来就恒在 owner 之上，置底用 `HWND_BOTTOM` 即可。
 - **owner 检测必须和"当前期望的 owner"比较**：换 owner 目标（DefView→Progman）时忘了同步 `ownerLost()`，会每秒误判"丢失"并重挂、反复搅动 z-order（日志刷屏 `桌面层 owner 丢失，重新挂载`）。
 - **鼠标按下期间要临时摘掉 Shell owner**（WitchDrawer 的 `SuspendDesktopOwnershipForMouseInput`）：否则 Explorer 会把被点到的挂件记成 Progman 的 "last active popup"，之后 Win+D 会去激活挂件而不是显示桌面。摘除期间 `ownerLost()` 要让路，别和"交互结束恢复"打架。
-- **"贴桌面 + Win+D 后仍可见"要用 Owner，不是 SetParent**：`SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT(-8), SHELLDLL_DefView)` 把顶层窗口的 Owner 设为桌面图标层 —— owned 窗口恒在 owner 之上（不被桌面图标遮挡），且不随 Win+D 最小化（桌面壳不被最小化），同时仍是顶层窗口（拖动/鼠标/坐标都正常）。`SetParent` 成 WorkerW 子窗口会被图标压在下面，且拖动坐标错乱。（做法对齐 DeskBox 的 DesktopPinned 模式）
+- **"贴桌面 + Win+D 后仍可见"要用 Owner，不是 SetParent**：`SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT(-8), <桌面宿主>)`，owner 取 Progman（见上条）—— owned 窗口恒在 owner 之上、不随 Win+D 消失，同时仍是顶层窗口（拖动/鼠标/坐标都正常）。`SetParent` 成 WorkerW 子窗口会被图标压在下面，且拖动坐标错乱。（做法对齐 DeskBox 的 DesktopPinned 模式）
 - **`WS_EX_NOACTIVATE` 会让窗口拖不动**：不可激活的窗口会被系统跳过原生 move loop。本项目已移除该样式，「不打扰」由"贴桌面层 + 置底"承担；这条与"点挂件不抢焦点"存在取舍，不要再硬塞回来。
 - **Electron 里拖动窗口用 `-webkit-app-region: drag`**（Chromium 内建 `WM_NCHITTEST → HTCAPTION`，真实鼠标输入、跟手、不丢事件），交互控件加 `no-drag`。从主进程 `SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION)` 在 Electron 上实测**不生效**（渲染层 DOM 事件也会被 drag 区域吞掉，两者恰好构成自然降级：drag 生效时走原生，失效时走自实现循环）。
 - 自实现拖动/缩放分支（WorkerW 子窗口用）必须双兜底：渲染层 `setPointerCapture` + 主进程 `GetAsyncKeyState(VK_LBUTTON)`。
@@ -79,5 +79,5 @@ docs/                 架构、数据模型、适配器指南
 
 - 仓库 Public：fixtures 与文档中不得出现学号、姓名、cookie、token 等任何个人凭据。
 - **不做** 1 系统自动登录（SSO 带短信增强，塞进桌面客户端不划算）：改为用户手动粘贴 Cookie，主进程 `main/tongji.ts` 发起请求并探测接口路径。Cookie 存 `credentials.json`，**任何日志都不得打印 Cookie 内容**。
-- 窗口默认「桌面层 + 置底」：Owner 设为桌面图标层（Win+D 后仍可见、不被图标遮挡），z-order 压在普通窗口之下；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
+- 窗口默认「桌面层 + 置底」：Owner 设为桌面宿主 Progman（Win+D 后仍可见），z-order 压在普通窗口之下；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
 - 拖动用 `-webkit-app-region: drag`（见上）；点击挂件会让它获得焦点，这是移除 `WS_EX_NOACTIVATE` 的代价，属于有意取舍。
