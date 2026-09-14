@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    纯逻辑核心库：**平台无关**（net10.0，不引任何 Windows/WinUI 依赖）。
+    对齐 TS 侧 `packages/core` 的硬约束（不得 import electron/vue/DOM）——
+    这样它能在 Linux/CI 上编译和跑测试，Windows 只属于将来的 WinUI 外壳。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>Tjt.Core</RootNamespace>
+    <AssemblyName>Tjt.Core</AssemblyName>
+  </PropertyGroup>
+
+</Project>

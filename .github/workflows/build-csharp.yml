@@ -1,0 +1,33 @@
+# C# 迁移线的构建与测试。
+#
+# 关键点：核心库是 **net10.0（平台无关）**，所以 Linux 与 Windows 都能跑 ——
+# 只有将来的 WinUI 外壳才必须 Windows。这样"迁移是否可行"这件事不依赖某台机器。
+name: csharp
+
+on:
+  push:
+    paths:
+      - 'dotnet/**'
+      - '.github/workflows/build-csharp.yml'
+  pull_request:
+    paths:
+      - 'dotnet/**'
+      - '.github/workflows/build-csharp.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore dotnet/TjtTimetable.slnx
+      - name: Test
+        run: dotnet test dotnet/TjtTimetable.slnx --no-restore --configuration Release

@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TjtCore.Tests/TjtCore.Tests.csproj" />
+  <Project Path="TjtCore/TjtCore.csproj" />
+</Solution>
