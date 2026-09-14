@@ -49,10 +49,23 @@ function writeJson(file: string, value: unknown): void {
 
 let settingsCache: WidgetSettings | null = null;
 
+/** 旧设置里的 light/dark/auto → 三种外观之一（与渲染层 `normalizeTheme` 保持一致）。 */
+function migrateTheme(value: unknown): 'moe' | 'glass' | 'crystal' {
+  if (value === 'glass' || value === 'crystal' || value === 'moe') return value;
+  if (value === 'dark') return 'glass';
+  return 'moe';
+}
+
 export function loadSettings(): WidgetSettings {
   if (settingsCache) return settingsCache;
   const stored = readJson<Partial<WidgetSettings>>(FILE_SETTINGS) ?? {};
-  settingsCache = { ...DEFAULT_SETTINGS, ...stored, bounds: stored.bounds ?? undefined };
+  settingsCache = {
+    ...DEFAULT_SETTINGS,
+    ...stored,
+    // 旧设置里的 light/dark/auto 迁移到三种外观
+    theme: migrateTheme((stored as { theme?: unknown }).theme),
+    bounds: stored.bounds ?? undefined,
+  };
   return settingsCache;
 }
 

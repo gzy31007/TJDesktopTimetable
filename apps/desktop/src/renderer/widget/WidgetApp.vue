@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { localTodayIso, termWeekAt, todaysSessions, type Timetable, type WeekFilter } from '@tjt/core';
 import TimetableBoard from '../shared/TimetableBoard.vue';
 import { createMockApi, getApi, previewOverrides } from '../shared/api';
-import { DEFAULT_SETTINGS, type AppState, type WidgetSettings } from '../../shared/ipc';
+import { isDarkTheme, themeOf } from '../shared/theme';
+import { DEFAULT_SETTINGS, type AppState, type ThemeMode, type WidgetSettings } from '../../shared/ipc';
 import '../shared/fluent.css';
 import './widget.css';
 
@@ -14,12 +15,13 @@ import './widget.css';
  */
 
 const preview = previewOverrides();
+/** 窗口是否失焦：用于把 Acrylic 切走时那层偏蓝冷灰拉回中性。 */
+const unfocused = ref(false);
 const api = getApi() ?? createMockApi();
 
 const state = ref<AppState>({ settings: { ...DEFAULT_SETTINGS }, timetable: null });
 const toast = ref('');
 let toastTimer: number | null = null;
-let prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
 let offState: (() => void) | null = null;
 let offFallback: (() => void) | null = null;
 
@@ -31,10 +33,12 @@ const weekFilter = computed<WeekFilter>(() => settings.value.weekFilter);
 /** 网格组件暴露的 board：用来在工具条提示里说明"有多少时段被周次过滤"。 */
 const boardRef = ref<{ board: { hiddenSessions: number } } | null>(null);
 const hiddenSessions = computed(() => boardRef.value?.board.hiddenSessions ?? 0);
-const dark = computed(() => {
-  if (preview.theme) return preview.theme === 'dark';
-  return settings.value.theme === 'auto' ? prefersDark.matches : settings.value.theme === 'dark';
-});
+/**
+ * 三种外观主题（移植自 WitchDrawer 的 AppTheme）：moe / glass / crystal。
+ * 预览参数 `?theme=` 可覆盖，便于在浏览器里逐个比对。
+ */
+const theme = computed<ThemeMode>(() => preview.theme ?? themeOf(settings.value));
+const dark = computed(() => isDarkTheme(theme.value));
 
 /** 预览参数只在 mock 模式生效（见 `shared/api.ts`）。 */
 const today = preview.today ?? localTodayIso();
@@ -106,21 +110,32 @@ onMounted(async () => {
   state.value = await api.getState();
   offState = api.onStateChanged?.((next) => (state.value = next)) ?? null;
   offFallback = api.onFallback?.((reason) => showToast(reason)) ?? null;
-  prefersDark.addEventListener('change', onThemeChange);
   // 兜底：即使指针事件丢失（原生拖动会吞掉 pointerup），也能收尾
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('blur', onPointerUp);
+
+  // 失焦时 Acrylic 会变成偏蓝冷灰：切到中性档位抵消
+  unfocused.value = !document.hasFocus();
+  window.addEventListener('blur', onWindowBlur);
+  window.addEventListener('focus', onWindowFocus);
 });
 
-function onThemeChange(): void {
-  // 触发 dark 计算属性重新求值
-  state.value = { ...state.value };
+// 主题（深浅）变化时同步窗口底色与 DWM 深色边框：mica 的取色跟窗口深浅走
+watch(dark, (value) => void api.setTitleBarTheme?.(value), { immediate: true });
+
+function onWindowBlur(): void {
+  unfocused.value = true;
+}
+
+function onWindowFocus(): void {
+  unfocused.value = !document.hasFocus();
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener('blur', onWindowBlur);
+  window.removeEventListener('focus', onWindowFocus);
   offState?.();
   offFallback?.();
-  prefersDark.removeEventListener('change', onThemeChange);
   window.removeEventListener('pointerup', onPointerUp);
   window.removeEventListener('blur', onPointerUp);
 });
@@ -129,7 +144,8 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="widget-shell fluent-root glass--edge"
-    :data-theme="dark ? 'dark' : 'light'"
+    :class="{ 'is-unfocused': unfocused }"
+    :data-theme="theme"
     :style="{ '--shell-alpha': String(settings.opacity) }"
   >
     <div class="widget-bar" title="按住此处可拖动挂件" @pointerdown="onBarPointerDown" @pointerup="onPointerUp">

@@ -13,11 +13,13 @@ import AppearancePanel from './AppearancePanel.vue';
 import ImportPanel from './ImportPanel.vue';
 import TimetableBoard from '../shared/TimetableBoard.vue';
 import { createMockApi, getApi, isMock, previewOverrides } from '../shared/api';
+import { isDarkTheme, themeOf } from '../shared/theme';
 import {
   DEFAULT_SETTINGS,
   type AdapterInfo,
   type AppState,
   type PickedFile,
+  type ThemeMode,
   type TongjiFetchResult,
   type WidgetSettings,
 } from '../../shared/ipc';
@@ -50,7 +52,6 @@ const toastMessage = ref('');
 const requestText = ref('');
 const fetchBusy = ref(false);
 const probes = ref<{ label: string; value: string }[]>([]);
-const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
 
 let toastTimer: number | null = null;
 let offState: (() => void) | null = null;
@@ -68,12 +69,9 @@ const previewCourses = computed<Course[]>(() => {
 });
 
 /** 主题：挂件设置优先（auto → 跟随系统）；浏览器预览下允许 ?theme= 覆盖。 */
-const dark = computed(() => {
-  if (preview.theme) return preview.theme === 'dark';
-  const mode = settings.value.theme;
-  if (mode === 'auto') return prefersDark.matches;
-  return mode === 'dark';
-});
+/** 外观主题（与挂件一致的三选一）；预览参数 `?theme=` 可覆盖。 */
+const theme = computed<ThemeMode>(() => preview.theme ?? themeOf(settings.value));
+const dark = computed(() => isDarkTheme(theme.value));
 
 const previewHint = computed(() => (importResult.value ? '最近一次导入的结果' : '已应用的课表'));
 
@@ -179,11 +177,6 @@ async function updateSettings(patch: Partial<WidgetSettings>): Promise<void> {
   state.value = await api.updateSettings(patch);
 }
 
-function onThemeChange(): void {
-  // 触发 dark 计算属性重新求值
-  state.value = { ...state.value };
-}
-
 // 自绘标题栏必须与系统窗口按钮同色：深浅主题一变就同步过去（旧版 preload 无此方法则跳过）
 watch(dark, (value) => void api.setTitleBarTheme?.(value), { immediate: true });
 
@@ -192,18 +185,16 @@ onMounted(async () => {
   adapters.value = await api.listAdapters();
   requestText.value = await api.getTongjiRequest();
   offState = api.onStateChanged?.((next) => (state.value = next)) ?? null;
-  prefersDark.addEventListener('change', onThemeChange);
 });
 
 onBeforeUnmount(() => {
   offState?.();
-  prefersDark.removeEventListener('change', onThemeChange);
   if (toastTimer !== null) window.clearTimeout(toastTimer);
 });
 </script>
 
 <template>
-  <div class="manage fluent-root" :data-theme="dark ? 'dark' : 'light'">
+  <div class="manage fluent-root" :data-theme="theme">
     <header class="titlebar">
       <span class="mark" aria-hidden="true">课</span>
       <h1>同济桌面课表</h1>
@@ -298,7 +289,7 @@ onBeforeUnmount(() => {
   color: var(--text);
 }
 
-[data-theme='dark'].manage {
+[data-theme='glass'].manage {
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 30%);
 }
 

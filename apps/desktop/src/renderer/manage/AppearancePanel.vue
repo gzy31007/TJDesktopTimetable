@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { WidgetSettings } from '../../shared/ipc';
+import { THEME_LABELS, THEME_MODES } from '../shared/theme';
 
 /** 外观与行为设置（写回主进程 settings.json）。 */
 
@@ -54,9 +55,7 @@ void props;
           :value="settings.theme"
           @change="emit('update', { theme: ($event.target as HTMLSelectElement).value as WidgetSettings['theme'] })"
         >
-          <option value="auto">跟随系统</option>
-          <option value="light">浅色</option>
-          <option value="dark">深色</option>
+          <option v-for="mode in THEME_MODES" :key="mode" :value="mode">{{ THEME_LABELS[mode] }}</option>
         </select>
       </label>
 

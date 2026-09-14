@@ -40,10 +40,11 @@ body {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  border-radius: 14px;
+  /* 圆角由 DWM 提供（非透明窗口），不自绘，避免双圆角 */
   border: 1px solid var(--stroke-strong);
   /* 亚克力质感：描边 + 顶部高光由 inset 阴影承担，避免"外框套内框"的 Win7 Aero 观感 */
   background-color: var(--glass-shell);
+  transition: background-color 200ms var(--ease);
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0) 38%);
   color: var(--text);
   box-shadow: var(--shadow-shell), inset 0 1px 0 0 var(--stroke-top);
@@ -288,4 +289,11 @@ body {
 .toast.show {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+/*
+ * 失焦补偿：Acrylic 失焦时会变成偏蓝的冷灰，这里叠一层中性灰把它拉回中性。
+ */
+.widget-shell.is-unfocused {
+  background-color: var(--glass-shell-blur);
 }

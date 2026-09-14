@@ -10,6 +10,7 @@ import { refreshTrayMenu } from './tray.js';
 import { applyTitleBarTheme, createManageWindow } from './windows/manage.js';
 import {
   applyWidgetSettings,
+  applyWidgetTheme,
   beginDrag,
   beginResize,
   createWidgetWindow,
@@ -105,7 +106,9 @@ export function registerIpc(): void {
 
   // 渲染层切深浅主题时同步系统窗口按钮配色（自绘标题栏必须与按钮一致）
   ipcMain.handle('window:titlebar-theme', (_event, dark: boolean): void => {
-    applyTitleBarTheme(Boolean(dark));
+    const isDark = Boolean(dark);
+    applyTitleBarTheme(isDark);
+    applyWidgetTheme(isDark);
   });
 
   ipcMain.handle('widget:toggle', (_event, visible?: boolean): AppState => {

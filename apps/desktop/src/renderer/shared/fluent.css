@@ -54,8 +54,13 @@
 
   --win-tint: rgba(253, 253, 254, 0.78);
   --win-tint-2: rgba(250, 251, 253, 0.66);
-  /* 挂件外壳：底色交给 DWM 的 Acrylic（窗口级材质），渲染层只留描边/高光/噪声 */
+  /*
+   * 挂件外壳底色。DWM 的 Acrylic 在失焦时会切成"不活跃"并带一层偏蓝的冷灰，
+   * 所以这里不用纯透明：叠一层中性偏暖的灰把它拉回中性（0.16 已足够压色相，
+   * 又不会挡住模糊）。想完全交给系统就把两档都改成 transparent。
+   */
   --glass-shell: transparent;
+  --glass-shell-blur: rgba(250, 248, 244, 0.9);
   --layer: rgba(255, 255, 255, 0.62);
   --layer-2: rgba(255, 255, 255, 0.44);
   --layer-strong: rgba(255, 255, 255, 0.78);
@@ -105,6 +110,7 @@
   --win-tint: rgba(32, 32, 32, 0.72);
   --win-tint-2: rgba(28, 28, 28, 0.6);
   --glass-shell: transparent;
+  --glass-shell-blur: rgba(40, 39, 36, 0.92);
   --layer: rgba(255, 255, 255, 0.055);
   --layer-2: rgba(255, 255, 255, 0.035);
   --layer-strong: rgba(255, 255, 255, 0.085);
@@ -138,6 +144,143 @@
   --stripe: rgba(255, 255, 255, 0.08);
 }
 
+/* ======================================================================
+ * 三种外观主题（移植自 WitchDrawer 的 AppTheme：Moe / Glass / Crystal）
+ *
+ * 原项目的主题是一整套命名色（AppBackground / Panel / GlassSurface /
+ * GlassInner / GlassStroke / Accent / 语义色 …），这里按同样的角色映射到
+ * 本项目的令牌上；`--glass-tint` 等命名保留对应关系，便于日后对照上游。
+ * ==================================================================== */
+
+/* ------------------------- Moe（浅色，苹果系 #0071E3） ------------------ */
+[data-theme='moe'] {
+  --accent: #0071e3;
+  --accent-strong: #0068d1;
+  --accent-soft: #e7f1ff;
+  --accent-ring: rgba(0, 113, 227, 0.32);
+
+  --text: #1d1d1f;
+  --text-2: #4b4b4f;
+  --text-3: #6e6e73;
+  --text-on-accent: #ffffff;
+
+  --win-tint: rgba(255, 255, 255, 0.9);
+  --win-tint-2: #f2f2f7;
+  --layer: #ffffff;
+  --layer-2: #f2f2f7;
+  --layer-strong: #ffffff;
+  --layer-hover: #ebebf0;
+  --layer-press: #e2e2e8;
+
+  --stroke: #d9d9de;
+  --stroke-strong: #c8c8ce;
+  --stroke-top: #ffffff;
+  --divider: #e5e5ea;
+  --popup-surface: #ffffff;
+  --popup-surface-hover: #f2f2f7;
+
+  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.14), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.08), 0 0 1px rgba(0, 0, 0, 0.1);
+  --shadow-shell: 0 16px 48px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.1);
+
+  --grid-line: rgba(0, 0, 0, 0.06);
+  --grid-line-strong: rgba(0, 0, 0, 0.1);
+  --cell-weekend: rgba(0, 0, 0, 0.02);
+  --cell-today: rgba(0, 113, 227, 0.06);
+  --slot-ink: #6e6e73;
+  --slot-current: #0071e3;
+
+  --glass-shell: transparent;
+  --glass-shell-blur: rgba(255, 255, 255, 0.9);
+  --stripe: rgba(255, 255, 255, 0.22);
+}
+
+/* ------------------- Glass（深色玻璃，苹果暗色 #0A84FF） --------------- */
+[data-theme='glass'] {
+  --accent: #0a84ff;
+  --accent-strong: #409cff;
+  --accent-soft: rgba(10, 132, 255, 0.2);
+  --accent-ring: rgba(10, 132, 255, 0.36);
+
+  --text: #f5f5f7;
+  --text-2: #d0d0d4;
+  --text-3: #aeaeb2;
+  --text-on-accent: #ffffff;
+
+  --win-tint: rgba(28, 28, 30, 0.92);
+  --win-tint-2: rgba(28, 28, 30, 0.85);
+  --layer: rgba(44, 44, 46, 0.85);
+  --layer-2: rgba(34, 34, 36, 0.77);
+  --layer-strong: rgba(44, 44, 46, 0.85);
+  --layer-hover: rgba(58, 58, 60, 0.18);
+  --layer-press: rgba(58, 58, 60, 0.28);
+
+  --stroke: rgba(255, 255, 255, 0.2);
+  --stroke-strong: rgba(255, 255, 255, 0.28);
+  --stroke-top: rgba(255, 255, 255, 0.12);
+  --divider: rgba(255, 255, 255, 0.13);
+  --popup-surface: #2c2c2e;
+  --popup-surface-hover: #3a3a3c;
+
+  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.42), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.32), 0 0 1px rgba(0, 0, 0, 0.4);
+  --shadow-shell: 0 18px 52px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.4);
+
+  --grid-line: rgba(255, 255, 255, 0.06);
+  --grid-line-strong: rgba(255, 255, 255, 0.12);
+  --cell-weekend: rgba(255, 255, 255, 0.02);
+  --cell-today: rgba(10, 132, 255, 0.08);
+  --slot-ink: #aeaeb2;
+  --slot-current: #409cff;
+
+  --glass-shell: transparent;
+  --glass-shell-blur: rgba(28, 28, 30, 0.9);
+  --stripe: rgba(255, 255, 255, 0.08);
+}
+
+/* ------------------ Crystal（透白水晶，半透明高光 #0071E3） ------------ */
+[data-theme='crystal'] {
+  --accent: #0071e3;
+  --accent-strong: #0068d1;
+  --accent-soft: rgba(0, 113, 227, 0.19);
+  --accent-ring: rgba(0, 113, 227, 0.3);
+
+  --text: #1d1d1f;
+  --text-2: #4b4b4f;
+  --text-3: #6e6e73;
+  --text-on-accent: #ffffff;
+
+  --win-tint: rgba(245, 245, 247, 0.93);
+  --win-tint-2: rgba(242, 242, 247, 0.91);
+  --layer: rgba(255, 255, 255, 0.94);
+  --layer-2: rgba(245, 245, 247, 0.78);
+  --layer-strong: rgba(255, 255, 255, 0.94);
+  --layer-hover: rgba(255, 255, 255, 0.72);
+  --layer-press: rgba(242, 242, 247, 0.85);
+
+  --stroke: rgba(255, 255, 255, 0.65);
+  --stroke-strong: rgba(217, 217, 222, 0.56);
+  --stroke-top: #ffffff;
+  --divider: rgba(217, 217, 222, 0.6);
+  --popup-surface: #ffffff;
+  --popup-surface-hover: #f2f2f7;
+
+  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.09), 0 0 1px rgba(0, 0, 0, 0.08);
+  --shadow-shell: 0 16px 48px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
+
+  --grid-line: rgba(0, 0, 0, 0.05);
+  --grid-line-strong: rgba(0, 0, 0, 0.09);
+  --cell-weekend: rgba(0, 0, 0, 0.02);
+  --cell-today: rgba(0, 113, 227, 0.05);
+  --slot-ink: #6e6e73;
+  --slot-current: #0071e3;
+
+  --glass-shell: transparent;
+  --glass-shell-blur: rgba(255, 255, 255, 0.94);
+  --stripe: rgba(255, 255, 255, 0.34);
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     --accent: #60cdff;
@@ -153,6 +296,7 @@
     --win-tint: rgba(32, 32, 32, 0.72);
     --win-tint-2: rgba(28, 28, 28, 0.6);
     --glass-shell: transparent;
+    --glass-shell-blur: rgba(40, 39, 36, 0.92);
     --layer: rgba(255, 255, 255, 0.055);
     --layer-2: rgba(255, 255, 255, 0.035);
     --layer-strong: rgba(255, 255, 255, 0.085);

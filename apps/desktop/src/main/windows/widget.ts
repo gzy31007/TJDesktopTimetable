@@ -3,13 +3,15 @@ import { join } from 'node:path';
 import type { WidgetSettings } from '../../shared/ipc.js';
 import {
   attachToDesktop,
+  ensureWidgetVisible,
+  logZOrder,
   beginNativeMove,
   isLeftButtonDown,
   isWin32Available,
   type LayerHandle,
 } from '../win32/layer.js';
 import { loadSettings, saveSettings } from '../store.js';
-import { applyRoundedCorners } from '../win32/dwm.js';
+import { applyDarkFrame, applyRoundedCorners } from '../win32/dwm.js';
 import { log } from '../logger.js';
 
 /**
@@ -23,6 +25,12 @@ import { log } from '../logger.js';
 
 /** 玻璃卡片的圆角半径（与 widget.css 的 .widget-shell 保持一致）。 */
 const CORNER_RADIUS = 14;
+/**
+ * 窗口底色：非透明窗口忽略 alpha，必须是实色（给透明色会得到黑底）。
+ * mica 在不可用时它就退化成普通实底，因此跟随主题在深浅之间切换。
+ */
+const WIDGET_BASE_COLOR = { light: '#f3f3f3', dark: '#202020' } as const;
+
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 440;
 const MIN_WIDTH = 320;
@@ -124,9 +132,19 @@ export function createWidgetWindow(): BrowserWindow {
      * 渲染层背景保持透明，材质与圆角自然对齐。
      */
     transparent: false,
-    backgroundColor: '#00000000',
+    // 非透明窗口忽略 alpha：必须给不透明实色，否则是黑底（mica 会画在黑上）
+    backgroundColor: WIDGET_BASE_COLOR.dark,
+    /*
+     * 材质选 mica（放弃 acrylic）：
+     * acrylic 在"Win+D 隐藏 → 恢复"之后 DWM 合成会失效 —— 窗口 IsWindowVisible 为真、
+     * z-order 与 owner 都正确（日志实测 coveredByShell:false），但屏幕上不出现，
+     * Electron 侧无法感知也无法修复。mica 没有这个合成路径问题，代价是只有壁纸
+     * 着色 + 极轻模糊，且失去"活跃/失焦"两态。
+     *
+     * hasShadow: false —— 窗口级投影就是"外部立体感"的来源；圆角仍交给 DWM。
+     */
     ...(process.platform === 'win32'
-      ? { backgroundMaterial: 'acrylic' as const, roundedCorners: true, hasShadow: true }
+      ? { backgroundMaterial: 'mica' as const, roundedCorners: true, hasShadow: false }
       : {}),
     resizable: false,
     movable: true,
@@ -174,6 +192,27 @@ export function createWidgetWindow(): BrowserWindow {
   });
   win.webContents.on('render-process-gone', (_event, details) => {
     log('[widget] 渲染进程退出', details);
+  });
+
+  // Win+D 相关的窗口状态事件：即时恢复（不依赖渲染层 pointerup —— 原生拖动会吞事件）
+  win.on('minimize', () => {
+    log('[widget] 事件 minimize → 立即恢复');
+    if (!win.isDestroyed()) {
+      ensureWidgetVisible(win);
+      nudgeRepaint();
+    }
+  });
+  win.on('restore', () => log('[widget] 事件 restore'));
+  win.on('show', () => log('[widget] 事件 show'));
+  win.on('hide', () => {
+    log('[widget] 事件 hide → 立即恢复');
+    if (win.isDestroyed()) return;
+    layer?.refresh();
+    ensureWidgetVisible(win);
+    nudgeRepaint();
+    // Win+D 之后 DWM 合成可能滞后，补两拍抖动
+    setTimeout(nudgeRepaint, 250);
+    setTimeout(nudgeRepaint, 800);
   });
 
   win.on('moved', persistBounds);
@@ -305,14 +344,56 @@ export function beginResize(): void {
   });
 }
 
+/**
+ * 强制 DWM 重新合成窗口。
+ *
+ * 背景：Win+D 会隐藏挂件，恢复后 `IsWindowVisible` 为真、z-order 也正确，
+ * 但窗口在屏幕上不出现 —— 说明 DWM 的合成（Acrylic 材质那一层）失效了。
+ * 这里用一次 1px 的 bounds 抖动 + 重绘请求把它逼回来。
+ */
+function nudgeRepaint(): void {
+  const win = widgetWindow;
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.webContents.invalidate();
+    const bounds = win.getBounds();
+    win.setBounds({ ...bounds, width: bounds.width + 1 });
+    setTimeout(() => {
+      if (!win.isDestroyed()) win.setBounds(bounds);
+    }, 40);
+    log('[widget] 已请求强制重绘');
+  } catch (error) {
+    log('[widget] 强制重绘失败', String(error));
+  }
+}
+
 export function endPointer(): void {
-  if (!dragging && !resizing) return;
-  dragging = false;
-  resizing = false;
-  stopPointerLoop();
-  layer?.resume();
-  persistBounds();
-  log('[widget] 拖动/缩放结束', widgetWindow?.getBounds());
+  const wasDragging = dragging || resizing;
+
+  if (wasDragging) {
+    dragging = false;
+    resizing = false;
+    stopPointerLoop();
+    layer?.resume();
+    persistBounds();
+  }
+
+  /*
+   * 任何指针交互结束（包括"只是点了挂件一下"）都要确认窗口仍然贴在桌面层上方。
+   *
+   * 原因：Win32 侧在鼠标按下期间会临时摘掉 Shell owner（避免 Explorer 把挂件
+   * 记成 Progman 的 last active popup），松开后恢复；这一刻是修正 z-order 最
+   * 可靠的时机，否则要等 keepAlive 下一拍，期间可能出现"挂件看不见"。
+   */
+  const win = widgetWindow;
+  if (win && !win.isDestroyed()) {
+    ensureWidgetVisible(win);
+    nudgeRepaint();
+    // 诊断：如果仍然看不见，这一行会打出"谁压在挂件上面"
+    logZOrder(win);
+  }
+
+  if (wasDragging) log('[widget] 拖动/缩放结束', widgetWindow?.getBounds());
 }
 
 export function widgetFallbackMode(): void {
@@ -323,6 +404,14 @@ export function widgetFallbackMode(): void {
 }
 
 /** 重新应用当前的层级模式（托盘切换模式后调用）。 */
+/** 跟随主题切换窗口底色与 DWM 深色边框（mica 的取色也跟窗口深浅走）。 */
+export function applyWidgetTheme(dark: boolean): void {
+  const win = widgetWindow;
+  if (!win || win.isDestroyed()) return;
+  win.setBackgroundColor(dark ? WIDGET_BASE_COLOR.dark : WIDGET_BASE_COLOR.light);
+  applyDarkFrame(win, dark);
+}
+
 export function reapplyLayer(): void {
   const win = widgetWindow;
   if (!win || win.isDestroyed()) return;

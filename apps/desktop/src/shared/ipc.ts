@@ -3,7 +3,12 @@ import type { Timetable } from '@tjt/core';
 /** 主进程 ↔ 渲染进程共享的类型（单一真源）。 */
 
 export type WidgetMode = 'desktop' | 'wallpaper';
-export type ThemeMode = 'light' | 'dark' | 'auto';
+/**
+ * 外观主题（三选一，移植自 WitchDrawer 的 AppTheme）：
+ * `moe` 浅色 / `glass` 深色玻璃 / `crystal` 透白水晶。
+ * 旧版本的 `light`/`dark`/`auto` 由渲染层 `normalizeTheme()` 迁移。
+ */
+export type ThemeMode = 'moe' | 'glass' | 'crystal';
 export type WeekFilterMode = 'all' | 'odd' | 'even';
 
 export interface WidgetSettings {
@@ -43,7 +48,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   clickThrough: false,
   showWidget: true,
   launchAtLogin: false,
-  theme: 'auto',
+  theme: 'glass',
   keepAtBottomIntervalMs: 1000,
 };
 

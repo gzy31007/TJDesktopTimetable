@@ -1,4 +1,4 @@
-import type { AppState, DesktopApi, PickedFile, WidgetSettings } from '../../shared/ipc.js';
+import type { AppState, DesktopApi, PickedFile, ThemeMode, WidgetSettings } from '../../shared/ipc.js';
 import type { Timetable } from '@tjt/core';
 import { DEFAULT_SETTINGS } from '../../shared/ipc.js';
 import { mockTimetable } from './mockData.js';
@@ -34,7 +34,8 @@ export const isMock = (): boolean => getApi() === null;
 export interface PreviewOverrides {
   today?: string;
   nowMinutes?: number;
-  theme?: 'light' | 'dark';
+  /** 覆盖外观主题（对应三种外观：moe / glass / crystal）。 */
+  theme?: ThemeMode;
 }
 
 export function previewOverrides(): PreviewOverrides {
@@ -46,7 +47,7 @@ export function previewOverrides(): PreviewOverrides {
   const now = Number(params.get('now'));
   if (Number.isFinite(now) && now >= 0 && now <= 24 * 60) overrides.nowMinutes = now;
   const theme = params.get('theme');
-  if (theme === 'light' || theme === 'dark') overrides.theme = theme;
+  if (theme === 'moe' || theme === 'glass' || theme === 'crystal') overrides.theme = theme;
   return overrides;
 }
 
