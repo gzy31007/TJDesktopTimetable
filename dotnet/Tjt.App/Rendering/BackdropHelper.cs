@@ -2,6 +2,7 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using WinRT;
 
 namespace Tjt.App.Rendering;
 
@@ -54,7 +55,9 @@ internal sealed class BackdropHelper : IDisposable
             {
                 var controller = new MicaController { Kind = micaAlt ? MicaKind.BaseAlt : MicaKind.Base };
                 // WinUI 的 Window 实现了 ICompositionSupportsSystemBackdrop（就是材质的目标）
-                controller.AddSystemBackdropTarget(window);
+                // Window 的实现类型不是"投影后的接口"，要用 WinRT 的 As<> 做投影转换（官方样例写法）。
+                // 直接传 window 会得到 CS1503：无法把 Window 转成 ICompositionSupportsSystemBackdrop。
+                controller.AddSystemBackdropTarget(window.As<ICompositionSupportsSystemBackdrop>());
                 controller.SetSystemBackdropConfiguration(configuration);
                 helper._controller = controller;
                 helper.Mode = micaAlt ? "mica-controller(alt)" : "mica-controller";

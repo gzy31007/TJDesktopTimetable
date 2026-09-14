@@ -1,4 +1,5 @@
 using Tjt.Core;
+using Tjt.Core.Adapters;
 
 namespace Tjt.App.Data;
 
