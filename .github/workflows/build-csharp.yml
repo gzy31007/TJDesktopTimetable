@@ -77,22 +77,21 @@ jobs:
         shell: pwsh
         run: |
           $exe = "dotnet/Tjt.App/bin/Release/net10.0-windows10.0.22621.0/win-x64/Tjt.App.exe"
-          $out = Join-Path $env:RUNNER_TEMP "tjt-smoke.out.txt"
-          $err = Join-Path $env:RUNNER_TEMP "tjt-smoke.err.txt"
-          # --no-backdrop：runner 没有显卡，MicaController 的 D3D 合成路径会挂住
-          # （实测 job 卡满 90 秒且没有任何输出）。材质本身在真机已验证，见 AGENTS.md。
-          $p = Start-Process -FilePath $exe -ArgumentList '--smoke', '--no-backdrop', '--fixture', 'packages/core/fixtures/tongji-2026-1-personal.json' -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
-          if (-not $p.WaitForExit(90000)) {
-            Write-Host "冒烟自检 90 秒未退出，强杀进程"
+          $log = Join-Path $env:RUNNER_TEMP "tjt-app.log"
+          # 应用是 WinExe（GUI 子系统），不附加控制台，重定向 stdout 拿不到东西 ——
+          # 所以让它自己写 --log 指定的文件，这里读文件。--no-backdrop：runner 没有显卡。
+          $p = Start-Process -FilePath $exe -ArgumentList '--smoke', '--no-backdrop', '--log', $log, '--fixture', 'packages/core/fixtures/tongji-2026-1-personal.json' -PassThru
+          $finished = $p.WaitForExit(60000)
+          if (-not $finished) {
+            Write-Host "自检 60 秒未退出，强杀"
             try { $p.Kill() } catch { }
-            Write-Host "---- stdout ----"; if (Test-Path $out) { Get-Content $out | ForEach-Object { Write-Host $_ } }
-            Write-Host "---- stderr ----"; if (Test-Path $err) { Get-Content $err | ForEach-Object { Write-Host $_ } }
-            throw "冒烟自检超时（90s 未退出）"
           }
-          Write-Host "---- stdout ----"; Get-Content $out | ForEach-Object { Write-Host $_ }
-          Write-Host "---- stderr ----"; Get-Content $err | ForEach-Object { Write-Host $_ }
+          Write-Host "---- app log ($log) ----"
+          if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host $_ } } else { Write-Host "(no log file)" }
+          if (-not $finished) { throw "冒烟自检超时（60s 未退出）" }
           Write-Host "smoke exit code: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { throw "冒烟自检失败（exit $($p.ExitCode)）" }
+
       - name: Upload（WinUI 外壳产物）
         uses: actions/upload-artifact@v4
         with:

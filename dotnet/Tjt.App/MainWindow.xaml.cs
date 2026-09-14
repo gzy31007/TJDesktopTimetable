@@ -63,15 +63,15 @@ public sealed partial class MainWindow : Window
         // 1) 材质：窗口创建后尽早设置（材质只影响窗口本身，与控制内容无关）。
         //    `--no-backdrop` 用于无 GPU 的环境：MicaController 要走 D3D 合成，
         //    在无显卡的 CI runner 上会挂住（实测 job 卡满 90 秒没有任何输出）。
-        Console.WriteLine("[stage] window-created");
+        AppLog.Line("[stage] window-created");
         if (startup.NoBackdrop)
         {
-            Console.WriteLine("[backdrop] skipped (--no-backdrop)");
+            AppLog.Line("[backdrop] skipped (--no-backdrop)");
         }
         else
         {
             _backdrop = BackdropHelper.Apply(this, micaAlt: false);
-            Console.WriteLine($"[backdrop] mode={_backdrop.Mode}");
+            AppLog.Line($"[backdrop] mode={_backdrop.Mode}");
         }
 
         // 2) 用 core 布局 + widget 呈现模型算好整块课表，再量出画布尺寸（DIP）
@@ -81,11 +81,11 @@ public sealed partial class MainWindow : Window
             new Tjt.Core.BoardOptions { TrimEmptySlots = true });
         var visual = BoardVisualBuilder.Build(state, startup.Width, dark, Tjt.Core.Time.LocalMinutesOfDay());
 
-        Console.WriteLine("[stage] board-built");
+        AppLog.Line("[stage] board-built");
         var canvas = BoardRenderer.Render(visual, dark);
         Host.Children.Clear();
         Host.Children.Add(canvas);
-        Console.WriteLine("[stage] canvas-rendered");
+        AppLog.Line("[stage] canvas-rendered");
 
         Layout = new WindowLayoutInfo(
             canvas.Width,
@@ -108,21 +108,21 @@ public sealed partial class MainWindow : Window
         {
             DesktopHost.MarkToolWindow(handle);
             var attached = DesktopHost.Attach(handle, out var detail);
-            Console.WriteLine($"[desktop-layer] attach={(attached ? "ok" : "failed")} {detail}");
+            AppLog.Line($"[desktop-layer] attach={(attached ? "ok" : "failed")} {detail}");
             if (attached)
             {
-                Console.WriteLine($"[desktop-layer] send-to-bottom={(DesktopHost.SendToBottom(handle) ? "ok" : "failed")}");
+                AppLog.Line($"[desktop-layer] send-to-bottom={(DesktopHost.SendToBottom(handle) ? "ok" : "failed")}");
             }
         }
 
-        Console.WriteLine($"[layout] canvas={canvas.Width:0}x{canvas.Height:0}dip scale={_dpiScale:0.###} blocks={visual.Blocks.Count} days={visual.Days.Count} slots={visual.Slots.Count}");
+        AppLog.Line($"[layout] canvas={canvas.Width:0}x{canvas.Height:0}dip scale={_dpiScale:0.###} blocks={visual.Blocks.Count} days={visual.Days.Count} slots={visual.Slots.Count}");
     }
 
     /// <summary>真正显示窗口（冒烟测试不调用它，因此不会弹窗）。</summary>
     internal void ShowWidget()
     {
         Activate();
-        Console.WriteLine($"[window] visible handle=0x{WindowNative.GetWindowHandle(this):X}");
+        AppLog.Line($"[window] visible handle=0x{WindowNative.GetWindowHandle(this):X}");
     }
 
     /// <summary>断开材质与事件（关闭前调用，避免控制器在窗口销毁后继续引用它）。</summary>

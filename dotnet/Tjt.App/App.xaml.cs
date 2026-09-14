@@ -32,6 +32,7 @@ public partial class App : Application
     public App()
     {
         Startup = AppStartupOptions.Parse(Environment.GetCommandLineArgs());
+        AppLog.UseFile(Startup.LogPath);
         InitializeComponent();
         UnhandledException += OnUnhandledException;
     }
@@ -46,7 +47,7 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         var options = Startup;
-        Console.WriteLine($"[start] smoke={options.Smoke} desktopLayer={options.DesktopLayer} noBackdrop={options.NoBackdrop} size={options.Width}x{options.Height}");
+        AppLog.Line($"[start] smoke={options.Smoke} desktopLayer={options.DesktopLayer} noBackdrop={options.NoBackdrop} size={options.Width}x{options.Height}");
 
         // 自检看门狗：无 GPU 的 runner 上曾卡到 CI 只能看到"90 秒超时"，不知道卡在哪一步。
         // 有它就能看到最后到达的阶段标记；同时给自检一个硬上限，绝不让 CI 悬着。
@@ -55,7 +56,7 @@ public partial class App : Application
         try
         {
             var loaded = AppHost.Load(options.FixturePath);
-            Console.WriteLine($"[data] source={loaded.Source} courses={loaded.Timetable.Courses.Count} sessions={SessionCount(loaded)}");
+            AppLog.Line($"[data] source={loaded.Source} courses={loaded.Timetable.Courses.Count} sessions={SessionCount(loaded)}");
 
             var window = new MainWindow();
             _windows.Add(window);
@@ -71,7 +72,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[fatal] {ex}");
+            AppLog.Error($"[fatal] {ex}");
             SmokePassed = false;
         }
         finally
@@ -82,9 +83,7 @@ public partial class App : Application
                 // 会让进程挂住（退出消息投给消息循环，而循环在窗口激活前不推进），
                 // CI 上表现为 job 无限期 in_progress。自检是纯短命进程，不需要 WinUI 的清理路径，
                 // 用 Environment.Exit 保证一定结束（退出码直接决定 CI 成败）。
-                Console.Out.Flush();
-                Console.Error.Flush();
-                Environment.Exit(SmokePassed ? 0 : 1);
+                                Environment.Exit(SmokePassed ? 0 : 1);
             }
         }
     }
@@ -95,7 +94,7 @@ public partial class App : Application
         var watchdog = new Thread(() =>
         {
             Thread.Sleep(SmokeTimeout);
-            Console.Error.WriteLine($"[smoke] fail: 自检 {SmokeTimeout / 1000} 秒未完成（最后阶段见上方 [stage]/[backdrop] 日志）");
+            AppLog.Error($"[smoke] fail: 自检 {SmokeTimeout / 1000} 秒未完成（最后阶段见上方 [stage]/[backdrop] 日志）");
             Console.Error.Flush();
             Environment.Exit(1);
         })
@@ -137,16 +136,16 @@ public partial class App : Application
         {
             // 材质拿不到不算失败（无显卡 / 老系统的 runner 上本来就没有 Mica），但要留痕。
             // `--no-backdrop` 是调用方主动跳过的，不该在这里报"不可用"。
-            Console.WriteLine("[smoke] warn: 材质不可用，退回无材质窗口");
+            AppLog.Line("[smoke] warn: 材质不可用，退回无材质窗口");
         }
 
         if (problems.Count == 0)
         {
-            Console.WriteLine($"[smoke] ok blocks={layout!.Blocks} canvas={layout.CanvasWidth:0}x{layout.CanvasHeight:0} title={layout.Title}");
+            AppLog.Line($"[smoke] ok blocks={layout!.Blocks} canvas={layout.CanvasWidth:0}x{layout.CanvasHeight:0} title={layout.Title}");
             return true;
         }
 
-        foreach (var problem in problems) Console.Error.WriteLine($"[smoke] fail: {problem}");
+        foreach (var problem in problems) AppLog.Error($"[smoke] fail: {problem}");
         return false;
     }
 
@@ -165,7 +164,7 @@ public partial class App : Application
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[shutdown] 关闭窗口失败：{ex.Message}");
+                AppLog.Error($"[shutdown] 关闭窗口失败：{ex.Message}");
             }
         }
 
@@ -177,7 +176,7 @@ public partial class App : Application
     /// </summary>
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
-        Console.Error.WriteLine($"[fatal] 未处理异常：{e.Exception}");
+        AppLog.Error($"[fatal] 未处理异常：{e.Exception}");
         SmokePassed = false;
         Environment.ExitCode = 1;
     }
