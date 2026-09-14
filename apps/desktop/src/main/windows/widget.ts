@@ -15,6 +15,7 @@ import {
   type LayerHandle,
 } from '../win32/layer.js';
 import { loadSettings, saveSettings } from '../store.js';
+import { clampIntoWorkArea, defaultBounds, resolveSize, type Rect } from './geometry.js';
 import { applyDarkFrame, applyRoundedCorners } from '../win32/dwm.js';
 import { log } from '../logger.js';
 
@@ -84,41 +85,28 @@ export function getWidgetWindow(): BrowserWindow | null {
   return widgetWindow;
 }
 
-function resolveBounds(settings: WidgetSettings): { x: number; y: number; width: number; height: number } {
+function resolveBounds(settings: WidgetSettings): Rect {
+  const size = resolveSize(settings.bounds, { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }, {
+    width: MIN_WIDTH,
+    height: MIN_HEIGHT,
+  });
   const stored = settings.bounds;
-  const width = stored?.width && stored.width >= MIN_WIDTH ? Math.round(stored.width) : DEFAULT_WIDTH;
-  const height = stored?.height && stored.height >= MIN_HEIGHT ? Math.round(stored.height) : DEFAULT_HEIGHT;
 
   if (stored) {
     const area = screen.getDisplayNearestPoint({ x: stored.x, y: stored.y }).workArea;
-    const fullyInside =
-      stored.x >= area.x &&
-      stored.y >= area.y &&
-      stored.x + width <= area.x + area.width &&
-      stored.y + height <= area.y + area.height;
-    if (fullyInside) return { x: Math.round(stored.x), y: Math.round(stored.y), width, height };
-
     /*
-     * 部分越界：**夹回工作区**而不是整块退回默认位置。
-     *
-     * 旧判断只要求"和工作区有交集"，于是一个被拖到屏幕右边缘外的挂件会被原样恢复 ——
-     * 右下角的缩放手柄也跟着跑到屏幕外，用户再也点不到（实测：越界 104px 后拖手柄无任何反应）。
+     * 不管存下来的位置是否完整在屏内，都过一遍夹取（纯函数，有单测）：
+     * 旧实现只判"与工作区有交集"，于是被拖到屏幕外的位置会被原样恢复 ——
+     * 右下角的缩放手柄也跟着在屏幕外，用户点不到。
      */
-    return {
-      x: Math.round(Math.min(Math.max(stored.x, area.x), area.x + Math.max(0, area.width - width))),
-      y: Math.round(Math.min(Math.max(stored.y, area.y), area.y + Math.max(0, area.height - height))),
-      width,
-      height,
-    };
+    const clamped = clampIntoWorkArea(
+      { x: Math.round(stored.x), y: Math.round(stored.y), width: size.width, height: size.height },
+      area,
+    );
+    return clamped;
   }
 
-  const area = screen.getPrimaryDisplay().workArea;
-  return {
-    x: area.x + area.width - width - MARGIN,
-    y: area.y + area.height - height - MARGIN,
-    width,
-    height,
-  };
+  return defaultBounds(screen.getPrimaryDisplay().workArea, size, MARGIN);
 }
 
 function loadRenderer(win: BrowserWindow, page: 'widget' | 'manage'): void {
@@ -373,11 +361,10 @@ function clampWidgetIntoWorkArea(): void {
   if (!win || win.isDestroyed()) return;
   const bounds = win.getBounds();
   const area = screen.getDisplayMatching(bounds).workArea;
-  const x = Math.min(Math.max(bounds.x, area.x), area.x + Math.max(0, area.width - bounds.width));
-  const y = Math.min(Math.max(bounds.y, area.y), area.y + Math.max(0, area.height - bounds.height));
-  if (x === bounds.x && y === bounds.y) return;
-  log('[widget] 挂件越出工作区，已夹回', { from: `${bounds.x},${bounds.y}`, to: `${x},${y}` });
-  const next = { ...bounds, x, y };
+  // 规则本身在 `geometry.ts`（纯函数 + 单测）：位置只信一处实现
+  const next = clampIntoWorkArea(bounds, area);
+  if (next.x === bounds.x && next.y === bounds.y) return;
+  log('[widget] 挂件越出工作区，已夹回', { from: `${bounds.x},${bounds.y}`, to: `${next.x},${next.y}` });
   win.setBounds(next);
   saveSettings({ bounds: next, displayId: screen.getDisplayMatching(next).id });
 }
