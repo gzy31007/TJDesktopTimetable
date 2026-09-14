@@ -163,6 +163,13 @@ function onDesktopLayerMessage(reason: string): void {
     if (!win || win.isDestroyed()) return;
     log('[widget] 收到桌面层级变化消息', { reason });
     refreshDesktopLayer(win, reason);
+    /*
+     * 显示拓扑变化之后**位置也要重新校验**：最典型的是拔掉外接显示器 ——
+     * 原来那台屏上的坐标在新拓扑里可能整块落在工作区之外，只重修层级的话挂件会停在
+     * 看不见的地方（用户只能改配置文件救）。
+     * 复用越界夹回（同样的纯函数规则，见 geometry.ts）。
+     */
+    scheduleClampIntoWorkArea();
     layer?.resume();
   }, 300);
 }
