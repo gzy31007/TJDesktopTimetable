@@ -25,6 +25,10 @@ extraResources:
 # koffi 自带预编译二进制，不需要 rebuild
 npmRebuild: false
 
+# 必须写精确版本：本地 node_modules/electron 没有安装运行时（postinstall 被有意跳过），
+# electron-builder 无法自行推断版本；升级 electron 时这里要同步改。
+electronVersion: 44.3.0
+
 # 在 WSL/Linux 上交叉打包 Windows 产物时，从这里下载 win32 的 electron 二进制
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

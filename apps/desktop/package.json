@@ -14,7 +14,8 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
     "dist:win": "electron-vite build && electron-builder --win --x64 --dir",
-    "dist:win:zip": "electron-vite build && electron-builder --win --x64 --dir --config.win.target=zip"
+    "dist:win:wsl": "electron-vite build && electron-builder --win --x64 --dir --config.electronDownload.cache=$PWD/.cache/electron",
+    "dist:win:zip": "electron-vite build && electron-builder --win --x64 --dir --config.win.target=zip --config.electronDownload.cache=$PWD/.cache/electron"
   },
   "dependencies": {
     "koffi": "^3.2.1"

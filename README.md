@@ -35,15 +35,21 @@ docs/                   architecture.md · data-model.md · adapter-guide.md
 ## 快速开始
 
 ```bash
-# 依赖（WSL 内需要代理；CI / Windows 直连可省略 --config.* 参数）
-pnpm install --config.proxy=http://127.0.0.1:7897 --config.https-proxy=http://127.0.0.1:7897
+# 依赖（国内镜像直连，比走代理快约 30 倍；CI / 海外网络可去掉 --registry）
+pnpm install --registry=https://registry.npmmirror.com
 
-pnpm test          # 核心逻辑单测（含同济真实数据黄金测试）
-pnpm typecheck     # 全仓类型检查
-pnpm dev           # Electron 开发态（Windows 侧运行窗口层）
-pnpm dev:web       # 纯浏览器预览渲染层（喂 mock 数据，快速调视觉）
-pnpm dist:win      # 交叉打包 Windows 免安装版 → apps/desktop/dist/win-unpacked
+pnpm test          # 核心逻辑单测（含同济真实数据黄金测试，50 个用例）
+pnpm typecheck     # 全仓类型检查（core tsc + desktop vue-tsc）
+pnpm dev           # Electron 开发态（需 Windows 侧运行以验证窗口层级）
+pnpm dev:web       # 纯浏览器预览渲染层（WSL 内可跑，默认 http://127.0.0.1:5199）
+pnpm dist:win      # WSL 内交叉打包 Windows 免安装版 → apps/desktop/dist/win-unpacked
 ```
+
+> 在 WSL 里做视觉调试：`pnpm dev:web` 后访问 `http://127.0.0.1:5199/widget/index.html`（挂件）
+> 与 `/manage/index.html`（设置）。浏览器模式使用内置示例课表并写入 localStorage，不需要 Electron。
+>
+> 打包产物是免安装目录，双击 `TJDesktopTimetable.exe` 即用；需要 NSIS 安装包时跑
+> GitHub Actions 的 **Build Windows** 工作流（本地打 NSIS 需要 wine）。
 
 ## 课表数据从哪来
 
@@ -62,10 +68,11 @@ pnpm dist:win      # 交叉打包 Windows 免安装版 → apps/desktop/dist/win
 
 ## 路线图
 
-- [x] M1 核心库：统一模型、周次/冲突/布局/时间算法、同济适配器 + 单测
-- [ ] M2 管理窗口：导入面板、教学班勾选、外观设置
-- [ ] M3 桌面挂件窗口：置底、拖动缩放、托盘、开机自启
-- [ ] M4 Windows 打包产物、CI、文档
+- [x] M1 核心库：统一模型、周次/冲突/布局/时间算法、同济适配器 + 单测（50 用例全绿）
+- [x] M2 管理窗口：导入面板、教学班勾选、冲突拦截、外观设置
+- [x] M3 桌面挂件窗口：置底、拖动缩放、托盘、开机自启
+- [x] M4 Windows 交叉打包出 `win-unpacked`、CI（typecheck + test）
+- [ ] M5 Windows 真机验收与细节打磨
 - [ ] 后续：一键从 1 系统拉取、ICS/图片导出、多校适配器
 
 ## 许可

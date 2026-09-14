@@ -30,9 +30,10 @@ docs/                 架构、数据模型、适配器指南
 - 提交：Conventional Commits（英文类型 + 中文简述），例：`feat(core): 增加同济专业课表适配器`；推送前必须 `pnpm test && pnpm typecheck`。
 - 测试：core 的每个公开函数都要有单测；同济适配器必须过黄金测试（fixture 解析结果与 `tongji-2026-1-major.expected.json` 逐条一致）。
 - 视觉基准：`/root/trivial/tongji-timetable/select_preview.html`（网格参数、色板、条纹特殊块、单双周并排、冲突红闪）。改渲染前先对照它。
-- 代理：WSL 内装依赖必须显式传代理（CI 不需要）：
-  `pnpm install --config.proxy=http://127.0.0.1:7897 --config.https-proxy=http://127.0.0.1:7897`
-- 打包：`pnpm dist:win` → `electron-builder --win --x64 --dir`（免安装 `win-unpacked`，**不需要 wine**）；NSIS 安装包交给 `.github/workflows/build-win.yml`。
+- 代理：WSL 内装依赖优先用国内镜像直连（快 30 倍，CI 也适用）：
+  `pnpm install --registry=https://registry.npmmirror.com`
+  只有推送到 GitHub / 拉 GitHub 资源时才用代理：`export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`
+- 打包：`pnpm dist:win` → WSL 内交叉出免安装 `apps/desktop/dist/win-unpacked`（**不需要 wine**）；NSIS 安装包交给 `.github/workflows/build-win.yml`。
 
 ## 易错知识点
 
@@ -42,6 +43,10 @@ docs/                 架构、数据模型、适配器指南
 - 教学班去重键用 `teachingClassId`（数字），`code` 是教学班代码字符串（如 `00213702`），`courseCode` 是课程代码（如 `002137`），三者不可混用。
 - 校历时间戳是毫秒（如 `beginDay: 1820160000000`），且 `weekBenginDay` 表示"周从周几开始"（同济为 2 = 周一），不是开学日。
 - `koffi` 的平台二进制走 `optionalDependencies`（`@koromix/koffi-win32-x64`），在 WSL 上依赖 `pnpm-workspace.yaml` 的 `supportedArchitectures`，打包时必须 `asarUnpack: ["**/*.node"]`。
+- **WSL 沙箱下打包必须重定向缓存**：electron-builder 默认写 `~/.cache/electron`，本机沙箱只允许写工作区 → 报 `EACCES: permission denied, mkdir '/root/.cache/electron'`。用 `pnpm -F @tjt/desktop dist:win:wsl`（内部传 `--config.electronDownload.cache=$PWD/.cache/electron`）。
+- `electron-builder.yml` 里的 `electronVersion` 必须是**精确版本**：本地没装 electron 运行时（postinstall 被有意跳过），electron-builder 无法推断 `^44.3.0` 这种范围；升级 electron 时同步改这里。
+- pnpm 11 默认拦截依赖 postinstall（`ERR_PNPM_IGNORED_BUILDS`）：新依赖需要构建脚本时，写进 `pnpm-workspace.yaml` 的 `allowBuilds`。
+- WSL 内装依赖走代理极慢（实测 registry 请求 30s、19 KB/s）：改用国内镜像直连 `pnpm install --registry=https://registry.npmmirror.com`（实测 600 KB/s）。
 - WSL 内无法验证 Win32 窗口层级（置底/穿透）行为，这部分只能在 Windows 真机验收。
 
 ## 注意事项

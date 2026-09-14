@@ -15,6 +15,6 @@
     "dev": "pnpm -F @tjt/desktop dev",
     "dev:web": "pnpm -F @tjt/desktop dev:web",
     "build": "pnpm -F @tjt/desktop build",
-    "dist:win": "pnpm -F @tjt/desktop dist:win"
+    "dist:win": "pnpm -F @tjt/desktop dist:win:wsl"
   }
 }

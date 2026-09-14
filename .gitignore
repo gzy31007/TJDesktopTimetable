@@ -3,6 +3,7 @@ dist/
 out/
 release/
 .pnpm-store/
+.cache/
 *.tsbuildinfo
 .vite/
 coverage/
