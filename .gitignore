@@ -27,3 +27,6 @@ deploy-win.ps1
 .shots/
 .tools/
 *.local.json
+
+# 只读参照实现的克隆（DeskBox 等），不参与版本控制
+.refs/
