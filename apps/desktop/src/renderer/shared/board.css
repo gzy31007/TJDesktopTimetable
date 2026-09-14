@@ -114,7 +114,14 @@
   border-radius: var(--r-lg, 12px);
   overflow: hidden;
   z-index: 0;
-  /* 不铺灰底、不加内高光：这条 #F2F2F7（moe 的 --layer-2）正是列头下方那行"莫名其妙的灰" */
+  /*
+   * 必须是 grid 容器并声明模板：缺了这两行时 .cell 会塌成 1px 高，
+   * 77 个格子的边框全部堆在顶部，看起来就是列头下方一条"莫名其妙的灰带"。
+   */
+  display: grid;
+  grid-template-columns: repeat(var(--cols), var(--colw));
+  grid-template-rows: repeat(var(--rows), var(--rowh));
+  /* 不铺底色、不加内高光：网格只由 1px 分隔线表达，底色交给外壳 */
   background-color: transparent;
   border: 1px solid var(--stroke, rgba(0, 0, 0, 0.07));
 }

@@ -38,6 +38,7 @@ docs/                 架构、数据模型、适配器指南
   - **`tabbed`（Mica Alt）备选**：任务管理器用的就是它，比 mica 对比度更高、底纹更明显。要更重的层次感时把 `backgroundMaterial` 换成 `'tabbed'` 即可（Win11 23H2+，低于该版本 DWM 会忽略并退化成 mica/纯色）。
   - **不要用 `SetWindowRgn` 给透明窗口裁圆角**：实测拖动缩放约 12 秒后主进程**无日志直接重启**（原生层崩溃）；且 `transparent: true` 本身就拿不到 DWM 圆角。对应 DeskBox（WinUI 3 `MicaController`/`DesktopAcrylicController` + `SystemBackdropConfiguration`）的等价做法就是"非透明窗口 + `backgroundMaterial` + DWM 圆角属性"。
   - 管理窗口用主进程 `backgroundMaterial: 'mica'` + 自绘标题栏（`titleBarOverlay`，右侧留 `clamp(138px, 11vw, 190px)` 给系统按钮，深浅主题经 `window:titlebar-theme` 同步）。
+  - **`.tt .grid-bg` 必须保留 `display: grid` + `grid-template-columns/rows`**：缺了这两行，77 个 `.cell` 会塌成 1px 高、边框全堆在顶部，看起来就是"列头下方一条莫名其妙的灰带"（排查时用 CDP 探针量 `.cell` 尺寸最快：正常应是 `colw × rowh`）。
   - 色块染色走三个 CSS 变量（`--tint` / `--edge` / `--ink`），由 `TimetableBoard.vue` 按主题内联设置；`lift()` 必须返回 `#rrggbb`（返回 `rgb()` 会让下游混色算出 NaN，色块直接变透明）。
   - WSL 内验收视觉：`pnpm -F @tjt/desktop dev:web` 起浏览器预览（支持 `?today=&now=&theme=` 覆盖，仅 mock 模式生效，见 `shared/api.ts` 的 `previewOverrides`），再用 Windows Edge 无头截图（`--screenshot` 写 `\\wsl.localhost\...` 路径可行，本机沙箱禁写 `/mnt/c`）。
 - 代理：WSL 内装依赖优先用国内镜像直连（快 30 倍，CI 也适用）：
