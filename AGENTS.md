@@ -87,8 +87,8 @@ docs/                 架构、数据模型、适配器指南
 - 启动后 1s/3s/6s 各打一行 `[win32] 层级自检`（Electron 的 `isVisible()`/`getBounds()` 与 Win32 的 `IsWindowVisible`/`GetWindowRect`/owner/父窗口链并排）；排查"Electron 说显示了、屏幕上看不见"时先看这三行。
 - **`SetWindowPos` 的 `hWndInsertAfter` 是"插到该窗口之后（z-order 更低）"，不是"上方"**：曾误把 owner 传进去想让挂件"贴着桌面之上"，结果把它插到 Progman 下面被桌面盖住。owned 窗口本来就恒在 owner 之上，置底用 `HWND_BOTTOM` 即可。
 - **owner 巡检必须和"当前期望的宿主"比较**：宿主解析结果会随 Explorer 重启而变（DefView 句柄被换掉），比较对象必须每次从 `resolveDesktopHost()` 实时取，不能缓存期望值——否则会每秒误判"丢失"并重挂、反复搅动 z-order。
-- **鼠标交互期摘的是 `WS_EX_NOACTIVATE`，不是 owner**：贴桌面层时挂件是桌面宿主（`SHELLDLL_DefView`）的 owned window，owner 全程保留；要临时浮起/可拖动，靠 `suspendRestingStyle()`（摘 `WS_EX_NOACTIVATE` + `HWND_TOPMOST` → 立刻 `HWND_NOTOPMOST` 的脉冲）。旧实现"按下时摘 owner、松开挂回"已随 2026-09-14 重写删除。
-- **不要再引入"修 Shell last active popup"这类抢前台的补救**（已随 2026-09-14 重写整体删除，`repairShellLastActivePopup` 不再存在）：它内部要 `SetForegroundWindow(Progman)` 再切回，等于周期性抢前台——用户观察到的"别的程序有焦点时挂件也会消失"就是它自己造成的干扰。新层级层不需要它：静息态戴 `WS_EX_NOACTIVATE` 且 owner 挂在桌面图标视图上，不参与前台争夺。
+- **鼠标交互期只做"临时浮起"，不动 owner**：贴桌面层时挂件是桌面宿主（`SHELLDLL_DefView`）的 owned window，owner 全程保留；`suspendRestingStyle()` 只清一次 NOACTIVATE（兜底）+ 打 `HWND_TOPMOST` → 立刻 `HWND_NOTOPMOST` 的脉冲。旧实现"按下时摘 owner、松开挂回"已随 2026-09-14 重写删除。
+- **不要再引入"修 Shell last active popup"这类抢前台的补救**（已随 2026-09-14 重写整体删除，`repairShellLastActivePopup` 不再存在）：它内部要 `SetForegroundWindow(Progman)` 再切回，等于周期性抢前台——用户观察到的"别的程序有焦点时挂件也会消失"就是它自己造成的干扰。新层级层不需要它：owner 挂在桌面图标视图上、窗口不参与前台争夺，没有那个指针可修。
 - **`detach()` 不隐藏窗口**：切换层级模式（托盘 / 设置面板改 `mode`）会 `attachLayer()` → 先 `detach()` 再重新 `attachToDesktop()`；旧实现里 `detach()` 调了 `SW_HIDE`，结果**切一次模式挂件就消失且没人再显示回来**。真正要隐藏只能走 `setWidgetVisible(false)`。
 - **"贴桌面 + Win+D 后仍可见"要用 Owner，不是 SetParent**：`SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT(-8), <桌面图标视图>)` —— owned 窗口恒在 owner 之上、不随 Win+D 隐藏或最小化，同时仍是顶层窗口（拖动/鼠标/坐标都正常）。`SetParent` 成 WorkerW 子窗口会被桌面图标压在下面，且拖动坐标错乱。owner 的**写入/校验/还原**细节见上方"桌面 owner"条目。
 - **不要给挂件静息态戴 `WS_EX_NOACTIVATE`**：不可激活的窗口会被系统跳过原生 move loop，而 `-webkit-app-region: drag` 又依赖这条 move loop —— 戴上就等于"挂件拖不动"。想要"点击不抢前台"就只能走"悬停/命中测试时临时摘样式"那条路（需要 `WM_NCHITTEST` 子类化），代价与复杂度都不低；本项目选择不戴。`resting.ts` 里仍保留 `setNoActivate()` 原语，`suspendRestingStyle()` 会兜底清一次，防止将来有人又加回去。
