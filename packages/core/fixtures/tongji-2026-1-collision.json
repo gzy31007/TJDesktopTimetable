@@ -1,0 +1,242 @@
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "calendarId": 122,
+    "selectedCourses": [
+      {
+        "course": {
+          "courseCode": "90000000001",
+          "newCourseCode": "TST1001",
+          "courseName": "测试高等数学（工科类）",
+          "credits": 5.0,
+          "calendarId": 122,
+          "calendarName": "2026-2027学年第1学期",
+          "teachClassId": 9000000000000001,
+          "teachClassCode": "9000000000001",
+          "times": [
+            {
+              "timeStart": 1,
+              "timeEnd": 2,
+              "dayOfWeek": 1,
+              "weeks": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+              "value": "测试高等数学（工科类） 张三(10001)  [1-16] 南101 ",
+              "teacherCode": "10001",
+              "teacherCodeI18n": "张三",
+              "roomId": "9001",
+              "roomIdI18n": "南101"
+            }
+          ]
+        }
+      },
+      {
+        "course": {
+          "courseCode": "90000000002",
+          "newCourseCode": "TST1002",
+          "courseName": "测试大学物理",
+          "credits": 3.0,
+          "calendarId": 122,
+          "calendarName": "2026-2027学年第1学期",
+          "teachClassId": 9000000000000002,
+          "teachClassCode": "9000000000002",
+          "times": [
+            {
+              "timeStart": 1,
+              "timeEnd": 2,
+              "dayOfWeek": 1,
+              "weeks": [1, 3, 5, 7, 9, 11, 13, 15],
+              "value": "测试大学物理 李四(10002)  [1, 3, 5, 7, 9, 11, 13, 15] 北201 ",
+              "teacherCode": "10002",
+              "teacherCodeI18n": "李四",
+              "roomId": "9002",
+              "roomIdI18n": "北201"
+            }
+          ]
+        }
+      },
+      {
+        "course": {
+          "courseCode": "90000000003",
+          "newCourseCode": "TST1003",
+          "courseName": "测试大学英语",
+          "credits": 2.0,
+          "calendarId": 122,
+          "calendarName": "2026-2027学年第1学期",
+          "teachClassId": 9000000000000003,
+          "teachClassCode": "9000000000003",
+          "times": [
+            {
+              "timeStart": 1,
+              "timeEnd": 2,
+              "dayOfWeek": 1,
+              "weeks": [2, 4, 6, 8, 10, 12, 14, 16],
+              "value": "测试大学英语 王五(10003)  [2, 4, 6, 8, 10, 12, 14, 16] 南305 ",
+              "teacherCode": "10003",
+              "teacherCodeI18n": "王五",
+              "roomId": "9003",
+              "roomIdI18n": "南305"
+            }
+          ]
+        }
+      },
+      {
+        "course": {
+          "courseCode": "90000000004",
+          "newCourseCode": "TST1004",
+          "courseName": "测试跨节实践（部分重叠）",
+          "credits": 1.0,
+          "calendarId": 122,
+          "calendarName": "2026-2027学年第1学期",
+          "teachClassId": 9000000000000004,
+          "teachClassCode": "9000000000004",
+          "times": [
+            {
+              "timeStart": 1,
+              "timeEnd": 3,
+              "dayOfWeek": 1,
+              "weeks": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+              "value": "测试跨节实践（部分重叠） 赵六(10004)  [1-16] 实验楼 ",
+              "teacherCode": "10004",
+              "teacherCodeI18n": "赵六",
+              "roomId": "9004",
+              "roomIdI18n": "实验楼"
+            }
+          ]
+        }
+      },
+      {
+        "course": {
+          "courseCode": "90000000005",
+          "newCourseCode": "TST1005",
+          "courseName": "测试并行交替甲",
+          "credits": 1.0,
+          "calendarId": 122,
+          "calendarName": "2026-2027学年第1学期",
+          "teachClassId": 9000000000000005,
+          "teachClassCode": "9000000000005",
+          "times": [
+            {
+              "timeStart": 5,
+              "timeEnd": 6,
+              "dayOfWeek": 3,
+              "weeks": [1, 2, 3, 4, 5, 6, 7, 8],
+              "value": "测试并行交替甲 孙七(10005)  [1-8] 南102 ",
+              "teacherCode": "10005",
+              "teacherCodeI18n": "孙七",
+              "roomId": "9005",
+              "roomIdI18n": "南102"
+            }
+          ]
+        }
+      },
+      {
+        "course": {
+          "courseCode": "90000000006",
+          "newCourseCode": "TST1006",
+          "courseName": "测试并行交替乙",
+          "credits": 1.0,
+          "calendarId": 122,
+          "calendarName": "2026-2027学年第1学期",
+          "teachClassId": 9000000000000006,
+          "teachClassCode": "9000000000006",
+          "times": [
+            {
+              "timeStart": 5,
+              "timeEnd": 6,
+              "dayOfWeek": 3,
+              "weeks": [9, 10, 11, 12, 13, 14, 15, 16],
+              "value": "测试并行交替乙 周八(10006)  [9-16] 南103 ",
+              "teacherCode": "10006",
+              "teacherCodeI18n": "周八",
+              "roomId": "9006",
+              "roomIdI18n": "南103"
+            }
+          ]
+        }
+      },
+      {
+        "course": {
+          "courseCode": "90000000007",
+          "newCourseCode": "TST1007",
+          "courseName": "测试同格多时段合并",
+          "credits": 2.0,
+          "calendarId": 122,
+          "calendarName": "2026-2027学年第1学期",
+          "teachClassId": 9000000000000007,
+          "teachClassCode": "9000000000007",
+          "times": [
+            {
+              "timeStart": 9,
+              "timeEnd": 10,
+              "dayOfWeek": 5,
+              "weeks": [1, 2, 3, 4],
+              "value": "测试同格多时段合并 甲(10007)  [1-4] 北401 ",
+              "teacherCode": "10007",
+              "teacherCodeI18n": "甲",
+              "roomId": "9007",
+              "roomIdI18n": "北401"
+            },
+            {
+              "timeStart": 9,
+              "timeEnd": 10,
+              "dayOfWeek": 5,
+              "weeks": [5, 6, 7, 8],
+              "value": "测试同格多时段合并 乙(10008)  [5-8] 北401 ",
+              "teacherCode": "10008",
+              "teacherCodeI18n": "乙",
+              "roomId": "9007",
+              "roomIdI18n": "北401"
+            },
+            {
+              "timeStart": 9,
+              "timeEnd": 10,
+              "dayOfWeek": 5,
+              "weeks": [9, 10, 11, 12, 13, 14, 15, 16],
+              "value": "测试同格多时段合并 丙(10009)  [9-16] 北401 ",
+              "teacherCode": "10009",
+              "teacherCodeI18n": "丙",
+              "roomId": "9007",
+              "roomIdI18n": "北401"
+            }
+          ]
+        }
+      },
+      {
+        "course": {
+          "courseCode": "90000000008",
+          "newCourseCode": "TST1008",
+          "courseName": "测试同格异教室不合并",
+          "credits": 1.0,
+          "calendarId": 122,
+          "calendarName": "2026-2027学年第1学期",
+          "teachClassId": 9000000000000008,
+          "teachClassCode": "9000000000008",
+          "times": [
+            {
+              "timeStart": 9,
+              "timeEnd": 10,
+              "dayOfWeek": 5,
+              "weeks": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+              "value": "测试同格异教室不合并 丁(10010)  [1-16] 北402 ",
+              "teacherCode": "10010",
+              "teacherCodeI18n": "丁",
+              "roomId": "9008",
+              "roomIdI18n": "北402"
+            },
+            {
+              "timeStart": 9,
+              "timeEnd": 10,
+              "dayOfWeek": 5,
+              "weeks": [1, 3, 5, 7, 9, 11, 13, 15],
+              "value": "测试同格异教室不合并 戊(10011)  [1, 3, 5, 7, 9, 11, 13, 15] 北403 ",
+              "teacherCode": "10011",
+              "teacherCodeI18n": "戊",
+              "roomId": "9009",
+              "roomIdI18n": "北403"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
