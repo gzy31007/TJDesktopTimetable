@@ -31,7 +31,9 @@ docs/                 架构、数据模型、适配器指南
 - 测试：core 的每个公开函数都要有单测；同济个人课表适配器由 `test/e2e-timetable.spec.ts` 端到端覆盖（导入 → 布局 → 时间 → 单双周过滤）。
 - 视觉规范：Win11 Fluent / 亚克力玻璃。设计令牌与基础控件在 `apps/desktop/src/renderer/shared/fluent.css`（色彩分级、圆角、阴影、明暗主题、`.f-btn`/`.f-pill`/`.f-switch`/`.f-card`），课表皮肤在 `shared/board.css`，挂件外壳在 `widget/widget.css`，管理窗口在 `manage/`。改渲染先读这几份，不要再引入一次性硬编码色值。
   - 历史基准（网格参数、色板、条纹特殊块、单双周并排）仍可对照 `/root/trivial/tongji-timetable/select_preview.html`，但视觉语言以 Fluent 令牌为准。
-  - **挂件窗口材质（最终选型，2026-09-14 定稿）**：`transparent: false` + `backgroundMaterial: 'acrylic'` + DWM 圆角（`main/win32/dwm.ts` 的 `applyRoundedCorners`）。渲染层 `--glass-shell: transparent` 把底色让给系统材质，只留描边/高光/噪声。选它是为了**两态 + 真模糊**（活跃时壁纸透出并模糊）；代价是**失焦会被 DWM 切成不活跃（变灰、近乎不透明）**，这是系统对所有窗口的行为，Electron 在 Windows 上没有 `visualEffectState` 那种开关，渲染层加厚底色只能遮灰、做不到等价，已试过并放弃。
+  - **挂件窗口材质（最终选型，2026-09-14 二次定稿）**：`transparent: false` + `backgroundMaterial: 'mica'` + DWM 圆角（`main/win32/dwm.ts` 的 `applyRoundedCorners`）+ **不透明实色底**（浅 `#f3f3f3` / 深 `#202020`，随主题经 `applyWidgetTheme()` 切换）。渲染层 `--glass-shell: transparent` 把底色让给系统材质，圆角不自绘（避免双圆角），`hasShadow: false`（去掉窗口投影那层外部立体感）。
+  - **为什么放弃 Acrylic（重要）**：Acrylic 在"Win+D 隐藏 → 恢复"之后 **DWM 合成会失效**——实测窗口 `IsWindowVisible` 为真、owner 正确、z-order 也正确（诊断字段 `coveredByShell:false`、排位在 Progman 之前），但屏幕上就是不出现，Electron 侧无法感知也修不好（`webContents.invalidate()` + bounds 抖动只能治一时）。它另有两个固有代价：失焦被 DWM 切成不活跃（变灰发蓝）、必须 `transparent: true` 而透明窗口拿不到 DWM 圆角。
+  - **非透明窗口不能用透明底色**：`transparent: false` 时 `backgroundColor` 的 alpha 会被忽略，给 `#00000000` 得到黑底（材质画在黑上 = 一块死色）。必须给不透明实色。
   - **材质只在窗口创建时声明有效**：`backgroundMaterial` 写在 `new BrowserWindow({...})` 里才生效。运行时再设（Electron 的 `setBackgroundMaterial`，或 koffi 直写 `DWMWA_SYSTEMBACKDROP_TYPE`）即使 `DwmGetWindowAttribute` 读回 `accepted: 3` 也不出模糊。
   - **备选方案（要"永远一致、不失焦变灰"时用）**：`backgroundMaterial: 'mica'`（或 `tabbed`/Mica Alt，任务管理器那套）+ 不透明深色底 `#202020`，活跃/失焦差异极小，代价是没有模糊、只有壁纸着色。切这一档时记得同时把渲染层 `--glass-shell` 设为 transparent、去掉自绘圆角（圆角归 DWM），并锁定深色主题，否则浅色系统下会深底配浅色文字。
   - **不要用 `SetWindowRgn` 给透明窗口裁圆角**：实测拖动缩放约 12 秒后主进程**无日志直接重启**（原生层崩溃）；且 `transparent: true` 本身就拿不到 DWM 圆角。对应 DeskBox（WinUI 3 `MicaController`/`DesktopAcrylicController` + `SystemBackdropConfiguration`）的等价做法就是"非透明窗口 + `backgroundMaterial` + DWM 圆角属性"。
@@ -62,6 +64,10 @@ docs/                 架构、数据模型、适配器指南
 - **单实例锁的副作用**：上一次实例没退出（哪怕界面不可见）时，再双击 exe 会被静默挡掉，表现同样是"打不开"。排查时先 `taskkill /F /IM TJDesktopTimetable.exe`。
 - **不要从 UNC 路径（`\\wsl.localhost\...`）运行产物**：Chromium 需要内存映射加载 `resources.pak`/`icudtl.dat`，9p 文件系统上不可靠；产物要放到 Windows 本地磁盘（`C:\...`）再运行。WSL 侧复制过去极慢（9p 逐文件），让用户用资源管理器拖，或后台 robocopy。
 - **`app.getPath('userData')` 默认取 package.json 的 `name`**（`@tjt/desktop` → `%APPDATA%\@tjt\desktop`）。已在 `main/index.ts` 显式 `app.setName` + `app.setPath('userData', ...)` 固定为 `%APPDATA%\TJDesktopTimetable`。
+- **桌面 owner 用 Progman，不要用 SHELLDLL_DefView**（2026-09-14 修正）：owner 取 `GetShellWindow()` = Progman，对齐 WitchDrawer 的 `DesktopShellHost.ResolveOwner`；早期用 `SHELLDLL_DefView`（Progman 的**子窗口**）在 Win+D 路径下 z-order 行为不同，实测会"恢复了却看不见"。DefView 仅作回退。
+- **`SetWindowPos` 的 `hWndInsertAfter` 是"插到该窗口之后（z-order 更低）"，不是"上方"**：曾误把 owner 传进去想让挂件"贴着桌面之上"，结果把它插到 Progman 下面被桌面盖住。owned 窗口本来就恒在 owner 之上，置底用 `HWND_BOTTOM` 即可。
+- **owner 检测必须和"当前期望的 owner"比较**：换 owner 目标（DefView→Progman）时忘了同步 `ownerLost()`，会每秒误判"丢失"并重挂、反复搅动 z-order（日志刷屏 `桌面层 owner 丢失，重新挂载`）。
+- **鼠标按下期间要临时摘掉 Shell owner**（WitchDrawer 的 `SuspendDesktopOwnershipForMouseInput`）：否则 Explorer 会把被点到的挂件记成 Progman 的 "last active popup"，之后 Win+D 会去激活挂件而不是显示桌面。摘除期间 `ownerLost()` 要让路，别和"交互结束恢复"打架。
 - **"贴桌面 + Win+D 后仍可见"要用 Owner，不是 SetParent**：`SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT(-8), SHELLDLL_DefView)` 把顶层窗口的 Owner 设为桌面图标层 —— owned 窗口恒在 owner 之上（不被桌面图标遮挡），且不随 Win+D 最小化（桌面壳不被最小化），同时仍是顶层窗口（拖动/鼠标/坐标都正常）。`SetParent` 成 WorkerW 子窗口会被图标压在下面，且拖动坐标错乱。（做法对齐 DeskBox 的 DesktopPinned 模式）
 - **`WS_EX_NOACTIVATE` 会让窗口拖不动**：不可激活的窗口会被系统跳过原生 move loop。本项目已移除该样式，「不打扰」由"贴桌面层 + 置底"承担；这条与"点挂件不抢焦点"存在取舍，不要再硬塞回来。
 - **Electron 里拖动窗口用 `-webkit-app-region: drag`**（Chromium 内建 `WM_NCHITTEST → HTCAPTION`，真实鼠标输入、跟手、不丢事件），交互控件加 `no-drag`。从主进程 `SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION)` 在 Electron 上实测**不生效**（渲染层 DOM 事件也会被 drag 区域吞掉，两者恰好构成自然降级：drag 生效时走原生，失效时走自实现循环）。
