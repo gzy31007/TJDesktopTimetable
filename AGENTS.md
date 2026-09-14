@@ -80,15 +80,18 @@ docs/                 架构、数据模型、适配器指南
 - **层级层结构（2026-09-14 重写，已拆分）**：`main/win32/` 下 `api.ts`（koffi 绑定唯一入口 + 常量 + 句柄工具）→ `desktop-host.ts`（宿主与 owner 生命周期）→ `resting.ts`（z-order 原语 + `WS_EX_NOACTIVATE` 摘戴）→ `resting-policy.ts`（**纯策略，零依赖，有单测**）→ `layer.ts`（编排）。
   - **静息落点三选一，不再一律置底**：无前台/前台是桌面壳 → 回桌面层（owner + 置底）；前台是自己或本应用其它窗口 → 只维护内部顺序、不动全局层级；前台是第三方应用 → 插到该应用**之后**（`SetWindowPos(hwnd, foreground, ...)`，`hWndInsertAfter` 是"插到它之后/更低"）。
   - **不再有每秒重压**：只留 5 秒 owner 巡检，owner 正常时一次 `GetWindowLongPtrW` 读、不产生任何 z-order 变化；Explorer 重启与显示变化交给 `watchDesktopLayerMessages()` 订阅 `TaskbarCreated` / `WM_DISPLAYCHANGE` / `WM_SETTINGCHANGE`（去抖 300ms），收到后作废宿主缓存并重新静息。
-  - **交互期摘 `WS_EX_NOACTIVATE`、结束后戴回**（戴着它系统会跳过原生 move loop = 完全拖不动）：`suspendRestingStyle()` / `resumeRestingStyle()` 必须成对调用。
-  - 启动后 1s/3s/6s 各打一行 `[win32] 层级自检`（Electron 的 `isVisible()`/`getBounds()` 与 Win32 的 `IsWindowVisible`/`GetWindowRect`/owner/父窗口链并排）；排查"Electron 说显示了、屏幕上看不见"时先看这三行。
+  - **静息态不戴 `WS_EX_NOACTIVATE`**。真机实测：戴着它时 `-webkit-app-region: drag` 的标题栏既不走系统原生 move loop（不可激活窗口被跳过），渲染层也收不到 pointerdown（Chromium 拖拽区把事件吞了），两者叠加 = **挂件完全拖不动**（日志里连一条"开始拖动"都没有）。所以静息就是"普通顶层窗口 + owner 挂桌面图标视图"，点击会短暂激活并把它提到普通层级带顶部，交互结束由落点策略把它放回去 —— 与 DeskBox 默认的"动态层级"一致（它只在实验性的 DesktopPinned 模式才戴 NOACTIVATE）。
+  - 交互入口：`suspendRestingStyle()`（兜底清 NOACTIVATE + `HWND_TOPMOST` → 立刻 `HWND_NOTOPMOST` 脉冲，临时浮到普通带顶部）/ `resumeRestingStyle()`（按前台重新落点）。必须成对调用。
+  - **拖动/缩放的真机结论**（2026-09-14，合成鼠标事件验证）：拖动走的是 **Chromium 原生路径**（拖拽区 → `WM_NCHITTEST → HTCAPTION` → 系统 move loop），窗口位移与鼠标位移一致（实测 +130,+100 的拖拽让窗口 `left/top` 从 739,283 变成 859,375），且**不会**触发渲染层的 `beginDrag`（那条日志是给缩放/自实现分支用的）。缩放柄不是拖拽区，走渲染层 `beginResize` → `suspendRestingStyle` → 自实现循环（日志可见"开始缩放"）。
+  - 改完层级行为后，用 `.tools/layer-probe.ps1`（本机脚本，gitignore）做真机回归：它自己找 owner=DefView 的挂件窗口，按 Win+D、比对 `IsWindowVisible/IsIconic` 与像素，并打印阳性对照；注意 **PowerShell 进程不是 DPI 感知的**，`GetWindowRect`/`SetCursorPos` 用的是虚拟化坐标，而应用日志里的 `rect` 是物理坐标（本机缩放 150%，两者差 1.5 倍），混用会得到"看起来没动"的假结论。
+- 启动后 1s/3s/6s 各打一行 `[win32] 层级自检`（Electron 的 `isVisible()`/`getBounds()` 与 Win32 的 `IsWindowVisible`/`GetWindowRect`/owner/父窗口链并排）；排查"Electron 说显示了、屏幕上看不见"时先看这三行。
 - **`SetWindowPos` 的 `hWndInsertAfter` 是"插到该窗口之后（z-order 更低）"，不是"上方"**：曾误把 owner 传进去想让挂件"贴着桌面之上"，结果把它插到 Progman 下面被桌面盖住。owned 窗口本来就恒在 owner 之上，置底用 `HWND_BOTTOM` 即可。
 - **owner 巡检必须和"当前期望的宿主"比较**：宿主解析结果会随 Explorer 重启而变（DefView 句柄被换掉），比较对象必须每次从 `resolveDesktopHost()` 实时取，不能缓存期望值——否则会每秒误判"丢失"并重挂、反复搅动 z-order。
 - **鼠标交互期摘的是 `WS_EX_NOACTIVATE`，不是 owner**：贴桌面层时挂件是桌面宿主（`SHELLDLL_DefView`）的 owned window，owner 全程保留；要临时浮起/可拖动，靠 `suspendRestingStyle()`（摘 `WS_EX_NOACTIVATE` + `HWND_TOPMOST` → 立刻 `HWND_NOTOPMOST` 的脉冲）。旧实现"按下时摘 owner、松开挂回"已随 2026-09-14 重写删除。
 - **不要再引入"修 Shell last active popup"这类抢前台的补救**（已随 2026-09-14 重写整体删除，`repairShellLastActivePopup` 不再存在）：它内部要 `SetForegroundWindow(Progman)` 再切回，等于周期性抢前台——用户观察到的"别的程序有焦点时挂件也会消失"就是它自己造成的干扰。新层级层不需要它：静息态戴 `WS_EX_NOACTIVATE` 且 owner 挂在桌面图标视图上，不参与前台争夺。
 - **`detach()` 不隐藏窗口**：切换层级模式（托盘 / 设置面板改 `mode`）会 `attachLayer()` → 先 `detach()` 再重新 `attachToDesktop()`；旧实现里 `detach()` 调了 `SW_HIDE`，结果**切一次模式挂件就消失且没人再显示回来**。真正要隐藏只能走 `setWidgetVisible(false)`。
 - **"贴桌面 + Win+D 后仍可见"要用 Owner，不是 SetParent**：`SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT(-8), <桌面图标视图>)` —— owned 窗口恒在 owner 之上、不随 Win+D 隐藏或最小化，同时仍是顶层窗口（拖动/鼠标/坐标都正常）。`SetParent` 成 WorkerW 子窗口会被桌面图标压在下面，且拖动坐标错乱。owner 的**写入/校验/还原**细节见上方"桌面 owner"条目。
-- **`WS_EX_NOACTIVATE` 会让窗口拖不动，但不要因此永久摘掉它**：不可激活的窗口会被系统跳过原生 move loop。正确做法是**静息时戴着、交互前摘掉、结束再戴回**（`suspendRestingStyle`/`resumeRestingStyle`）。戴着它才有点击不抢前台、不把挂件提到第三方应用之上的桌面手感。
+- **不要给挂件静息态戴 `WS_EX_NOACTIVATE`**：不可激活的窗口会被系统跳过原生 move loop，而 `-webkit-app-region: drag` 又依赖这条 move loop —— 戴上就等于"挂件拖不动"。想要"点击不抢前台"就只能走"悬停/命中测试时临时摘样式"那条路（需要 `WM_NCHITTEST` 子类化），代价与复杂度都不低；本项目选择不戴。`resting.ts` 里仍保留 `setNoActivate()` 原语，`suspendRestingStyle()` 会兜底清一次，防止将来有人又加回去。
 - **Electron 里拖动窗口用 `-webkit-app-region: drag`**（Chromium 内建 `WM_NCHITTEST → HTCAPTION`，真实鼠标输入、跟手、不丢事件），交互控件加 `no-drag`。从主进程 `SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION)` 在 Electron 上实测**不生效**（渲染层 DOM 事件也会被 drag 区域吞掉，两者恰好构成自然降级：drag 生效时走原生，失效时走自实现循环）。
 - 自实现拖动/缩放分支（WorkerW 子窗口用）必须双兜底：渲染层 `setPointerCapture` + 主进程 `GetAsyncKeyState(VK_LBUTTON)`。
 - **拖动/缩放期间必须 `layer.pause()`**：owner 巡检会在拖动中途重挂 owner、和拖动抢 z-order（旧实现是每秒 `SetWindowPos(HWND_BOTTOM)`，已删除）。
@@ -99,4 +102,4 @@ docs/                 架构、数据模型、适配器指南
 - 仓库 Public：fixtures 与文档中不得出现学号、姓名、cookie、token 等任何个人凭据。
 - **不做** 1 系统自动登录（SSO 带短信增强，塞进桌面客户端不划算）：改为用户手动粘贴 Cookie，主进程 `main/tongji.ts` 发起请求并探测接口路径。Cookie 存 `credentials.json`，**任何日志都不得打印 Cookie 内容**。
 - 窗口默认「桌面层 + 静息」：Owner 设为桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见），静息落点按前台窗口三选一（见"层级层结构"）；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
-- 拖动用 `-webkit-app-region: drag`（见上）；静息态戴 `WS_EX_NOACTIVATE`（点击不抢前台），交互期由 `suspendRestingStyle()` 摘掉以便拖动，结束后 `resumeRestingStyle()` 戴回。
+- 拖动用 `-webkit-app-region: drag`（见上）；静息态**不戴** `WS_EX_NOACTIVATE`（戴了拖不动，见"易错知识点"），交互期只做"临时浮起 + 结束后重新落点"。

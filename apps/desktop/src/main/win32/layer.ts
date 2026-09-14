@@ -172,6 +172,7 @@ export function attachToDesktop(window: BrowserWindow, options: LayerOptions): L
     if (mode !== 'desktop' || interval <= 0 || timer) return;
     timer = setInterval(patrol, interval);
   };
+  /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
   const stop = (): void => {
     if (timer) {
       clearInterval(timer);
@@ -187,7 +188,8 @@ export function attachToDesktop(window: BrowserWindow, options: LayerOptions): L
     },
     pause: stop,
     resume() {
-      restoreRestingLayer(api, hwnd, 'resume');
+      // 只重启 owner 巡检：静息落点由调用方（交互结束 / 消息通道）自己决定，
+      // 这里再静息一次会造成同一次交互触发 2~3 次落点操作（实测日志里能看到）。
       start();
     },
     refresh() {
@@ -252,7 +254,6 @@ export function restoreRestingLayer(
       break;
   }
 
-  if (restingDesktopLayer) setNoActivate(api, hwnd, true);
   log('[win32] 静息落点', {
     reason,
     disposition,
@@ -279,7 +280,17 @@ function applyRestingLayer(api: Win32, hwnd: number, reason: string): void {
   }
 
   pushToBottom(api, hwnd);
-  setNoActivate(api, hwnd, true);
+  /*
+   * 这里**不戴** `WS_EX_NOACTIVATE`。
+   *
+   * 真机实测（2026-09-14）：静息态戴着它时，`-webkit-app-region: drag` 的标题栏
+   * 既不会触发系统原生 move loop（不可激活窗口被跳过），渲染层也收不到 pointerdown
+   * （Chromium 的拖拽区把事件吞了）—— 两者叠加的结果是**挂件完全拖不动**，
+   * 日志里连一条"开始拖动"都没有。所以静息样式与「不打扰」的取舍改成：
+   * 不戴样式（点击会短暂激活并把挂件提到普通层级带顶部），交互结束由
+   * `restoreRestingLayer()` 按前台重新落点。这与 DeskBox 默认的"动态层级"一致
+   * （它只在实验性的 DesktopPinned 模式才戴 NOACTIVATE）。
+   */
 }
 
 /** 只确保 owner 关系（不改变全局 z-order）。 */
@@ -311,9 +322,11 @@ export function suspendRestingStyle(window: BrowserWindow): void {
   const api = loadWin32();
   if (!api || window.isDestroyed()) return;
   const hwnd = toHwnd(window);
-  if (restingDesktopLayer && isNoActivate(api, hwnd)) {
+  // 兜底：静息态正常情况下已经不戴 NOACTIVATE（否则拖不动），这里顺手清一次，
+  // 以防将来又有人给静息态加回样式。
+  if (isNoActivate(api, hwnd)) {
     setNoActivate(api, hwnd, false);
-    log('[win32] 交互开始：已摘除静息样式');
+    log('[win32] 交互开始：已清除 NOACTIVATE');
   }
   holdTemporaryTopMost(api, hwnd);
 }

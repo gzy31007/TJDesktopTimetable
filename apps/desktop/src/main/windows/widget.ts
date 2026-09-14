@@ -5,7 +5,6 @@ import {
   attachToDesktop,
   ensureWidgetVisible,
   logLayerDiagnostics,
-  logZOrder,
   beginNativeMove,
   isLeftButtonDown,
   isWin32Available,
@@ -465,10 +464,10 @@ export function endPointer(): void {
    * 可靠的时机，否则要等 keepAlive 下一拍，期间可能出现"挂件看不见"。
    */
   const win = widgetWindow;
-  if (win && !win.isDestroyed()) {
+  if (win && !win.isDestroyed() && !wasDragging) {
+    // 只点了一下（没有拖动/缩放）：同样要确认它回到正确层级。
+    // 拖动/缩放的情况上面已经做过静息，这里不再重复。
     ensureWidgetVisible(win);
-    // 诊断：如果仍然看不见，这一行会打出站位、owner 与"谁压在挂件上面"
-    logZOrder(win);
   }
 
   if (wasDragging) log('[widget] 拖动/缩放结束', widgetWindow?.getBounds());
