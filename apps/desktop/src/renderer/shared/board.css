@@ -33,7 +33,7 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--text-2, #5d5d5d);
-  background-image: linear-gradient(180deg, var(--layer-2, rgba(255, 255, 255, 0.44)), transparent);
+  /* 列头不做任何渐变/提亮（去掉立体感）；横向滚动时由 .is-overflow 分支补衬底 */
   z-index: 3;
   transition: color var(--dur, 160ms) var(--ease, ease);
 }
@@ -44,7 +44,6 @@
 
 .tt .col-head.today {
   color: var(--accent, #0067c0);
-  background-image: linear-gradient(180deg, var(--cell-today, rgba(0, 103, 192, 0.055)), transparent);
 }
 
 .tt .col-head.today::after {
