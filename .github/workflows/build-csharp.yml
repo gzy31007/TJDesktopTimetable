@@ -52,6 +52,20 @@ jobs:
         run: dotnet restore dotnet/TjtTimetable.Windows.slnx
       - name: Build（WinUI 外壳）
         run: dotnet build dotnet/TjtTimetable.Windows.slnx --configuration Release --no-restore
+      # 无显卡的 runner 上，WASDK 的 bootstrap 在找不到匹配的 Windows App Runtime 时会
+      # **挂在 DispatcherQueue/XAML 初始化之前**：实测 stdout 一行都没有、90 秒超时被杀。
+      # 所以先把 1.8 运行时静默装上（框架依赖部署本来就要求目标机有它）。
+      - name: Install Windows App Runtime 1.8
+        shell: pwsh
+        run: |
+          $url = 'https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe'
+          $dest = Join-Path $env:RUNNER_TEMP 'windowsappruntimeinstall-x64.exe'
+          Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+          $p = Start-Process -FilePath $dest -ArgumentList '--quiet' -PassThru
+          if (-not $p.WaitForExit(300000)) { $p.Kill(); throw 'Windows App Runtime 安装超时' }
+          Write-Host "runtime installer exit=$($p.ExitCode)"
+          Get-AppxPackage *WindowsAppRuntime.1.8* | Select-Object -ExpandProperty Name
+
       # 冒烟自检：建窗口 + 渲染课表 + 校验布局。
       #
       # 两层超时保护：WinUI 在没有交互式桌面的 runner 上有可能卡在某一步，
