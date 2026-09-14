@@ -53,7 +53,10 @@ docs/                 架构、数据模型、适配器指南
 - **单实例锁的副作用**：上一次实例没退出（哪怕界面不可见）时，再双击 exe 会被静默挡掉，表现同样是"打不开"。排查时先 `taskkill /F /IM TJDesktopTimetable.exe`。
 - **不要从 UNC 路径（`\\wsl.localhost\...`）运行产物**：Chromium 需要内存映射加载 `resources.pak`/`icudtl.dat`，9p 文件系统上不可靠；产物要放到 Windows 本地磁盘（`C:\...`）再运行。WSL 侧复制过去极慢（9p 逐文件），让用户用资源管理器拖，或后台 robocopy。
 - **`app.getPath('userData')` 默认取 package.json 的 `name`**（`@tjt/desktop` → `%APPDATA%\@tjt\desktop`）。已在 `main/index.ts` 显式 `app.setName` + `app.setPath('userData', ...)` 固定为 `%APPDATA%\TJDesktopTimetable`。
-- Windows 侧排查可用 WSL interop 直接调 `cmd.exe` / `powershell.exe`，但**参数里的引号与反斜杠会被 interop 再处理一次**：把逻辑写进 `.ps1`/`.bat` 再执行，不要在 `cmd /c` 里堆嵌套引号（`tasklist /FI "IMAGENAME eq x"` 这种就会解析失败）。
+- **窗口拖动优先用 Windows 原生 move loop**：`ReleaseCapture()` + `SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)`，跟手性与系统窗口一致，且系统自动处理鼠标捕获与松手。自实现"轮询光标 + `setPosition`"有两个硬伤：指针移出窗口就收不到 `mouseup`（拖动粘住），以及每帧 `setPosition` 等 DWM 合成的滞后感。自实现分支（WorkerW 子窗口用）必须双兜底：渲染层 `setPointerCapture` + 主进程 `GetAsyncKeyState(VK_LBUTTON)`。
+- **拖动/缩放期间必须 `layer.pause()`**：置底保险定时器每秒 `SetWindowPos(HWND_BOTTOM)` 会和拖动抢 z-order，表现为拖到一半窗口被压回去。
+- `WS_EX_NOACTIVATE` 窗口进入原生 move loop 时会短暂激活（系统行为）；拖动结束后 `layer.resume()` 会把窗口重新压到底部，不影响"平时不抢焦点"。
+- Windows 侧排查可用 WSL interop 直接调 `cmd.exe` / `powershell.exe`，但**参数里的引号与反斜杠会被 interop 再处理一次**：把逻辑写进 `.ps1`/`.bat` 再执行，不要在 `cmd /c` 里堆嵌套引号（`tasklist /FI "IMAGENAME eq x"` 这种就会解析失败）。`.ps1` 用 Windows PowerShell 5 执行时按 ANSI 读取，**脚本内容必须是纯 ASCII**（含中文注释会因引号配对错乱而解析失败）。
 
 ## 注意事项
 
