@@ -8,6 +8,10 @@ import {
   beginNativeMove,
   isLeftButtonDown,
   isWin32Available,
+  refreshDesktopLayer,
+  resumeRestingStyle,
+  suspendRestingStyle,
+  watchDesktopLayerMessages,
   type LayerHandle,
 } from '../win32/layer.js';
 import { loadSettings, saveSettings } from '../store.js';
@@ -44,12 +48,13 @@ const MARGIN = 24;
 
 let widgetWindow: BrowserWindow | null = null;
 let layer: LayerHandle | null = null;
+/** 桌面层级消息订阅（窗口销毁时取消）。 */
+let offMessages: (() => void) | null = null;
+/** WM_SETTINGCHANGE 去抖句柄：这条消息在系统里很吵，必须合并。 */
+let layerMessageTimer: NodeJS.Timeout | null = null;
 let dragging = false;
 let resizing = false;
 let pointerTimer: NodeJS.Timeout | null = null;
-/** 桌面层挂载失败（Explorer 未就绪）时只重试一次，避免无限循环。 */
-let layerRetried = false;
-
 export function getWidgetWindow(): BrowserWindow | null {
   return widgetWindow;
 }
@@ -106,21 +111,34 @@ function attachLayer(win: BrowserWindow, settings: WidgetSettings): void {
   });
   if (settings.clickThrough) win.setIgnoreMouseEvents(true, { forward: true });
   if (!settings.showWidget) layer.pause();
+  // 重新 attach（切换层级模式 / 重新挂载）之后窗口可能还处于隐藏态：
+  // 只要设置里要求显示，就把它带回屏幕上。
+  else if (!win.isVisible()) win.showInactive();
 
-  // Explorer 可能比我们启动得晚（DefView 还不存在）→ 稍后重试一次
-  if (settings.mode === 'desktop' && settings.desktopLayer && !layerRetried) {
-    layerRetried = true;
-    setTimeout(() => {
-      const target = widgetWindow;
-      if (target && !target.isDestroyed()) reapplyLayer();
-    }, 2000);
-  }
 }
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send(channel, payload);
   }
+}
+
+/**
+ * 桌面层级消息的去抖分发。
+ *
+ * `WM_SETTINGCHANGE` 在系统里非常吵（任务栏、主题、工作区都会发），
+ * 而重建层级要作废宿主缓存并动 z-order，必须合并成一次。
+ */
+function onDesktopLayerMessage(reason: string): void {
+  if (layerMessageTimer) clearTimeout(layerMessageTimer);
+  layerMessageTimer = setTimeout(() => {
+    layerMessageTimer = null;
+    const win = widgetWindow;
+    if (!win || win.isDestroyed()) return;
+    log('[widget] 收到桌面层级变化消息', { reason });
+    refreshDesktopLayer(win, reason);
+    layer?.resume();
+  }, 300);
 }
 
 export function createWidgetWindow(): BrowserWindow {
@@ -190,6 +208,7 @@ export function createWidgetWindow(): BrowserWindow {
 
   loadRenderer(win, 'widget');
   attachLayer(win, settings);
+  offMessages = watchDesktopLayerMessages(win, onDesktopLayerMessage);
 
   // 三重保险：透明窗口在部分 Windows 配置下不会触发 ready-to-show，
   // 只靠它会导致"进程在跑但界面永不出现"。
@@ -206,27 +225,25 @@ export function createWidgetWindow(): BrowserWindow {
   // Win+D 相关的窗口状态事件：即时恢复（不依赖渲染层 pointerup —— 原生拖动会吞事件）
   win.on('minimize', () => {
     log('[widget] 事件 minimize → 立即恢复');
-    if (!win.isDestroyed()) {
-      ensureWidgetVisible(win);
-      nudgeRepaint();
-    }
+    if (!win.isDestroyed()) ensureWidgetVisible(win);
   });
   win.on('restore', () => log('[widget] 事件 restore'));
   win.on('show', () => log('[widget] 事件 show'));
   win.on('hide', () => {
     log('[widget] 事件 hide → 立即恢复');
     if (win.isDestroyed()) return;
-    layer?.refresh();
     ensureWidgetVisible(win);
-    nudgeRepaint();
-    // Win+D 之后 DWM 合成可能滞后，补两拍抖动
-    setTimeout(nudgeRepaint, 250);
-    setTimeout(nudgeRepaint, 800);
   });
 
   win.on('moved', persistBounds);
   win.on('resized', persistBounds);
   win.on('closed', () => {
+    if (layerMessageTimer) {
+      clearTimeout(layerMessageTimer);
+      layerMessageTimer = null;
+    }
+    offMessages?.();
+    offMessages = null;
     layer?.detach();
     layer = null;
     widgetWindow = null;
@@ -303,8 +320,10 @@ export function beginDrag(): void {
   const win = widgetWindow;
   if (!win || win.isDestroyed() || !win.isVisible() || dragging || resizing) return;
   dragging = true;
-  // 关键：拖动期间不要让置底定时器反复 SetWindowPos，否则拖到一半会被压回底部
+  // 关键一：拖动期间停掉 owner 巡检，否则巡检里的重挂会和拖动抢 z-order
   layer?.pause();
+  // 关键二：摘掉静息样式（WS_EX_NOACTIVATE 会让系统跳过原生 move loop，拖不动）并临时浮起
+  suspendRestingStyle(win);
   log('[widget] 开始拖动', { mode: layer?.mode });
 
   const native = layer?.mode === 'desktop' ? beginNativeMove(win) : false;
@@ -331,6 +350,7 @@ export function beginResize(): void {
   if (!win || win.isDestroyed() || !win.isVisible() || resizing || dragging) return;
   resizing = true;
   layer?.pause();
+  suspendRestingStyle(win);
   log('[widget] 开始缩放');
 
   const startCursor = screen.getCursorScreenPoint();
@@ -353,29 +373,6 @@ export function beginResize(): void {
   });
 }
 
-/**
- * 强制 DWM 重新合成窗口。
- *
- * 背景：Win+D 会隐藏挂件，恢复后 `IsWindowVisible` 为真、z-order 也正确，
- * 但窗口在屏幕上不出现 —— 说明 DWM 的合成（Acrylic 材质那一层）失效了。
- * 这里用一次 1px 的 bounds 抖动 + 重绘请求把它逼回来。
- */
-function nudgeRepaint(): void {
-  const win = widgetWindow;
-  if (!win || win.isDestroyed()) return;
-  try {
-    win.webContents.invalidate();
-    const bounds = win.getBounds();
-    win.setBounds({ ...bounds, width: bounds.width + 1 });
-    setTimeout(() => {
-      if (!win.isDestroyed()) win.setBounds(bounds);
-    }, 40);
-    log('[widget] 已请求强制重绘');
-  } catch (error) {
-    log('[widget] 强制重绘失败', String(error));
-  }
-}
-
 export function endPointer(): void {
   const wasDragging = dragging || resizing;
 
@@ -383,6 +380,9 @@ export function endPointer(): void {
     dragging = false;
     resizing = false;
     stopPointerLoop();
+    // 先按前台决定静息落点，再恢复 owner 巡检（顺序反了会被巡检插一脚）
+    const win = widgetWindow;
+    if (win && !win.isDestroyed()) resumeRestingStyle(win, 'drag-end');
     layer?.resume();
     persistBounds();
   }
@@ -397,8 +397,7 @@ export function endPointer(): void {
   const win = widgetWindow;
   if (win && !win.isDestroyed()) {
     ensureWidgetVisible(win);
-    nudgeRepaint();
-    // 诊断：如果仍然看不见，这一行会打出"谁压在挂件上面"
+    // 诊断：如果仍然看不见，这一行会打出站位、owner 与"谁压在挂件上面"
     logZOrder(win);
   }
 

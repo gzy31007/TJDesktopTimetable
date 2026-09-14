@@ -1,217 +1,366 @@
 import type { BrowserWindow } from 'electron';
 import type { WidgetMode } from '../../shared/ipc.js';
 import { log } from '../logger.js';
+import {
+  HTCAPTION,
+  SW_HIDE,
+  WM_DISPLAYCHANGE,
+  WM_SETTINGCHANGE,
+  SW_RESTORE,
+  SW_SHOWNOACTIVATE,
+  WM_NCLBUTTONDOWN,
+  hwndOrNull,
+  isWin32Available,
+  isLeftButtonDown,
+  isWindow,
+  loadWin32,
+  toHwnd,
+  windowClassName,
+  windowTitle,
+  type Win32,
+} from './api.js';
+import {
+  attachToDesktopHost,
+  foregroundRoot,
+  forgetOwnerRecord,
+  getCurrentOwner,
+  invalidateDesktopHostCache,
+  isDesktopShellWindow,
+  resolveDesktopHost,
+  restoreOriginalOwner,
+} from './desktop-host.js';
+import { decideRestingDisposition } from './resting-policy.js';
+import {
+  applyToolWindowStyle,
+  clearTopMost,
+  holdTemporaryTopMost,
+  isNoActivate,
+  placeBehindWindow,
+  pushToBottom,
+  setNoActivate,
+} from './resting.js';
 
 /**
- * Win32 窗口层级控制（koffi 纯 FFI 调用 user32.dll）。
+ * 挂件窗口的层级编排（Win32，koffi 纯 FFI）。
  *
- * 两种模式：
- * - `desktop`（默认）：普通顶层窗口 + `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`，
- *   用 `SetWindowPos(HWND_BOTTOM)` 压到 z-order 最底；保险定时器每秒重压一次，
- *   并处理"显示桌面"导致窗口被隐藏的情况。
- * - `wallpaper`：WorkerW 注入（Progman → 0x052C → 找 SHELLDLL_DefView → 取其后空 WorkerW
- *   → `SetParent`），即贴在桌面图标之下的真壁纸层。失败自动回退 `desktop`。
+ * ## 设计要点（2026-09-14 重写）
  *
- * 说明：非 Windows 平台（开发期的 Linux/WSL）直接退化为 Electron 自身的窗口属性，
- * 保证 `pnpm build` / 单测不会被原生模块拖垮。
+ * 旧实现有五个互相干扰的机制同时在动 z-order：每秒无条件 `SetWindowPos(HWND_BOTTOM)`、
+ * `hide`/`minimize` 事件里的 `SW_RESTORE` + owner 重挂、`nudgeRepaint` 的 1px resize、
+ * 定期"修 Shell last active popup"（内部会抢一次前台）、以及"owner 丢了就重挂"。
+ * 结果是窗口永远在动，"Win+D 后看不见"这类问题无法收敛。
+ *
+ * 新实现的职责划分：
+ * - **静息态由 `resting.ts` 的落点策略决定**（三选一），不再一律置底；
+ * - **不再有每秒重压**。只保留一个 5 秒的 **owner 巡检**：owner 关系没丢就完全不动窗口，
+ *   丢了才重挂 —— 代价是一次 `GetWindowLongPtrW` 读，不产生任何 z-order 变化；
+ * - **可靠性来自事件而不是轮询**：Explorer 重启（`TaskbarCreated`）、
+ *   显示器/工作区变化（`WM_DISPLAYCHANGE` / `WM_SETTINGCHANGE`）由 `widget.ts` 订阅后
+ *   调用 `refreshDesktopLayer()`，作废宿主缓存并重新静息；
+ * - **交互期临时摘掉 `WS_EX_NOACTIVATE`**（否则系统跳过原生 move loop，窗口拖不动），
+ *   交互结束后戴回并重新静息。这一对必须成对出现，见 `suspendRestingStyle` /
+ *   `resumeRestingStyle`。
+ *
+ * 非 Windows 平台或 koffi 不可用时全部退化为空实现（`pnpm build` / 单测不受影响）。
  */
 
-type AnyFn = (...args: unknown[]) => unknown;
-
-interface KoffiLib {
-  func(convention: string, name: string, ret: string, args: unknown[]): AnyFn;
+export interface LayerOptions {
+  mode: WidgetMode;
+  /**
+   * 静息态 owner 巡检间隔（毫秒，0 = 关闭）。
+   *
+   * 注意语义已经变了：这是"owner 关系是否还在"的巡检，**不是** z-order 重压。
+   * owner 正常时不做任何窗口操作。
+   */
+  keepAtBottomIntervalMs?: number;
+  /** 是否把窗口挂到桌面图标层（Win+D 后仍可见）；默认 true。 */
+  desktopLayer?: boolean;
+  /** 模式降级回调（例如 wallpaper 不可用时）。 */
+  onFallback?: (reason: string) => void;
 }
 
-interface KoffiLike {
-  load(path: string): KoffiLib;
-  proto(convention: string, name: string, ret: string, args: unknown[]): unknown;
-  pointer(type: unknown): unknown;
-  register(fn: (...args: unknown[]) => unknown, type: unknown): unknown;
-  unregister(handle: unknown): void;
+export interface LayerHandle {
+  /** 实际生效的模式（可能与请求的不同）。 */
+  readonly mode: WidgetMode;
+  /** 暂停 owner 巡检（窗口被主动隐藏时调用）。 */
+  pause(): void;
+  /** 恢复巡检并立即重新静息一次。 */
+  resume(): void;
+  /** 立即重新静息一次（按当前前台窗口决定落点）。 */
+  refresh(): void;
+  /** 解除控制（退出前调用）。 */
+  detach(): void;
 }
 
-interface Win32 {
-  /** 原始 koffi 模块，回调注册要用。 */
-  koffi: KoffiLike;
-  /** EnumWindows 回调原型。 */
-  enumCbProto: unknown;
-  FindWindowW: AnyFn;
-  FindWindowExW: AnyFn;
-  SendMessageTimeoutW: AnyFn;
-  EnumWindows: AnyFn;
-  SetParent: AnyFn;
-  ShowWindow: AnyFn;
-  SetWindowLongPtrW: AnyFn;
-  GetWindowLongPtrW: AnyFn;
-  SetWindowPos: AnyFn;
-  IsIconic: AnyFn;
-  IsWindowVisible: AnyFn;
-  ReleaseCapture: AnyFn;
-  SendMessageW: AnyFn;
-  GetAsyncKeyState: AnyFn;
-  GetShellWindow: AnyFn;
-  GetForegroundWindow: AnyFn;
-  SetForegroundWindow: AnyFn;
-  GetLastActivePopup: AnyFn;
-  GetWindowThreadProcessId: AnyFn;
-  GetClassNameW: AnyFn;
-  GetWindowTextW: AnyFn;
-  WindowFromPoint: AnyFn;
-  GetAncestor: AnyFn;
-  GetWindow: AnyFn;
-}
-
-const GWL_EXSTYLE = -20;
-const WS_EX_TOOLWINDOW = 0x00000080;
-const WS_EX_NOACTIVATE = 0x08000000;
-const WS_EX_APPWINDOW = 0x00040000;
-
-const SW_SHOWNOACTIVATE = 4;
-const SW_RESTORE = 9;
-const SW_HIDE = 0;
-
-/** `SetWindowLongPtrW` 的索引：子窗口=父窗口；顶层窗口=Owner。 */
-const GWLP_HWNDPARENT = -8;
-
-/** `SetWindowPos` 的 hWndInsertAfter 常量。 */
-const HWND_BOTTOM = 1;
-
-const SWP_NOSIZE = 0x0001;
-const SWP_NOMOVE = 0x0002;
-const SWP_NOACTIVATE = 0x0010;
-const SWP_NOOWNERZORDER = 0x0200;
-const SWP_NOSENDCHANGING = 0x0400;
-const SWP_SHOWWINDOW = 0x0040;
-
-const WM_NCLBUTTONDOWN = 0x00a1;
-/** 命中测试码：标题栏（用于原生拖动）。 */
-const HTCAPTION = 2;
-const VK_LBUTTON = 0x01;
-
-let cached: Win32 | null | undefined;
-let loadFailed = false;
-
-function loadWin32(): Win32 | null {
-  if (cached !== undefined) return cached;
-  if (process.platform !== 'win32' || loadFailed) {
-    cached = null;
-    return null;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const koffi = require('koffi') as KoffiLike;
-    const user32 = koffi.load('user32.dll');
-    const EnumWindowsCb = koffi.proto('__stdcall', 'EnumWindowsCb', 'int32', ['void *', 'intptr_t']);
-    cached = {
-      koffi,
-      enumCbProto: EnumWindowsCb,
-      FindWindowW: user32.func('__stdcall', 'FindWindowW', 'void *', ['str16', 'str16']) as AnyFn,
-      FindWindowExW: user32.func('__stdcall', 'FindWindowExW', 'void *', ['void *', 'void *', 'str16', 'str16']) as AnyFn,
-      SendMessageTimeoutW: user32.func('__stdcall', 'SendMessageTimeoutW', 'intptr_t', [
-        'void *',
-        'uint32',
-        'uintptr_t',
-        'intptr_t',
-        'uint32',
-        'uint32',
-        'void *',
-      ]) as AnyFn,
-      EnumWindows: user32.func('__stdcall', 'EnumWindows', 'int32', [koffi.pointer(EnumWindowsCb), 'intptr_t']) as AnyFn,
-      SetParent: user32.func('__stdcall', 'SetParent', 'void *', ['void *', 'void *']) as AnyFn,
-      ShowWindow: user32.func('__stdcall', 'ShowWindow', 'int32', ['void *', 'int32']) as AnyFn,
-      SetWindowLongPtrW: user32.func('__stdcall', 'SetWindowLongPtrW', 'intptr_t', ['void *', 'int32', 'intptr_t']) as AnyFn,
-      GetWindowLongPtrW: user32.func('__stdcall', 'GetWindowLongPtrW', 'intptr_t', ['void *', 'int32']) as AnyFn,
-      SetWindowPos: user32.func('__stdcall', 'SetWindowPos', 'int32', [
-        'void *',
-        'void *',
-        'int32',
-        'int32',
-        'int32',
-        'int32',
-        'uint32',
-      ]) as AnyFn,
-      IsIconic: user32.func('__stdcall', 'IsIconic', 'int32', ['void *']) as AnyFn,
-      IsWindowVisible: user32.func('__stdcall', 'IsWindowVisible', 'int32', ['void *']) as AnyFn,
-      ReleaseCapture: user32.func('__stdcall', 'ReleaseCapture', 'int32', []) as AnyFn,
-      SendMessageW: user32.func('__stdcall', 'SendMessageW', 'intptr_t', [
-        'void *',
-        'uint32',
-        'uintptr_t',
-        'intptr_t',
-      ]) as AnyFn,
-      GetAsyncKeyState: user32.func('__stdcall', 'GetAsyncKeyState', 'int16', ['int32']) as AnyFn,
-      GetShellWindow: user32.func('__stdcall', 'GetShellWindow', 'void *', []) as AnyFn,
-      SetForegroundWindow: user32.func('__stdcall', 'SetForegroundWindow', 'int32', ['void *']) as AnyFn,
-      GetLastActivePopup: user32.func('__stdcall', 'GetLastActivePopup', 'void *', ['void *']) as AnyFn,
-      GetWindowThreadProcessId: user32.func('__stdcall', 'GetWindowThreadProcessId', 'uint32', [
-        'void *',
-        'void *',
-      ]) as AnyFn,
-      GetForegroundWindow: user32.func('__stdcall', 'GetForegroundWindow', 'void *', []) as AnyFn,
-      GetClassNameW: user32.func('__stdcall', 'GetClassNameW', 'int32', ['void *', 'void *', 'int32']) as AnyFn,
-      GetWindowTextW: user32.func('__stdcall', 'GetWindowTextW', 'int32', ['void *', 'void *', 'int32']) as AnyFn,
-      WindowFromPoint: user32.func('__stdcall', 'WindowFromPoint', 'void *', ['int64']) as AnyFn,
-      GetAncestor: user32.func('__stdcall', 'GetAncestor', 'void *', ['void *', 'uint32']) as AnyFn,
-      GetWindow: user32.func('__stdcall', 'GetWindow', 'void *', ['void *', 'uint32']) as AnyFn,
-    };
-  } catch (error) {
-    loadFailed = true;
-    cached = null;
-    log('[win32] koffi/user32 加载失败，退化为普通置底窗口：', error);
-  }
-  return cached;
-}
+/** 当前是否有挂件在桌面层静息（决定 `WS_EX_NOACTIVATE` 的归属）。 */
+let restingDesktopLayer = false;
+let currentHwnd: number | null = null;
 
 /**
- * 交给 Windows 自己拖动窗口（原生 move loop）。
- *
- * 为什么不用"轮询光标 + setPosition"：那种做法有三个硬伤——
- * 1. 松开鼠标必须靠渲染层收到 `mouseup`，指针一移出窗口就丢事件，拖动会"粘住"；
- * 2. 每 16ms 一次 `setPosition` 要等 DWM 合成，肉眼可见的滞后、橡皮筋感；
- * 3. 与置底定时器抢 z-order，拖动中会跳。
- *
- * `SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)` 让系统进入自己的模态拖动循环：
- * 跟手性 = 系统窗口拖动，且自动处理鼠标捕获、多屏、DPI 与松手结束。
- * 代价是该调用会阻塞到用户松手（主进程在拖动期间不处理其它消息，可接受）；
- * WorkerW 壁纸层模式下窗口是子窗口，原生拖动坐标会错乱，因此只在置底模式使用。
+ * 把窗口挂到桌面层级。
  */
-export function beginNativeMove(window: BrowserWindow): boolean {
+export function attachToDesktop(window: BrowserWindow, options: LayerOptions): LayerHandle {
+  window.setSkipTaskbar(true);
   const api = loadWin32();
-  if (!api) return false;
+  if (!api) {
+    return { mode: options.mode, pause() {}, resume() {}, refresh() {}, detach() {} };
+  }
+
   const hwnd = toHwnd(window);
-  try {
-    api.ReleaseCapture();
-    api.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
-    return true;
-  } catch (error) {
-    log('[win32] 原生拖动失败，回退自实现：', error);
-    return false;
+  currentHwnd = hwnd;
+  applyToolWindowStyle(api, hwnd);
+
+  let mode: WidgetMode = options.mode;
+  restingDesktopLayer = false;
+
+  if (mode === 'wallpaper') {
+    const workerW = findWorkerW(api);
+    if (workerW === null) {
+      mode = 'desktop';
+      options.onFallback?.('未找到 WorkerW（可能被其它壁纸软件占用），已回退为普通桌面层模式');
+    } else {
+      api.SetParent(hwnd, workerW);
+      api.ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+      restoreOriginalOwner(api, hwnd);
+      setNoActivate(api, hwnd, false);
+    }
   }
+
+  if (mode === 'desktop') {
+    restingDesktopLayer = options.desktopLayer !== false;
+    if (!restingDesktopLayer) {
+      // 用户显式关闭"固定到桌面层"：不挂 owner，纯置底窗口。
+      // 代价是 Win+D 会把它最小化，靠 hide/minimize 事件恢复（见 `ensureWidgetVisible`）。
+      restoreOriginalOwner(api, hwnd);
+      setNoActivate(api, hwnd, false);
+      applyToolWindowStyle(api, hwnd);
+      pushToBottom(api, hwnd);
+    } else {
+      applyRestingLayer(api, hwnd, 'initial');
+    }
+  }
+
+  const interval = options.keepAtBottomIntervalMs ?? 5000;
+  let timer: NodeJS.Timeout | null = null;
+  let ownerRelogged = false;
+
+  /**
+   * owner 巡检：**只在 owner 关系丢了的时候动窗口**。
+   *
+   * 之所以需要它：Explorer 重启、显示拓扑变化、以及其它桌面软件抢宿主之后，
+   * owner 可能被系统清掉，此时窗口就失去了"Win+D 后仍可见"的保护。
+   * 事件通道（TaskbarCreated / WM_DISPLAYCHANGE）负责主要修复，这里是低频兜底。
+   */
+  const patrol = (): void => {
+    if (!restingDesktopLayer || !isWindow(api, hwnd)) return;
+    const host = resolveDesktopHost();
+    if (host === null) return;
+    if (getCurrentOwner(api, hwnd) === host.hwnd) {
+      ownerRelogged = false;
+      return;
+    }
+    if (!ownerRelogged) {
+      ownerRelogged = true;
+      log('[win32] 桌面层 owner 丢失，重新挂载（同类不再重复记录）');
+    }
+    applyRestingLayer(api, hwnd, 'owner-patrol');
+  };
+
+  const start = (): void => {
+    if (mode !== 'desktop' || interval <= 0 || timer) return;
+    timer = setInterval(patrol, interval);
+  };
+  const stop = (): void => {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  start();
+
+  return {
+    get mode() {
+      return mode;
+    },
+    pause: stop,
+    resume() {
+      restoreRestingLayer(api, hwnd, 'resume');
+      start();
+    },
+    refresh() {
+      restoreRestingLayer(api, hwnd, 'refresh');
+    },
+    detach() {
+      stop();
+      restoreOriginalOwner(api, hwnd);
+      forgetOwnerRecord(hwnd);
+      currentHwnd = null;
+      // 注意：这里**不隐藏窗口**。detach 在"切换层级模式"时也会被调用
+      // （托盘 / 设置面板改了 mode 就重新 attach），旧实现在这里 `SW_HIDE`，
+      // 结果是切一次模式挂件就消失且没人再把它显示回来。
+      // 真正需要隐藏时走 `setWidgetVisible(false)`。
+    },
+  };
 }
 
-/** 左键当前是否按下（自实现拖动/缩放的兜底：即使丢了 pointerup 也能收尾）。 */
-export function isLeftButtonDown(): boolean {
-  const api = loadWin32();
-  if (!api) return false;
+/**
+ * 重新静息：按当前前台窗口决定落点。
+ *
+ * 三种落点见 `decideRestingDisposition`。这是**唯一**会改变挂件全局 z-order 的入口
+ * （除了交互期临时浮起）。
+ */
+export function restoreRestingLayer(
+  api: Win32,
+  hwnd: number,
+  reason: string,
+): void {
+  if (!isWindow(api, hwnd)) return;
+
+  const foreground = foregroundRoot(api);
+  const ownAppPid = currentProcessId(api, hwnd);
+  const disposition = decideRestingDisposition({
+    hasForeground: foreground !== null,
+    foregroundIsDesktopShell: isDesktopShellWindow(api, foreground),
+    foregroundIsSelf: foreground === hwnd,
+    foregroundIsOwnApp: foreground !== null && currentProcessId(api, foreground) === ownAppPid,
+  });
+
+  switch (disposition) {
+    case 'desktop-bottom':
+      // 注意：只有用户开着"固定到桌面层"时才挂 owner。关掉时必须保持无 owner，
+      // 否则会在这里把它偷偷变回桌面层窗口（历史 bug，A/B 对照实验因此作废过一次）。
+      if (restingDesktopLayer) applyRestingLayer(api, hwnd, reason);
+      else {
+        clearTopMost(api, hwnd);
+        pushToBottom(api, hwnd);
+      }
+      break;
+    case 'behind-foreground': {
+      // 保住 owner（Win+D 保护），但不要压到底：插到当前前台之后。
+      if (restingDesktopLayer) attachOwnerOnly(api, hwnd);
+      else clearTopMost(api, hwnd);
+      if (foreground !== null) placeBehindWindow(api, hwnd, foreground);
+      break;
+    }
+    case 'preserve-peer-order':
+      // 前台是我们自己：只确保 owner 与样式，不动全局层级。
+      if (restingDesktopLayer) attachOwnerOnly(api, hwnd);
+      else clearTopMost(api, hwnd);
+      break;
+  }
+
+  if (restingDesktopLayer) setNoActivate(api, hwnd, true);
+  log('[win32] 静息落点', {
+    reason,
+    disposition,
+    owner: getCurrentOwner(api, hwnd),
+  });
+}
+
+/**
+ * 把窗口放回桌面层：挂 owner + 置底 + 戴静息样式。
+ *
+ * 没有可用宿主时（Explorer 还没起来）**不挂 owner**，退化为纯置底并摘掉静息样式
+ * （保住可拖动性）；下一次层级操作（owner 巡检 / 事件通道）会再试挂载。
+ */
+function applyRestingLayer(api: Win32, hwnd: number, reason: string): void {
+  if (!isWindow(api, hwnd)) return;
+
+  const host = resolveDesktopHost();
+  if (host === null || !attachToDesktopHost(api, hwnd, host.hwnd)) {
+    log('[win32] 桌面宿主不可用，回退为无 owner 置底', { reason });
+    clearTopMost(api, hwnd);
+    pushToBottom(api, hwnd);
+    setNoActivate(api, hwnd, false);
+    return;
+  }
+
+  pushToBottom(api, hwnd);
+  setNoActivate(api, hwnd, true);
+}
+
+/** 只确保 owner 关系（不改变全局 z-order）。 */
+function attachOwnerOnly(api: Win32, hwnd: number): void {
+  const host = resolveDesktopHost();
+  if (host === null) return;
+  if (getCurrentOwner(api, hwnd) === host.hwnd) return;
+  attachToDesktopHost(api, hwnd, host.hwnd);
+}
+
+function currentProcessId(api: Win32, hwnd: number | null): number {
+  if (hwnd === null) return -1;
   try {
-    return (Number(api.GetAsyncKeyState(VK_LBUTTON)) & 0x8000) !== 0;
+    const buffer = Buffer.alloc(4);
+    api.GetWindowThreadProcessId(hwnd, buffer);
+    return buffer.readUInt32LE(0);
   } catch {
-    return false;
+    return -1;
   }
 }
 
 /**
- * 立即把挂件恢复到"桌面层上方 + 可见"。
+ * 交互期：摘掉静息样式并临时浮起。
  *
- * 渲染层在拖动/点击结束后调用 —— 这是最可靠的时机：Win32 侧此刻刚结束鼠标
- * 交互、owner 恢复，而 `keepAlive` 的下一拍可能还在摘除/恢复的中间态。
+ * 两件事必须一起做：`WS_EX_NOACTIVATE` 会让系统跳过原生 move loop（拖不动），
+ * 而贴桌面层的窗口本来就在所有普通窗口之下，用户拖它时看不到自己在拖什么。
  */
+export function suspendRestingStyle(window: BrowserWindow): void {
+  const api = loadWin32();
+  if (!api || window.isDestroyed()) return;
+  const hwnd = toHwnd(window);
+  if (restingDesktopLayer && isNoActivate(api, hwnd)) {
+    setNoActivate(api, hwnd, false);
+    log('[win32] 交互开始：已摘除静息样式');
+  }
+  holdTemporaryTopMost(api, hwnd);
+}
+
+/** 交互期结束：重新静息（戴回样式 + 按前台决定落点）。 */
+export function resumeRestingStyle(window: BrowserWindow, reason = 'pointer-end'): void {
+  const api = loadWin32();
+  if (!api || window.isDestroyed()) return;
+  const hwnd = toHwnd(window);
+  if (!restingDesktopLayer) {
+    // 用户关掉了桌面层：不挂 owner，只把临时浮起收回去（置底）。
+    clearTopMost(api, hwnd);
+    pushToBottom(api, hwnd);
+    return;
+  }
+  restoreRestingLayer(api, hwnd, reason);
+}
+
 /**
- * 诊断：打印挂件在顶层 z-order 里的站位，以及前两个压着它的窗口。
+ * 立即把挂件恢复到"可见 + 落在正确层级"。
  *
- * `恢复后看不见` 说明窗口可见、owner 正常，但被别的窗口盖住了 —— 这个方法
- * 直接把"谁盖着它"打出来，避免继续盲猜。
+ * 调用时机：窗口被系统隐藏/最小化之后（Win+D、Explorer 重启），以及交互结束。
+ * 与旧实现的区别：这里不再无条件 `SW_RESTORE` + owner 重挂 + 压底，
+ * 而是先修可见性，再交给落点策略决定位置。
  */
+export function ensureWidgetVisible(window: BrowserWindow): void {
+  const api = loadWin32();
+  if (!api || window.isDestroyed()) return;
+  const hwnd = toHwnd(window);
+  if (!api.IsWindowVisible(hwnd)) api.ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+  if (api.IsIconic(hwnd)) api.ShowWindow(hwnd, SW_RESTORE);
+  restoreRestingLayer(api, hwnd, 'ensure-visible');
+}
+
+/**
+ * 显示器 / 工作区 / Explorer 变化之后重建桌面层级。
+ *
+ * 宿主句柄（`SHELLDLL_DefView`）在这些场景下可能已经被 Explorer 换掉，
+ * 所以必须先作废缓存再重新静息。
+ */
+export function refreshDesktopLayer(window: BrowserWindow, reason: string): void {
+  const api = loadWin32();
+  if (!api || window.isDestroyed()) return;
+  invalidateDesktopHostCache();
+  log('[win32] 重建桌面层级', { reason });
+  restoreRestingLayer(api, toHwnd(window), reason);
+}
+
+/** 诊断：打印挂件在顶层 z-order 里的站位、owner 与压着它的窗口。 */
 export function logZOrder(window: BrowserWindow): void {
   try {
     const api = loadWin32();
@@ -221,14 +370,17 @@ export function logZOrder(window: BrowserWindow): void {
     const index = top.findIndex((item) => item.hwnd === hwnd);
     const above = index > 0 ? top.slice(0, index).slice(-2) : [];
     const [x = 0, y = 0] = window.getPosition();
-    const progman = hwndOrNull(api.GetShellWindow());
-    const progmanIndex = progman === null ? -1 : top.findIndex((item) => item.hwnd === progman);
+    const host = top.findIndex((item) => item.title === '' && item.cls === 'Progman');
+    const owner = getCurrentOwner(api, hwnd);
+    const ownerIndex = owner === null ? -1 : top.findIndex((item) => item.hwnd === owner);
     log('[win32] z-order', {
       position: index < 0 ? '未在顶层窗口中找到' : `第 ${index + 1}/${top.length}`,
       xy: `${x},${y}`,
-      // 挂件必须在 Progman 之后（z-order 更低）：progmanIndex < index 表示被桌面盖住 = 异常
-      progmanIndex: progmanIndex < 0 ? '未找到' : progmanIndex + 1,
-      coveredByShell: progmanIndex >= 0 && index >= 0 && progmanIndex < index,
+      owner,
+      ownerIndex: ownerIndex < 0 ? '未找到' : ownerIndex + 1,
+      // 挂件必须排在 owner 之前（z-order 更高）：ownerIndex < index 表示被宿主/桌面盖住 = 异常
+      coveredByOwner: ownerIndex >= 0 && index >= 0 && ownerIndex < index,
+      progmanIndex: host < 0 ? '未找到' : host + 1,
       above: above.map((item) => `${item.cls}${item.title ? `(${item.title})` : ''}`),
       below: index >= 0 ? top.slice(index + 1, index + 3).map((item) => item.cls) : [],
     });
@@ -237,41 +389,13 @@ export function logZOrder(window: BrowserWindow): void {
   }
 }
 
-export function ensureWidgetVisible(window: BrowserWindow): void {
-  const api = loadWin32();
-  if (!api || window.isDestroyed()) return;
-  const hwnd = toHwnd(window);
-  if (!api.IsWindowVisible(hwnd)) api.ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-  if (api.IsIconic(hwnd)) api.ShowWindow(hwnd, SW_RESTORE);
-  // 注意：不要拿 owner 当 insertAfter（那会把窗口插到 owner 下面、被桌面盖住）
-  api.SetWindowPos(
-    hwnd,
-    HWND_BOTTOM,
-    0,
-    0,
-    0,
-    0,
-    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
-  );
-  const progman = hwndOrNull(api.GetShellWindow());
-  log('[win32] ensureWidgetVisible', { owner: hwndOrNull(api.GetWindowLongPtrW(hwnd, GWLP_HWNDPARENT)), progman });
-}
-
 /** 遍历顶层窗口，返回按 z-order 从上到下的列表（前 N 个）。 */
 function topLevelWindows(api: Win32, limit = 20): { hwnd: number; cls: string; title: string }[] {
   const ranked: { hwnd: number; cls: string; title: string }[] = [];
   const cb = api.koffi.register((hwnd: unknown) => {
     const value = hwndOrNull(hwnd);
     if (value !== null) {
-      const clsBuf = Buffer.alloc(128);
-      api.GetClassNameW(value, clsBuf, 64);
-      const titleBuf = Buffer.alloc(256);
-      api.GetWindowTextW(value, titleBuf, 128);
-      ranked.push({
-        hwnd: value,
-        cls: clsBuf.toString('utf16le').split('\0')[0] ?? '',
-        title: titleBuf.toString('utf16le').split('\0')[0] ?? '',
-      });
+      ranked.push({ hwnd: value, cls: windowClassName(api, value), title: windowTitle(api, value) });
     }
     return ranked.length < limit ? 1 : 0;
   }, api.koffi.pointer(api.enumCbProto));
@@ -286,92 +410,38 @@ function topLevelWindows(api: Win32, limit = 20): { hwnd: number; cls: string; t
 }
 
 /**
- * 修复 Shell 的 "last active popup" 指针（移植自 WitchDrawer 的 `RepairShellLastActivePopup`）。
+ * 交给 Windows 自己拖动窗口（原生 move loop）。
  *
- * 桌面挂件必须是 Progman 的 owned 窗口才能在 Win+D 后存活；但一旦**点击挂件或点击桌面**，
- * Explorer 会把挂件登记成 Progman 的 last active popup —— 此后 Win+D 不再是"显示桌面"，
- * 而变成"激活那个挂件"，表现为挂件被藏起来/层级错乱（NVIDIA 的 overlay 也会被同一机制
- * 连带影响，说明这是系统对桌面级叠加层的统一行为）。
+ * 为什么不用"轮询光标 + setPosition"：松开鼠标要靠渲染层收到 `mouseup`，
+ * 指针一移出窗口就丢事件，拖动会"粘住"；而且每 16ms 一次 `setPosition`
+ * 肉眼可见滞后、与层级定时器抢 z-order。
  *
- * 修法：把该指针改回 Progman —— 先 `SetForegroundWindow(Progman)`，随后恢复原前台窗口，
- * 使这个"激活"对用户不可见。
+ * 注意：调用前必须先 `suspendRestingStyle()` 摘掉 `WS_EX_NOACTIVATE`，
+ * 否则系统会跳过原生 move loop（窗口拖不动）。
  */
-function repairShellLastActivePopup(api: Win32): boolean {
+export function beginNativeMove(window: BrowserWindow): boolean {
+  const api = loadWin32();
+  if (!api) return false;
+  const hwnd = toHwnd(window);
   try {
-    const shell = hwndOrNull(api.GetShellWindow());
-    if (shell === null) return false;
-    const popup = hwndOrNull(api.GetLastActivePopup(shell));
-    if (popup === null || popup === shell) return false;
-
-    const pidBuffer = Buffer.alloc(4);
-    api.GetWindowThreadProcessId(popup, pidBuffer);
-    if (pidBuffer.readUInt32LE(0) !== process.pid) return false;
-
-    const previous = hwndOrNull(api.GetForegroundWindow());
-    if (api.SetForegroundWindow(shell) === 0) return false;
-    if (previous !== null && previous !== shell) api.SetForegroundWindow(previous);
+    api.ReleaseCapture();
+    api.SendMessageW(hwnd, 0x00a1 /* WM_NCLBUTTONDOWN */, 2 /* HTCAPTION */, 0);
     return true;
   } catch (error) {
-    log('[win32] 修复 last active popup 异常', String(error));
+    log('[win32] 原生拖动失败，回退自实现：', error);
     return false;
   }
 }
 
-export function isWin32Available(): boolean {
-  return loadWin32() !== null;
-}
-
-/** Electron 的原生窗口句柄 → number（x64 上取低 8 字节；HWND 实际值远小于 2^53）。 */
-function toHwnd(window: BrowserWindow): number {
-  const buffer = window.getNativeWindowHandle();
-  return buffer.length >= 8 ? Number(buffer.readBigUInt64LE(0)) : buffer.readUInt32LE(0);
-}
-
-function hwndOrNull(value: unknown): number | null {
-  if (typeof value === 'bigint') return value === 0n ? null : Number(value);
-  if (typeof value === 'number') return value === 0 ? null : value;
-  return null;
-}
-
 /**
- * 扩展样式。
+ * 找到位于桌面图标之下的空 WorkerW 窗口（"壁纸层"模式）。
  *
- * 注意**不加** `WS_EX_NOACTIVATE`：不可激活的窗口会被系统跳过原生 move loop，
- * 表现为"完全拖不动"。窗口"不打扰"的职责改由"贴桌面层 + 置底"承担
- * （参考 DeskBox：只在 DesktopPinned 模式才加 NOACTIVATE）。
+ * ⚠️ 本函数会给 Progman 发 `0x052C` **催生** WorkerW。这条消息只应在本模式使用：
+ * 登录阶段催生 WorkerW 会和 Explorer 恢复桌面图标布局抢时序，把用户图标顺序搞乱。
+ * 默认的 `desktop` 模式**绝不**走这条路。
  */
-function applyExStyle(api: Win32, hwnd: number, noActivate = false): void {
-  const current = Number(api.GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
-  let next = (current | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW;
-  next = noActivate ? next | WS_EX_NOACTIVATE : next & ~WS_EX_NOACTIVATE;
-  api.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
-}
-
-/**
- * 把窗口压到 z-order 底部。
- *
- * ⚠️ `SetWindowPos` 的 `hWndInsertAfter` 语义是"插到该窗口**之后**（z-order 更低）"，
- * 不是"上方"。把 owner 传进来会让挂件跑到 owner **下面**，反而被桌面盖住（实测）。
- *
- * owned 窗口本来就有"恒在 owner 之上"的保证，所以这里就该用 `HWND_BOTTOM`：
- * 压到所有普通窗口之下，同时仍在 owner（Progman）之上。
- */
-export function pushToBottom(api: Win32, hwnd: number, insertAfter: number = HWND_BOTTOM): void {
-  api.SetWindowPos(
-    hwnd,
-    insertAfter,
-    0,
-    0,
-    0,
-    0,
-    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING,
-  );
-}
-
-/** 找到位于桌面图标之下的空 WorkerW 窗口。 */
 function findWorkerW(api: Win32): number | null {
   const { koffi, enumCbProto } = api;
-
   const progman = hwndOrNull(api.FindWindowW('Progman', null));
   if (progman === null) return null;
 
@@ -397,314 +467,59 @@ function findWorkerW(api: Win32): number | null {
   return hwndOrNull(api.FindWindowExW(null, shellViewParent, 'WorkerW', null));
 }
 
-/** 桌面图标视图（`SHELLDLL_DefView`）本身 —— 它是桌面图标的容器窗口。 */
-function findDesktopIconView(api: Win32): number | null {
-  const { koffi, enumCbProto } = api;
-  let found: number | null = null;
-  const callback = koffi.register((hwnd: unknown) => {
-    const value = hwndOrNull(hwnd);
-    if (value === null) return 1;
-    const defView = hwndOrNull(api.FindWindowExW(value, null, 'SHELLDLL_DefView', null));
-    if (defView !== null) {
-      found = defView;
-      return 0;
-    }
-    return 1;
-  }, koffi.pointer(enumCbProto));
-
-  api.EnumWindows(callback, 0);
-  koffi.unregister(callback);
-  return found;
+/** 当前是否处于桌面层静息（渲染层/设置面板可用来解释行为）。 */
+export function isRestingOnDesktopLayer(): boolean {
+  return restingDesktopLayer;
 }
+
+export { isLeftButtonDown, isWin32Available };
 
 /**
- * 把顶层窗口的 **Owner** 设为桌面图标层（不是 `SetParent` 成子窗口）。
+ * 订阅桌面层级相关的窗口消息（事件驱动，替代轮询兜底）。
  *
- * 这是"贴桌面"最省事也最稳的一条路（参考 DeskBox 的 DesktopPinned）：
- * - owned 窗口永远显示在 owner 之上 → 浮在桌面图标之上，不被图标遮挡；
- * - owner 是桌面壳，Win+D / "显示桌面" 不会把它最小化 → 桌面常驻；
- * - 窗口仍是顶层窗口，拖动、鼠标交互、坐标都正常（子窗口方案做不到）。
+ * 三条通道对应三类会把宿主关系打坏的系统事件：
+ * - `WM_DISPLAYCHANGE`：分辨率/显示器拓扑变化，Explorer 可能重建桌面窗口；
+ * - `WM_SETTINGCHANGE`：工作区（任务栏）变化等，触发频率高，调用方需自行去抖；
+ * - `TaskbarCreated`（注册消息）：**Explorer 重启**的信号。此时旧的
+ *   `SHELLDLL_DefView` 句柄已失效，必须作废宿主缓存后重新静息。
+ *
+ * @returns 取消订阅函数。
  */
-/**
- * 解析桌面 owner。
- *
- * 优先 **Progman（GetShellWindow）** —— 与 WitchDrawer 的
- * `DesktopShellHost.ResolveOwner` 一致：Win11 上 Progman 本身就是桌面宿主，
- * 顶层窗口做 owner 时 owned 窗口的 z-order 语义稳定（Win+D 不会把它带走）。
- *
- * 之前我们用的是 `SHELLDLL_DefView`（Progman 的**子窗口**）当 owner，
- * 在 Win+D 路径下 z-order 行为不同，实测会"恢复了却看不见"。
- */
-function resolveDesktopOwner(api: Win32): { owner: number | null; source: string } {
-  const shell = hwndOrNull(api.GetShellWindow());
-  if (shell !== null) {
-    const defView = hwndOrNull(api.FindWindowExW(shell, null, 'SHELLDLL_DefView', null));
-    return { owner: shell, source: defView !== null ? 'Progman(含 DefView)' : 'Progman' };
-  }
-  const defView = findDesktopIconView(api);
-  return { owner: defView, source: defView !== null ? 'DefView(回退)' : '无' };
-}
-
-export function attachToDesktopIconLayer(window: BrowserWindow): boolean {
+export function watchDesktopLayerMessages(
+  window: BrowserWindow,
+  onChange: (reason: string) => void,
+): () => void {
+  if (process.platform !== 'win32' || window.isDestroyed()) return () => {};
   const api = loadWin32();
-  if (!api) return false;
-  const hwnd = toHwnd(window);
-  const { owner, source } = resolveDesktopOwner(api);
-  if (owner === null) {
-    log('[win32] 未找到可用的桌面宿主（Progman / DefView）');
-    return false;
-  }
-  api.SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner);
-  const actual = hwndOrNull(api.GetWindowLongPtrW(hwnd, GWLP_HWNDPARENT));
-  if (actual !== owner) {
-    log('[win32] 桌面层 Owner 设置失败', { expected: owner, actual, source });
-    return false;
-  }
-  pushToBottom(api, hwnd, owner);
-  log('[win32] 已挂到桌面宿主', { owner, source });
-  return true;
-}
+  if (!api) return () => {};
 
-export function detachFromDesktopIconLayer(window: BrowserWindow): void {
-  const api = loadWin32();
-  if (!api) return;
-  api.SetWindowLongPtrW(toHwnd(window), GWLP_HWNDPARENT, 0);
-}
-
-export interface LayerOptions {
-  mode: WidgetMode;
-  /** 置底保险定时器间隔（毫秒），0 表示关闭。 */
-  keepAtBottomIntervalMs?: number;
-  /** 是否把窗口挂到桌面图标层（Win+D 后仍可见）；默认 true。 */
-  desktopLayer?: boolean;
-  /** 模式降级回调（例如 wallpaper 不可用时）。 */
-  onFallback?: (reason: string) => void;
-}
-
-export interface LayerHandle {
-  /** 实际生效的模式（可能与请求的不同）。 */
-  readonly mode: WidgetMode;
-  /** 暂停保险定时器（窗口被主动隐藏时调用）。 */
-  pause(): void;
-  /** 恢复保险定时器并立即重压到底部。 */
-  resume(): void;
-  /** 立即重压到底部。 */
-  refresh(): void;
-  /** 解除控制（退出前调用）。 */
-  detach(): void;
-}
-
-/**
- * 把窗口挂到桌面层级。
- *
- * 非 Windows 平台或 koffi 不可用时返回空实现（仅设置 Electron 自身属性）。
- */
-export function attachToDesktop(window: BrowserWindow, options: LayerOptions): LayerHandle {
-  window.setSkipTaskbar(true);
-  const api = loadWin32();
-  if (!api) {
-    return { mode: options.mode, pause() {}, resume() {}, refresh() {}, detach() {} };
-  }
-
-  const hwnd = toHwnd(window);
-  applyExStyle(api, hwnd, false);
-
-  let mode: WidgetMode = options.mode;
-  let desktopOwned = false;
-
-  if (mode === 'wallpaper') {
-    const workerW = findWorkerW(api);
-    if (workerW === null) {
-      mode = 'desktop';
-      options.onFallback?.('未找到 WorkerW（可能被其它壁纸软件占用），已回退为普通置底模式');
-    } else {
-      api.SetParent(hwnd, workerW);
-      api.ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+  const hooked: number[] = [];
+  const hook = (message: number, reason: string): void => {
+    if (message <= 0 || window.isDestroyed()) return;
+    try {
+      if (window.isWindowMessageHooked(message)) return;
+      window.hookWindowMessage(message, () => onChange(reason));
+      hooked.push(message);
+    } catch (error) {
+      log('[win32] 订阅窗口消息失败', { message, reason, error: String(error) });
     }
-  } else if (options.desktopLayer !== false) {
-    desktopOwned = attachToDesktopIconLayer(window);
-    if (!desktopOwned) {
-      options.onFallback?.('未找到桌面图标层，已回退为普通置底模式（Win+D 后会被隐藏）');
-    }
-  }
-
-  const interval = options.keepAtBottomIntervalMs ?? 1000;
-  let timer: NodeJS.Timeout | null = null;
-
-  /**
-   * owner 关系是否还在期望的桌面宿主上（Win+D 之后 Explorer/DWM 会清掉它）。
-   *
-   * 必须用 `resolveDesktopOwner` 的期望值比较 —— 早期版本硬比较 DefView，
-   * 而 owner 已改为 Progman，导致两者永不相等、每秒误判"丢失"并重挂。
-   */
-  const ownerLost = (): boolean => {
-    if (!desktopOwned) return false;
-    const { owner: expected } = resolveDesktopOwner(api);
-    if (expected === null) return false;
-    const actual = hwndOrNull(api.GetWindowLongPtrW(hwnd, GWLP_HWNDPARENT));
-    return actual !== expected;
   };
 
-  let lastState = '';
-  /** 当前 owner（桌面图标层）句柄；没有则返回 null。 */
-  const currentOwner = (): number | null => hwndOrNull(api.GetWindowLongPtrW(hwnd, GWLP_HWNDPARENT));
+  hook(WM_DISPLAYCHANGE, 'display-change');
+  hook(WM_SETTINGCHANGE, 'setting-change');
+  try {
+    hook(Number(api.RegisterWindowMessageW('TaskbarCreated')), 'explorer-restart');
+  } catch (error) {
+    log('[win32] 注册 TaskbarCreated 消息失败', String(error));
+  }
 
-  /**
-   * 桌面（Progman/WorkerW）是否是前台窗口。
-   *
-   * 对应 WitchDrawer 的 `ShouldSendToBottom(isDesktopForeground)`：只有桌面在前台时
-   * 才把挂件压到底。否则"显示桌面"之后的无条件置底会把挂件压到桌面层之下。
-   */
-  const isDesktopForeground = (): boolean => {
-    const foreground = hwndOrNull(api.GetForegroundWindow());
-    if (foreground === null) return true; // 没有前台窗口 = 桌面在前
-    const shell = hwndOrNull(api.GetShellWindow());
-    if (shell !== null && foreground === shell) return true;
-    const buffer = Buffer.alloc(64);
-    api.GetClassNameW(foreground, buffer, 32);
-    const name = buffer.toString('utf16le').replace(/\0.*$/, '');
-    return name === 'Progman' || name === 'WorkerW';
-  };
-
-  /**
-   * 鼠标按下期间临时摘掉 Shell owner（WitchDrawer 的
-   * `SuspendDesktopOwnershipForMouseInput`）。
-   *
-   * 不摘的话，Explorer 会把被点到的挂件记成 Progman 的 "last active popup"，
-   * 之后 Win+D 就会变成"激活挂件"而不是显示桌面 → 表现成挂件消失/异常。
-   */
-  let ownershipSuspended = false;
-  let lastButtonDown = false;
-  let ownerRelogged = false;
-
-  let zorderTicks = 0;
-  const keepAlive = (): void => {
-    // 每 3 拍打一次 z-order 诊断（主进程侧，不依赖渲染层事件）
-    zorderTicks += 1;
-    if (zorderTicks % 3 === 0) logZOrder(window);
-
-    // 埋点：只有状态变化时才写日志，用于定位 Win+D 后"有时恢复有时不恢复"
-    const snapshot = `${api.IsWindowVisible(hwnd) ? 'vis' : 'hid'}/${api.IsIconic(hwnd) ? 'iconic' : 'normal'}/${ownerLost() ? 'no-owner' : 'owner'}`;
-    if (snapshot !== lastState) {
-      lastState = snapshot;
-      log('[win32] 窗口状态变化', { state: snapshot });
-    }
-
-    /*
-     * 修 shell 的 last active popup，但要克制：这个函数内部会 SetForegroundWindow(Progman)
-     * 再切回，等于"抢一次前台"。之前每 2 秒无条件跑，实测日志被刷屏、并会干扰前台程序
-     * （用户观察到"别的程序有焦点时也会消失"）。现在只在**桌面是前台**且低频（每 8 拍）时修。
-     */
-    if (zorderTicks % 8 === 0 && isDesktopForeground() && repairShellLastActivePopup(api)) {
-      log('[win32] 已修复 shell last active popup 指针');
-    }
-
-    // 鼠标交互：按下时摘 owner，松开后挂回（owner 由 keepAlive 轮询检测，不依赖渲染层事件）
-    const buttonDown = isLeftButtonDown();
-    if (buttonDown && !lastButtonDown && desktopOwned && !ownershipSuspended) {
-      if (api.SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, 0) !== 0) {
-        ownershipSuspended = true;
-        log('[win32] 鼠标交互：已临时摘除桌面层 owner');
+  return () => {
+    for (const message of hooked) {
+      try {
+        if (!window.isDestroyed()) window.unhookWindowMessage(message);
+      } catch {
+        /* 窗口已销毁，忽略 */
       }
-    } else if (!buttonDown && lastButtonDown && ownershipSuspended) {
-      ownershipSuspended = false;
-      attachToDesktopIconLayer(window);
-      log('[win32] 鼠标交互结束：已恢复桌面层 owner');
     }
-    lastButtonDown = buttonDown;
-
-    let recovered = false;
-    if (api.IsIconic(hwnd)) {
-      // 被"显示桌面"最小化：必须用 SW_RESTORE，SW_SHOWNOACTIVATE 不会恢复最小化窗口
-      api.ShowWindow(hwnd, SW_RESTORE);
-      recovered = true;
-      log('[win32] 显示桌面后恢复：SW_RESTORE');
-    } else if (!api.IsWindowVisible(hwnd)) {
-      api.ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-      recovered = true;
-      log('[win32] 窗口被隐藏，已重新显示');
-    }
-
-    // owner 丢了 → 重新挂回桌面层。注意：鼠标交互期间是我们主动摘除的，
-    // 那种情况不要在这里抢挂回去（否则和"鼠标交互结束恢复"互相打架，
-    // 实测会出现 owner 反复丢失/重挂、恢复时读到 null 的问题）。
-    if (ownerLost() && !ownershipSuspended) {
-      if (!ownerRelogged) {
-        ownerRelogged = true;
-        log('[win32] 桌面层 owner 丢失，重新挂载（后续同类不再重复记录）');
-      }
-      attachToDesktopIconLayer(window);
-      return;
-    }
-    ownerRelogged = false;
-
-    if (recovered) {
-      /*
-       * 先确保 owner 关系还在（owner 保证"在桌面之上"），再压到 HWND_BOTTOM。
-       *
-       * `desktopOwned` 这个条件不能省：关闭「固定到桌面层」（`desktopLayer: false`）时
-       * 我们**故意**不挂 owner，此处若无条件重挂，会在第一次 Win+D 之后就偷偷把窗口变回
-       * 桌面层窗口 —— 设置项静默失效，A/B 对照实验直接作废（2026-09-14 实测：22:40:06
-       * 日志打出 desktopLayer:false，22:40:07 恢复路径就打出了"已挂到桌面宿主"）。
-       */
-      if (desktopOwned && currentOwner() === null) {
-        log('[win32] 恢复时 owner 为空，先重新挂载');
-        attachToDesktopIconLayer(window);
-      }
-      pushToBottom(api, hwnd);
-      // 再来一次：ShowWindow 之后紧接着的 SetWindowPos 偶发被系统丢弃
-      api.SetWindowPos(
-        hwnd,
-        HWND_BOTTOM,
-        0,
-        0,
-        0,
-        0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
-      );
-      log('[win32] 恢复完成（owner 保持 + 压到底部）', { owner: currentOwner(), desktopOwned });
-      logZOrder(window);
-      return;
-    }
-
-    // 仅在桌面是前台时置底：否则（例如"显示桌面"刚结束）会把挂件压到桌面层之下
-    if (isDesktopForeground()) {
-      pushToBottom(api, hwnd);
-    }
-  };
-
-  const start = (): void => {
-    if (mode !== 'desktop' || interval <= 0 || timer) return;
-    timer = setInterval(keepAlive, interval);
-  };
-  const stop = (): void => {
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-  };
-
-  if (mode === 'desktop') {
-    pushToBottom(api, hwnd);
-    start();
-  }
-
-  return {
-    get mode() {
-      return mode;
-    },
-    pause: stop,
-    resume() {
-      pushToBottom(api, hwnd);
-      start();
-    },
-    refresh() {
-      pushToBottom(api, hwnd);
-    },
-    detach() {
-      stop();
-      if (desktopOwned) detachFromDesktopIconLayer(window);
-      api.ShowWindow(hwnd, SW_HIDE);
-    },
   };
 }

@@ -9,8 +9,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "pnpm -F @tjt/core test",
-    "test:watch": "pnpm -F @tjt/core test:watch",
+    "test": "pnpm -r test",
+    "test:watch": "pnpm -r test:watch",
     "typecheck": "pnpm -r typecheck",
     "dev": "pnpm -F @tjt/desktop dev",
     "dev:web": "pnpm -F @tjt/desktop dev:web",
