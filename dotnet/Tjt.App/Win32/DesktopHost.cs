@@ -119,7 +119,8 @@ internal static class DesktopHost
     public static void MarkToolWindow(nint hwnd)
     {
         var style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.Constants.GwlExStyle);
-        var updated = style | NativeMethods.Constants.WsExToolWindow;
+        // nint | long 的运算结果是 long，而 SetWindowLongPtr 第 3 参是 nint —— 必须显式转回来
+        var updated = (nint)(style | NativeMethods.Constants.WsExToolWindow);
         if (updated != style)
         {
             NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.Constants.GwlExStyle, updated);
