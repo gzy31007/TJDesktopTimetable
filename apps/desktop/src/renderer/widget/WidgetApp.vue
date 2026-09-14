@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="widget-shell fluent-root glass--edge"
+    class="widget-shell fluent-root"
     :class="{ 'is-unfocused': unfocused }"
     :data-theme="theme"
     :style="{ '--shell-alpha': String(settings.opacity) }"

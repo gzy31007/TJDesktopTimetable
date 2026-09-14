@@ -40,42 +40,21 @@ body {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  /* 圆角由 DWM 提供（非透明窗口），不自绘，避免双圆角 */
+  /* 圆角由 DWM 提供（非透明窗口），不自绘；整体保持平面，不加高光/渐变/自绘阴影 */
   border: 1px solid var(--stroke-strong);
-  /* 亚克力质感：描边 + 顶部高光由 inset 阴影承担，避免"外框套内框"的 Win7 Aero 观感 */
   background-color: var(--glass-shell);
   transition: background-color 200ms var(--ease);
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0) 38%);
   color: var(--text);
-  box-shadow: var(--shadow-shell), inset 0 1px 0 0 var(--stroke-top);
   overflow: hidden;
   isolation: isolate;
   /* 不透明度由设置驱动：玻璃底板越不透越"实"，文字与色块不受影响 */
   opacity: var(--shell-alpha, 1);
 }
 
-/* Win11 亚克力的细腻颗粒（SVG 噪声，比纯色更像毛玻璃；< 1% 体积开销） */
-.widget-shell::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0.5;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.24'/%3E%3C/svg%3E");
-  background-size: 120px 120px;
-}
-
 /* 内容层压在噪声之上 */
 .widget-bar,
 .widget-content {
   z-index: 2;
-}
-
-[data-theme='dark'] .widget-shell {
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0) 40%);
 }
 
 /* 面板级半透明度：让网格与色块跟着一起变透，而不是整窗发灰 */
@@ -97,8 +76,8 @@ body {
   user-select: none;
   flex: 0 0 auto;
   touch-action: none;
+  /* 只留一条功能性分隔线，不做任何提亮/渐变（去掉立体感） */
   border-bottom: 1px solid var(--divider);
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent);
   /* 交给 Chromium 原生拖动（WM_NCHITTEST → HTCAPTION），跟手且不丢鼠标事件 */
   -webkit-app-region: drag;
 }
