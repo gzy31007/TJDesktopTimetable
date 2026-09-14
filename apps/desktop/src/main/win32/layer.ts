@@ -639,8 +639,15 @@ export function attachToDesktop(window: BrowserWindow, options: LayerOptions): L
     ownerRelogged = false;
 
     if (recovered) {
-      // 先确保 owner 关系还在（owner 保证"在桌面之上"），再压到 HWND_BOTTOM
-      if (currentOwner() === null) {
+      /*
+       * 先确保 owner 关系还在（owner 保证"在桌面之上"），再压到 HWND_BOTTOM。
+       *
+       * `desktopOwned` 这个条件不能省：关闭「固定到桌面层」（`desktopLayer: false`）时
+       * 我们**故意**不挂 owner，此处若无条件重挂，会在第一次 Win+D 之后就偷偷把窗口变回
+       * 桌面层窗口 —— 设置项静默失效，A/B 对照实验直接作废（2026-09-14 实测：22:40:06
+       * 日志打出 desktopLayer:false，22:40:07 恢复路径就打出了"已挂到桌面宿主"）。
+       */
+      if (desktopOwned && currentOwner() === null) {
         log('[win32] 恢复时 owner 为空，先重新挂载');
         attachToDesktopIconLayer(window);
       }
@@ -655,7 +662,7 @@ export function attachToDesktop(window: BrowserWindow, options: LayerOptions): L
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
       );
-      log('[win32] 恢复完成（owner 保持 + 压到底部）', { owner: currentOwner() });
+      log('[win32] 恢复完成（owner 保持 + 压到底部）', { owner: currentOwner(), desktopOwned });
       logZOrder(window);
       return;
     }
