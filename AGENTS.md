@@ -31,7 +31,9 @@ docs/                 架构、数据模型、适配器指南
 - 测试：core 的每个公开函数都要有单测；同济个人课表适配器由 `test/e2e-timetable.spec.ts` 端到端覆盖（导入 → 布局 → 时间 → 单双周过滤）。
 - 视觉规范：Win11 Fluent / 亚克力玻璃。设计令牌与基础控件在 `apps/desktop/src/renderer/shared/fluent.css`（色彩分级、圆角、阴影、明暗主题、`.f-btn`/`.f-pill`/`.f-switch`/`.f-card`），课表皮肤在 `shared/board.css`，挂件外壳在 `widget/widget.css`，管理窗口在 `manage/`。改渲染先读这几份，不要再引入一次性硬编码色值。
   - 历史基准（网格参数、色板、条纹特殊块、单双周并排）仍可对照 `/root/trivial/tongji-timetable/select_preview.html`，但视觉语言以 Fluent 令牌为准。
-  - **系统材质只能靠 DWM，`backdrop-filter` 在透明窗口里糊不了桌面**：挂件已改为 `transparent: false` + `backgroundMaterial: 'acrylic'` + `DWMWA_WINDOW_CORNER_PREFERENCE`（见 `main/win32/dwm.ts`），圆角与材质都由 DWM 绘制、天然对齐；渲染层 `--glass-shell: transparent` 让出底色，只保留描边/高光/噪声。
+  - **挂件窗口材质（最终选型，2026-09-14 定稿）**：`transparent: false` + `backgroundMaterial: 'acrylic'` + DWM 圆角（`main/win32/dwm.ts` 的 `applyRoundedCorners`）。渲染层 `--glass-shell: transparent` 把底色让给系统材质，只留描边/高光/噪声。选它是为了**两态 + 真模糊**（活跃时壁纸透出并模糊）；代价是**失焦会被 DWM 切成不活跃（变灰、近乎不透明）**，这是系统对所有窗口的行为，Electron 在 Windows 上没有 `visualEffectState` 那种开关，渲染层加厚底色只能遮灰、做不到等价，已试过并放弃。
+  - **材质只在窗口创建时声明有效**：`backgroundMaterial` 写在 `new BrowserWindow({...})` 里才生效。运行时再设（Electron 的 `setBackgroundMaterial`，或 koffi 直写 `DWMWA_SYSTEMBACKDROP_TYPE`）即使 `DwmGetWindowAttribute` 读回 `accepted: 3` 也不出模糊。
+  - **备选方案（要"永远一致、不失焦变灰"时用）**：`backgroundMaterial: 'mica'`（或 `tabbed`/Mica Alt，任务管理器那套）+ 不透明深色底 `#202020`，活跃/失焦差异极小，代价是没有模糊、只有壁纸着色。切这一档时记得同时把渲染层 `--glass-shell` 设为 transparent、去掉自绘圆角（圆角归 DWM），并锁定深色主题，否则浅色系统下会深底配浅色文字。
   - **不要用 `SetWindowRgn` 给透明窗口裁圆角**：实测拖动缩放约 12 秒后主进程**无日志直接重启**（原生层崩溃）；且 `transparent: true` 本身就拿不到 DWM 圆角。对应 DeskBox（WinUI 3 `MicaController`/`DesktopAcrylicController` + `SystemBackdropConfiguration`）的等价做法就是"非透明窗口 + `backgroundMaterial` + DWM 圆角属性"。
   - 管理窗口用主进程 `backgroundMaterial: 'mica'` + 自绘标题栏（`titleBarOverlay`，右侧留 `clamp(138px, 11vw, 190px)` 给系统按钮，深浅主题经 `window:titlebar-theme` 同步）。
   - 色块染色走三个 CSS 变量（`--tint` / `--edge` / `--ink`），由 `TimetableBoard.vue` 按主题内联设置；`lift()` 必须返回 `#rrggbb`（返回 `rgb()` 会让下游混色算出 NaN，色块直接变透明）。
