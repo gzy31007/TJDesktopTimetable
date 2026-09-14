@@ -114,3 +114,43 @@ docs/                 架构、数据模型、适配器指南
 - **不做** 1 系统自动登录（SSO 带短信增强，塞进桌面客户端不划算）：改为用户手动粘贴 Cookie，主进程 `main/tongji.ts` 发起请求并探测接口路径。Cookie 存 `credentials.json`，**任何日志都不得打印 Cookie 内容**。
 - 窗口默认「桌面层 + 静息」：Owner 设为桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见），静息落点按前台窗口三选一（见"层级层结构"）；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
 - 拖动用 `-webkit-app-region: drag`（见上）；静息态**不戴** `WS_EX_NOACTIVATE`（戴了拖不动，见"易错知识点"），交互期只做"临时浮起 + 结束后重新落点"。
+
+## C# / WinUI 线（2026-09-15 起）
+
+技术栈正在从「Electron 独占」转向「WinUI 外壳 + 核心逻辑双实现」。原因是材质：Electron 的三条系统材质路径实测全拿不到 DeskBox 那种质感（DWM 对"从未被激活的窗口"一律降级成近黑平色），只有 WinUI 的 `MicaController` + `SystemBackdropConfiguration`（可强制 `IsInputActive`）能拿到。
+
+### 三个工程的分工（改动时必须守住）
+
+| 位置 | TFM | 能跑在哪 | 职责 |
+|---|---|---|---|
+| `dotnet/TjtCore` | `net10.0` | Linux + Windows | 模型 / 周次 / 冲突 / 布局 / 时间 / 适配器（TS `packages/core` 的移植） |
+| `dotnet/Tjt.Widget` | `net10.0` | Linux + Windows | 挂件视觉层：几何、色块染色、名称分档、呈现模型（**纯计算，不得引用 WinUI/Win32**） |
+| `dotnet/Tjt.App` | `net10.0-windows10.0.22621.0` | **只能 Windows** | WinUI 外壳：窗口、材质、Win32、照坐标摆控件 |
+
+- `dotnet/TjtTimetable.slnx` = 前两个（Linux 也要能 `dotnet test`）；`dotnet/TjtTimetable.Windows.slnx` = 第三个。
+  **不要**把 `Tjt.App` 并进前者，否则 Linux/CI 的构建整片失败。
+- 新逻辑优先下沉到 `Tjt.Widget`：那里能在 WSL 上编译 + 单测，反馈最快；外壳里只留"必须在 Windows 上跑"的东西。
+- 视觉规则的**唯一真源**仍是 `apps/desktop/src/renderer/shared/TimetableBoard.vue`（`blockRect` / `blockFontSize` / `blockName` / `tintStyle`）；C# 侧 `Tjt.Widget` 逐档对齐，改一边必须同步另一边，`BoardVisualTests` 有对照断言。
+
+### 在 Windows 本机构建（WSL 侧编译不了 WinUI）
+
+```bash
+B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.ps1','rb').read().decode('ascii').encode('utf-16-le')).decode())")
+/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand "$B64"
+```
+
+- 脚本把源码 robocopy 到 `C:\tjt-tools\work`（**反向拉取**：Windows 侧读 `\\wsl.localhost\...`，不是 WSL 写 `/mnt/c`），
+  再用 `C:\tjt-tools\dotnet\dotnet.exe`（.NET 10 SDK，装在工作区里，不污染系统）构建；加 `-RunSmoke` 还会跑冒烟自检。
+  日志在 `C:\tjt-tools\build.log`。
+- **WSL 沙箱把 `/mnt/c` 挂成只读**：`touch /mnt/c/...` 会 `Permission denied`，robocopy 到 `/mnt/c` 也失败。
+  一切对 Windows 盘的写操作都要走 PowerShell（interop 或 `-EncodedCommand`），别从 WSL 直接写。
+- 脚本内容**必须是纯 ASCII**（Windows PowerShell 5 按 ANSI 读，中文注释会让解析错乱）；所有输出重定向到文件读，
+  因为 interop 下 stderr 会被序列化成 CLIXML 没法看。
+- **GUI 进程不会自动退出**：冒烟自检一度把 CI job 挂成无限 `in_progress`（`Application.Exit()` 在"窗口从未激活"的路径上
+  不推进消息循环）。现在 `--smoke` 做完校验直接 `Environment.Exit(code)`，CI 与本机脚本都有 `WaitForExit` 超时兜底。
+- WSL 侧可以用 `EnableWindowsTargeting=true`（已写进 `Tjt.App.csproj`）做**编译级**检查（C# 类型/签名错误一次暴露），
+  但构建必然停在 XAML：XAML 编译器依赖 Windows 原生 `GenXbf.dll`（报 `WMC0621`）。
+- 本机装的是 **Visual Studio Community 2026**（`D:\Program Files\Microsoft Visual Studio\18\Community`）+
+  Windows SDK `10.0.26100`；VS 只带 .NET **运行时**，不带 SDK —— 所以 `C:\tjt-tools\dotnet` 是必须的。
+- **Windows App Runtime 只装了 1.5 / 1.7**（缺 1.8）：`Tjt.App` 引用 WASDK `1.8.260804001`，其 `Bootstrap.TryInitialize`
+  需要 1.8 运行时。跑真机 GUI / 冒烟前要么装 1.8 运行时，要么改用 `WindowsAppSDKSelfContained=true` 自包含。
