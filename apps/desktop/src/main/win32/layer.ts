@@ -57,7 +57,11 @@ const WS_EX_NOACTIVATE = 0x08000000;
 const WS_EX_APPWINDOW = 0x00040000;
 
 const SW_SHOWNOACTIVATE = 4;
+const SW_RESTORE = 9;
 const SW_HIDE = 0;
+
+/** `SetWindowLongPtrW` 的索引：子窗口=父窗口；顶层窗口=Owner。 */
+const GWLP_HWNDPARENT = -8;
 
 /** `SetWindowPos` 的 hWndInsertAfter 常量。 */
 const HWND_BOTTOM = 1;
@@ -188,9 +192,17 @@ function hwndOrNull(value: unknown): number | null {
   return null;
 }
 
-function applyExStyle(api: Win32, hwnd: number): void {
+/**
+ * 扩展样式。
+ *
+ * 注意**不加** `WS_EX_NOACTIVATE`：不可激活的窗口会被系统跳过原生 move loop，
+ * 表现为"完全拖不动"。窗口"不打扰"的职责改由"贴桌面层 + 置底"承担
+ * （参考 DeskBox：只在 DesktopPinned 模式才加 NOACTIVATE）。
+ */
+function applyExStyle(api: Win32, hwnd: number, noActivate = false): void {
   const current = Number(api.GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
-  const next = (current | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) & ~WS_EX_APPWINDOW;
+  let next = (current | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW;
+  next = noActivate ? next | WS_EX_NOACTIVATE : next & ~WS_EX_NOACTIVATE;
   api.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
 }
 
@@ -235,10 +247,66 @@ function findWorkerW(api: Win32): number | null {
   return hwndOrNull(api.FindWindowExW(null, shellViewParent, 'WorkerW', null));
 }
 
+/** 桌面图标视图（`SHELLDLL_DefView`）本身 —— 它是桌面图标的容器窗口。 */
+function findDesktopIconView(api: Win32): number | null {
+  const { koffi, enumCbProto } = api;
+  let found: number | null = null;
+  const callback = koffi.register((hwnd: unknown) => {
+    const value = hwndOrNull(hwnd);
+    if (value === null) return 1;
+    const defView = hwndOrNull(api.FindWindowExW(value, null, 'SHELLDLL_DefView', null));
+    if (defView !== null) {
+      found = defView;
+      return 0;
+    }
+    return 1;
+  }, koffi.pointer(enumCbProto));
+
+  api.EnumWindows(callback, 0);
+  koffi.unregister(callback);
+  return found;
+}
+
+/**
+ * 把顶层窗口的 **Owner** 设为桌面图标层（不是 `SetParent` 成子窗口）。
+ *
+ * 这是"贴桌面"最省事也最稳的一条路（参考 DeskBox 的 DesktopPinned）：
+ * - owned 窗口永远显示在 owner 之上 → 浮在桌面图标之上，不被图标遮挡；
+ * - owner 是桌面壳，Win+D / "显示桌面" 不会把它最小化 → 桌面常驻；
+ * - 窗口仍是顶层窗口，拖动、鼠标交互、坐标都正常（子窗口方案做不到）。
+ */
+export function attachToDesktopIconLayer(window: BrowserWindow): boolean {
+  const api = loadWin32();
+  if (!api) return false;
+  const hwnd = toHwnd(window);
+  const defView = findDesktopIconView(api);
+  if (defView === null) {
+    log('[win32] 未找到桌面图标层 SHELLDLL_DefView');
+    return false;
+  }
+  api.SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, defView);
+  const actual = hwndOrNull(api.GetWindowLongPtrW(hwnd, GWLP_HWNDPARENT));
+  if (actual !== defView) {
+    log('[win32] 桌面层 Owner 设置失败', { expected: defView, actual });
+    return false;
+  }
+  pushToBottom(api, hwnd);
+  log('[win32] 已挂到桌面图标层', { defView });
+  return true;
+}
+
+export function detachFromDesktopIconLayer(window: BrowserWindow): void {
+  const api = loadWin32();
+  if (!api) return;
+  api.SetWindowLongPtrW(toHwnd(window), GWLP_HWNDPARENT, 0);
+}
+
 export interface LayerOptions {
   mode: WidgetMode;
   /** 置底保险定时器间隔（毫秒），0 表示关闭。 */
   keepAtBottomIntervalMs?: number;
+  /** 是否把窗口挂到桌面图标层（Win+D 后仍可见）；默认 true。 */
+  desktopLayer?: boolean;
   /** 模式降级回调（例如 wallpaper 不可用时）。 */
   onFallback?: (reason: string) => void;
 }
@@ -269,17 +337,24 @@ export function attachToDesktop(window: BrowserWindow, options: LayerOptions): L
   }
 
   const hwnd = toHwnd(window);
-  applyExStyle(api, hwnd);
+  applyExStyle(api, hwnd, false);
 
   let mode: WidgetMode = options.mode;
+  let desktopOwned = false;
+
   if (mode === 'wallpaper') {
     const workerW = findWorkerW(api);
     if (workerW === null) {
       mode = 'desktop';
-      options.onFallback?.('未找到 WorkerW（可能被其它壁纸软件占用），已回退为置底模式');
+      options.onFallback?.('未找到 WorkerW（可能被其它壁纸软件占用），已回退为普通置底模式');
     } else {
       api.SetParent(hwnd, workerW);
       api.ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
+  } else if (options.desktopLayer !== false) {
+    desktopOwned = attachToDesktopIconLayer(window);
+    if (!desktopOwned) {
+      options.onFallback?.('未找到桌面图标层，已回退为普通置底模式（Win+D 后会被隐藏）');
     }
   }
 
@@ -287,8 +362,10 @@ export function attachToDesktop(window: BrowserWindow, options: LayerOptions): L
   let timer: NodeJS.Timeout | null = null;
 
   const keepAlive = (): void => {
-    if (!api.IsWindowVisible(hwnd) || api.IsIconic(hwnd)) {
-      // "显示桌面" / 最小化后重新露面，但不抢焦点
+    if (api.IsIconic(hwnd)) {
+      // 被"显示桌面"最小化：必须用 SW_RESTORE，SW_SHOWNOACTIVATE 不会恢复最小化窗口
+      api.ShowWindow(hwnd, SW_RESTORE);
+    } else if (!api.IsWindowVisible(hwnd)) {
       api.ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     }
     pushToBottom(api, hwnd);
@@ -324,6 +401,7 @@ export function attachToDesktop(window: BrowserWindow, options: LayerOptions): L
     },
     detach() {
       stop();
+      if (desktopOwned) detachFromDesktopIconLayer(window);
       api.ShowWindow(hwnd, SW_HIDE);
     },
   };

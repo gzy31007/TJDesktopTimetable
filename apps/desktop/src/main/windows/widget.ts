@@ -25,6 +25,8 @@ let layer: LayerHandle | null = null;
 let dragging = false;
 let resizing = false;
 let pointerTimer: NodeJS.Timeout | null = null;
+/** 桌面层挂载失败（Explorer 未就绪）时只重试一次，避免无限循环。 */
+let layerRetried = false;
 
 export function getWidgetWindow(): BrowserWindow | null {
   return widgetWindow;
@@ -68,15 +70,29 @@ function attachLayer(win: BrowserWindow, settings: WidgetSettings): void {
   layer = attachToDesktop(win, {
     mode: settings.mode,
     keepAtBottomIntervalMs: settings.keepAtBottomIntervalMs,
+    desktopLayer: settings.desktopLayer,
     onFallback: (reason) => {
       log('[widget] 层级回退：', reason);
-      saveSettings({ mode: 'desktop' });
       broadcast('widget:fallback', reason);
     },
   });
-  log('[widget] 层级模式', { requested: settings.mode, effective: layer.mode, win32: isWin32Available() });
+  log('[widget] 层级模式', {
+    requested: settings.mode,
+    effective: layer.mode,
+    desktopLayer: settings.desktopLayer,
+    win32: isWin32Available(),
+  });
   if (settings.clickThrough) win.setIgnoreMouseEvents(true, { forward: true });
   if (!settings.showWidget) layer.pause();
+
+  // Explorer 可能比我们启动得晚（DefView 还不存在）→ 稍后重试一次
+  if (settings.mode === 'desktop' && settings.desktopLayer && !layerRetried) {
+    layerRetried = true;
+    setTimeout(() => {
+      const target = widgetWindow;
+      if (target && !target.isDestroyed()) reapplyLayer();
+    }, 2000);
+  }
 }
 
 function broadcast(channel: string, payload?: unknown): void {
@@ -163,7 +179,7 @@ export function applyWidgetSettings(patch: Partial<WidgetSettings>, next: Widget
   const win = widgetWindow;
   if (!win || win.isDestroyed()) return;
 
-  if (patch.mode !== undefined) {
+  if (patch.mode !== undefined || patch.desktopLayer !== undefined) {
     attachLayer(win, next);
   }
   if (patch.clickThrough !== undefined) {

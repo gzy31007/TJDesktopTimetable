@@ -71,6 +71,7 @@ const emit = defineEmits<{
     </div>
 
     <div class="toggles">
+      <label><input type="checkbox" :checked="settings.desktopLayer" @change="emit('update', { desktopLayer: ($event.target as HTMLInputElement).checked })" /> 固定到桌面层（Win+D 后仍可见、不被图标遮挡）</label>
       <label><input type="checkbox" :checked="settings.showWeekend" @change="emit('update', { showWeekend: ($event.target as HTMLInputElement).checked })" /> 显示周末</label>
       <label><input type="checkbox" :checked="settings.trimEmptySlots" @change="emit('update', { trimEmptySlots: ($event.target as HTMLInputElement).checked })" /> 紧凑模式（隐藏空闲节次）</label>
       <label><input type="checkbox" :checked="settings.clickThrough" @change="emit('update', { clickThrough: ($event.target as HTMLInputElement).checked })" /> 点击穿透（锁定挂件）</label>

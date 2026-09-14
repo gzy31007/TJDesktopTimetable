@@ -56,6 +56,16 @@ body {
   border-bottom: 1px solid rgba(148, 163, 184, 0.3);
   flex: 0 0 auto;
   touch-action: none;
+  /* 交给 Chromium 原生拖动（WM_NCHITTEST → HTCAPTION），跟手且不丢鼠标事件 */
+  -webkit-app-region: drag;
+}
+
+/* 交互控件必须排除在拖动区之外，否则点不动 */
+.widget-bar button,
+.widget-bar select,
+.widget-bar input,
+.widget-bar a {
+  -webkit-app-region: no-drag;
 }
 
 .widget-bar .title {

@@ -53,13 +53,16 @@ docs/                 架构、数据模型、适配器指南
 - **单实例锁的副作用**：上一次实例没退出（哪怕界面不可见）时，再双击 exe 会被静默挡掉，表现同样是"打不开"。排查时先 `taskkill /F /IM TJDesktopTimetable.exe`。
 - **不要从 UNC 路径（`\\wsl.localhost\...`）运行产物**：Chromium 需要内存映射加载 `resources.pak`/`icudtl.dat`，9p 文件系统上不可靠；产物要放到 Windows 本地磁盘（`C:\...`）再运行。WSL 侧复制过去极慢（9p 逐文件），让用户用资源管理器拖，或后台 robocopy。
 - **`app.getPath('userData')` 默认取 package.json 的 `name`**（`@tjt/desktop` → `%APPDATA%\@tjt\desktop`）。已在 `main/index.ts` 显式 `app.setName` + `app.setPath('userData', ...)` 固定为 `%APPDATA%\TJDesktopTimetable`。
-- **窗口拖动优先用 Windows 原生 move loop**：`ReleaseCapture()` + `SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)`，跟手性与系统窗口一致，且系统自动处理鼠标捕获与松手。自实现"轮询光标 + `setPosition`"有两个硬伤：指针移出窗口就收不到 `mouseup`（拖动粘住），以及每帧 `setPosition` 等 DWM 合成的滞后感。自实现分支（WorkerW 子窗口用）必须双兜底：渲染层 `setPointerCapture` + 主进程 `GetAsyncKeyState(VK_LBUTTON)`。
-- **拖动/缩放期间必须 `layer.pause()`**：置底保险定时器每秒 `SetWindowPos(HWND_BOTTOM)` 会和拖动抢 z-order，表现为拖到一半窗口被压回去。
-- `WS_EX_NOACTIVATE` 窗口进入原生 move loop 时会短暂激活（系统行为）；拖动结束后 `layer.resume()` 会把窗口重新压到底部，不影响"平时不抢焦点"。
+- **"贴桌面 + Win+D 后仍可见"要用 Owner，不是 SetParent**：`SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT(-8), SHELLDLL_DefView)` 把顶层窗口的 Owner 设为桌面图标层 —— owned 窗口恒在 owner 之上（不被桌面图标遮挡），且不随 Win+D 最小化（桌面壳不被最小化），同时仍是顶层窗口（拖动/鼠标/坐标都正常）。`SetParent` 成 WorkerW 子窗口会被图标压在下面，且拖动坐标错乱。（做法对齐 DeskBox 的 DesktopPinned 模式）
+- **`WS_EX_NOACTIVATE` 会让窗口拖不动**：不可激活的窗口会被系统跳过原生 move loop。本项目已移除该样式，「不打扰」由"贴桌面层 + 置底"承担；这条与"点挂件不抢焦点"存在取舍，不要再硬塞回来。
+- **Electron 里拖动窗口用 `-webkit-app-region: drag`**（Chromium 内建 `WM_NCHITTEST → HTCAPTION`，真实鼠标输入、跟手、不丢事件），交互控件加 `no-drag`。从主进程 `SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION)` 在 Electron 上实测**不生效**（渲染层 DOM 事件也会被 drag 区域吞掉，两者恰好构成自然降级：drag 生效时走原生，失效时走自实现循环）。
+- 自实现拖动/缩放分支（WorkerW 子窗口用）必须双兜底：渲染层 `setPointerCapture` + 主进程 `GetAsyncKeyState(VK_LBUTTON)`。
+- **拖动/缩放期间必须 `layer.pause()`**：置底保险定时器每秒 `SetWindowPos(HWND_BOTTOM)` 会和拖动抢 z-order。
 - Windows 侧排查可用 WSL interop 直接调 `cmd.exe` / `powershell.exe`，但**参数里的引号与反斜杠会被 interop 再处理一次**：把逻辑写进 `.ps1`/`.bat` 再执行，不要在 `cmd /c` 里堆嵌套引号（`tasklist /FI "IMAGENAME eq x"` 这种就会解析失败）。`.ps1` 用 Windows PowerShell 5 执行时按 ANSI 读取，**脚本内容必须是纯 ASCII**（含中文注释会因引号配对错乱而解析失败）。
 
 ## 注意事项
 
 - 仓库 Public：fixtures 与文档中不得出现学号、姓名、cookie、token 等任何个人凭据。
 - 本阶段**不做** 1 系统自动登录抓取（SSO + 短信增强链路复杂）；`adapters/tongji-student.ts` 只留占位接口，等抓包结果再补字段映射。
-- 窗口默认"置底 + 可交互"（`HWND_BOTTOM`）；`WorkerW` 壁纸层作为可切换模式保留，切换失败必须自动回退，不能黑屏。
+- 窗口默认「桌面层 + 置底」：Owner 设为桌面图标层（Win+D 后仍可见、不被图标遮挡），z-order 压在普通窗口之下；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
+- 拖动用 `-webkit-app-region: drag`（见上）；点击挂件会让它获得焦点，这是移除 `WS_EX_NOACTIVATE` 的代价，属于有意取舍。
