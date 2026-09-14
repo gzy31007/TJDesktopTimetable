@@ -40,8 +40,8 @@ body {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  /* 圆角由 DWM 提供（非透明窗口），不自绘；整体保持平面，不加高光/渐变/自绘阴影 */
-  border: 1px solid var(--stroke-strong);
+  /* 对齐设置窗口：整窗不加自绘边框与立体感，边界交给 DWM 圆角 + 材质 */
+  border: none;
   background-color: var(--glass-shell);
   transition: background-color 200ms var(--ease);
   color: var(--text);

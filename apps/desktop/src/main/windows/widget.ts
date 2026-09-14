@@ -142,17 +142,18 @@ export function createWidgetWindow(): BrowserWindow {
     // 非透明窗口忽略 alpha：必须给不透明实色，否则是黑底
     backgroundColor: startDark ? WIDGET_BASE_COLOR.dark : WIDGET_BASE_COLOR.light,
     /*
-     * 不启用系统材质（backgroundMaterial）。
-     *
-     * 原因链：acrylic 在"Win+D 隐藏 → 恢复"后 DWM 合成会失效（窗口可见、owner 与
-     * z-order 均正确但屏幕上不出现）；mica 没有该问题，但 DWM 会在窗口**获得焦点**
-     * 时改变材质色调（整体变灰/变实），而挂件是常年失焦的桌面元素，任何"激活态"
-     * 跳变都是干扰。渲染层只能用半透明底盖住大部分，做不到 100% 一致。
-     *
-     * 所以最终选择：不用材质，纯不透明底 + DWM 圆角 —— 显示与焦点状态完全无关。
+     * 材质与底色都对齐设置窗口：mica + 近不透明的渲染层底色（见 shared/fluent.css 的 --glass-shell）。
+     * acrylic 曾因"Win+D 隐藏→恢复"后 DWM 合成失效（窗口可见但不显示）而弃用。
      * hasShadow: false 去掉窗口投影（那层"外部立体感"）。
      */
-    ...(process.platform === 'win32' ? { roundedCorners: true, hasShadow: false } : {}),
+    /*
+     * 对齐设置窗口的组合：material + 近不透明渲染层底。
+     * 之前 mica 会让"选中变灰"，根因是渲染层底只有 72~78%、材质透出来；
+     * 设置窗口的 `.manage` 用 ~90% 底，所以看不出焦点跳变。这里照抄。
+     */
+    ...(process.platform === 'win32'
+      ? { backgroundMaterial: 'mica' as const, roundedCorners: true, hasShadow: false }
+      : {}),
     resizable: false,
     movable: true,
     minimizable: false,
