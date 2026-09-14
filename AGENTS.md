@@ -71,6 +71,8 @@ docs/                 架构、数据模型、适配器指南
 - **`SetWindowPos` 的 `hWndInsertAfter` 是"插到该窗口之后（z-order 更低）"，不是"上方"**：曾误把 owner 传进去想让挂件"贴着桌面之上"，结果把它插到 Progman 下面被桌面盖住。owned 窗口本来就恒在 owner 之上，置底用 `HWND_BOTTOM` 即可。
 - **owner 检测必须和"当前期望的 owner"比较**：换 owner 目标（DefView→Progman）时忘了同步 `ownerLost()`，会每秒误判"丢失"并重挂、反复搅动 z-order（日志刷屏 `桌面层 owner 丢失，重新挂载`）。
 - **鼠标按下期间要临时摘掉 Shell owner**（WitchDrawer 的 `SuspendDesktopOwnershipForMouseInput`）：否则 Explorer 会把被点到的挂件记成 Progman 的 "last active popup"，之后 Win+D 会去激活挂件而不是显示桌面。摘除期间 `ownerLost()` 要让路，别和"交互结束恢复"打架。
+- **还要定期修 Shell 的 "last active popup" 指针**（WitchDrawer 的 `RepairShellLastActivePopup`，已实现为 `repairShellLastActivePopup()`，在 `keepAlive` 里每 2 拍跑一次）：**点击桌面或挂件之后**，Explorer 会把挂件登记成 Progman 的 last active popup，此后 Win+D 不再是"显示桌面"而是"激活挂件"——现象正是"点过桌面之后 Win+D 才消失"。修法是把指针改回 Progman（`SetForegroundWindow(Progman)` 后立刻恢复原前台窗口，用户无感）。判别：取 `GetLastActivePopup(GetShellWindow())`，若该窗口属于本进程就修。
+  旁证：**NVIDIA 面板的 overlay 也会被同一机制连带隐藏**，说明这是 Windows 对"桌面级叠加层"的统一行为，不是本应用的 bug。
 - **"贴桌面 + Win+D 后仍可见"要用 Owner，不是 SetParent**：`SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT(-8), <桌面宿主>)`，owner 取 Progman（见上条）—— owned 窗口恒在 owner 之上、不随 Win+D 消失，同时仍是顶层窗口（拖动/鼠标/坐标都正常）。`SetParent` 成 WorkerW 子窗口会被图标压在下面，且拖动坐标错乱。（做法对齐 DeskBox 的 DesktopPinned 模式）
 - **`WS_EX_NOACTIVATE` 会让窗口拖不动**：不可激活的窗口会被系统跳过原生 move loop。本项目已移除该样式，「不打扰」由"贴桌面层 + 置底"承担；这条与"点挂件不抢焦点"存在取舍，不要再硬塞回来。
 - **Electron 里拖动窗口用 `-webkit-app-region: drag`**（Chromium 内建 `WM_NCHITTEST → HTCAPTION`，真实鼠标输入、跟手、不丢事件），交互控件加 `no-drag`。从主进程 `SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION)` 在 Electron 上实测**不生效**（渲染层 DOM 事件也会被 drag 区域吞掉，两者恰好构成自然降级：drag 生效时走原生，失效时走自实现循环）。
