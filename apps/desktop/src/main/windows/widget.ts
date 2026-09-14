@@ -2,7 +2,6 @@ import { BrowserWindow, screen } from 'electron';
 import { join } from 'node:path';
 import type { WidgetSettings } from '../../shared/ipc.js';
 import {
-  applyRoundedRegion,
   attachToDesktop,
   beginNativeMove,
   isLeftButtonDown,
@@ -10,6 +9,7 @@ import {
   type LayerHandle,
 } from '../win32/layer.js';
 import { loadSettings, saveSettings } from '../store.js';
+import { applyRoundedCorners } from '../win32/dwm.js';
 import { log } from '../logger.js';
 
 /**
@@ -118,21 +118,22 @@ export function createWidgetWindow(): BrowserWindow {
   const win = new BrowserWindow({
     ...bounds,
     frame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
     /*
-     * Win11 真·毛玻璃：交给 DWM 做窗口级 Acrylic（系统对窗口背后的桌面做模糊 + 噪声）。
-     * 渲染层的 `backdrop-filter` 只能模糊本进程内容，永远做不出这个效果。
-     * 样式层保留半透明玻璃底作为兜底（< Win11 22H2 时材质不生效，界面仍可读）。
+     * 不透明窗口：Win11 的 Acrylic 与圆角都由 DWM 绘制，透明窗口拿不到圆角
+     * （`transparent: true` 时 DWM 会跳过圆角与阴影），所以这里交给 DWM 全权处理；
+     * 渲染层背景保持透明，材质与圆角自然对齐。
      */
-    ...(process.platform === 'win32' ? { backgroundMaterial: 'acrylic' as const, roundedCorners: true } : {}),
+    transparent: false,
+    backgroundColor: '#00000000',
+    ...(process.platform === 'win32'
+      ? { backgroundMaterial: 'acrylic' as const, roundedCorners: true, hasShadow: true }
+      : {}),
     resizable: false,
     movable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    hasShadow: false,
     show: false,
     title: '同济桌面课表',
     webPreferences: {
@@ -145,20 +146,9 @@ export function createWidgetWindow(): BrowserWindow {
 
   win.setMenuBarVisibility(false);
 
-  /**
-   * 圆角裁切：透明窗口 + Acrylic 会得到"整个矩形都被模糊"的方块玻璃，
-   * 且 DWM 在透明窗口上不画圆角，所以这里用 region 把窗口形状裁圆。
-   * Electron 的 width/height 是 DIP，SetWindowRgn 要物理像素，按缩放比换算。
-   */
-  const clipCorners = (): void => {
-    if (process.platform !== 'win32' || win.isDestroyed()) return;
-    const [width = 0, height = 0] = win.getSize();
-    const scale = screen.getDisplayMatching(win.getBounds()).scaleFactor || 1;
-    applyRoundedRegion(win, width * scale, height * scale, CORNER_RADIUS * scale);
-  };
-  clipCorners();
-  win.on('resize', clipCorners);
-  win.on('moved', clipCorners);
+  // 圆角交给 DWM（对应 DeskBox 的 MicaController/AcrylicController 路线）
+  applyRoundedCorners(win, 'round');
+
 
   let revealed = false;
   const reveal = (reason: string): void => {

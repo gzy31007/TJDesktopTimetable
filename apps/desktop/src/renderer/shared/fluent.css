@@ -54,8 +54,8 @@
 
   --win-tint: rgba(253, 253, 254, 0.78);
   --win-tint-2: rgba(250, 251, 253, 0.66);
-  /* 挂件外壳：更透，靠系统 Acrylic 提供模糊 */
-  --glass-shell: rgba(253, 253, 254, 0.52);
+  /* 挂件外壳：底色交给 DWM 的 Acrylic（窗口级材质），渲染层只留描边/高光/噪声 */
+  --glass-shell: transparent;
   --layer: rgba(255, 255, 255, 0.62);
   --layer-2: rgba(255, 255, 255, 0.44);
   --layer-strong: rgba(255, 255, 255, 0.78);
@@ -104,7 +104,7 @@
 
   --win-tint: rgba(32, 32, 32, 0.72);
   --win-tint-2: rgba(28, 28, 28, 0.6);
-  --glass-shell: rgba(28, 28, 30, 0.5);
+  --glass-shell: transparent;
   --layer: rgba(255, 255, 255, 0.055);
   --layer-2: rgba(255, 255, 255, 0.035);
   --layer-strong: rgba(255, 255, 255, 0.085);
@@ -152,7 +152,7 @@
 
     --win-tint: rgba(32, 32, 32, 0.72);
     --win-tint-2: rgba(28, 28, 28, 0.6);
-    --glass-shell: rgba(28, 28, 30, 0.5);
+    --glass-shell: transparent;
     --layer: rgba(255, 255, 255, 0.055);
     --layer-2: rgba(255, 255, 255, 0.035);
     --layer-strong: rgba(255, 255, 255, 0.085);
