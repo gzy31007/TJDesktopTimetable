@@ -18,9 +18,17 @@ public partial class App : Application
 {
     private readonly List<MainWindow> _windows = [];
 
-    /// <summary>构造应用；标志位必须在实例化（触发 <c>Application.Start</c>）之前设好。</summary>
+    /// <summary>
+    /// 构造应用。
+    ///
+    /// 命令行在这里读：XAML 编译器会为项目生成 <c>Main</c>（<c>App.g.i.cs</c> 里的
+    /// <c>Program.Main</c>），它直接 <c>new App()</c> —— 自己再写一个 <c>Main</c> 会撞
+    /// 「namespace 已包含 Program 定义」。所以入口交给生成代码，参数从
+    /// <see cref="Environment.GetCommandLineArgs"/> 取。
+    /// </summary>
     public App()
     {
+        Startup = AppStartupOptions.Parse(Environment.GetCommandLineArgs());
         InitializeComponent();
         UnhandledException += OnUnhandledException;
     }
@@ -28,11 +36,8 @@ public partial class App : Application
     /// <summary>冒烟自检结果；<c>false</c> 会让进程以非零码退出（CI 视为失败）。</summary>
     public bool SmokePassed { get; private set; } = true;
 
-    /// <summary>
-    /// 当前启动用的命令行选项。刻意用静态字段而不是构造参数：
-    /// XAML 生成的 <c>Main</c> 会 <c>new App()</c>，没有传参的位置。
-    /// </summary>
-    internal static AppStartupOptions Startup { get; set; } = new();
+    /// <summary>本次启动的命令行选项（构造时解析；见构造函数的说明）。</summary>
+    internal AppStartupOptions Startup { get; private set; } = new();
 
     /// <inheritdoc />
     protected override void OnLaunched(LaunchActivatedEventArgs args)
