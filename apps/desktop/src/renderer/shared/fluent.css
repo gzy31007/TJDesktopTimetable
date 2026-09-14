@@ -59,7 +59,7 @@
    * 所以这里不用纯透明：叠一层中性偏暖的灰把它拉回中性（0.16 已足够压色相，
    * 又不会挡住模糊）。想完全交给系统就把两档都改成 transparent。
    */
-  --glass-shell: rgba(253, 253, 254, 0.78);
+  --glass-shell: rgba(255, 255, 255, 0.78);
   --glass-shell-blur: rgba(250, 248, 244, 0.9);
   --layer: rgba(255, 255, 255, 0.62);
   --layer-2: rgba(255, 255, 255, 0.44);
@@ -109,7 +109,7 @@
 
   --win-tint: rgba(32, 32, 32, 0.72);
   --win-tint-2: rgba(28, 28, 28, 0.6);
-  --glass-shell: rgba(32, 32, 32, 0.72);
+  --glass-shell: rgba(255, 255, 255, 0.085);
   --glass-shell-blur: rgba(40, 39, 36, 0.92);
   --layer: rgba(255, 255, 255, 0.055);
   --layer-2: rgba(255, 255, 255, 0.035);
@@ -190,7 +190,7 @@
   --slot-ink: #6e6e73;
   --slot-current: #0071e3;
 
-  --glass-shell: rgba(255, 255, 255, 0.9);
+  --glass-shell: #ffffff;
   --glass-shell-blur: rgba(255, 255, 255, 0.9);
   --stripe: rgba(255, 255, 255, 0.22);
 }
@@ -233,7 +233,7 @@
   --slot-ink: #aeaeb2;
   --slot-current: #409cff;
 
-  --glass-shell: rgba(28, 28, 30, 0.92);
+  --glass-shell: rgba(44, 44, 46, 0.85);
   --glass-shell-blur: rgba(28, 28, 30, 0.9);
   --stripe: rgba(255, 255, 255, 0.08);
 }
@@ -276,7 +276,7 @@
   --slot-ink: #6e6e73;
   --slot-current: #0071e3;
 
-  --glass-shell: rgba(245, 245, 247, 0.93);
+  --glass-shell: rgba(255, 255, 255, 0.94);
   --glass-shell-blur: rgba(255, 255, 255, 0.94);
   --stripe: rgba(255, 255, 255, 0.34);
 }
@@ -295,7 +295,7 @@
 
     --win-tint: rgba(32, 32, 32, 0.72);
     --win-tint-2: rgba(28, 28, 28, 0.6);
-    --glass-shell: rgba(32, 32, 32, 0.72);
+    --glass-shell: rgba(255, 255, 255, 0.085);
     --glass-shell-blur: rgba(40, 39, 36, 0.92);
     --layer: rgba(255, 255, 255, 0.055);
     --layer-2: rgba(255, 255, 255, 0.035);
