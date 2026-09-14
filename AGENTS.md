@@ -152,5 +152,20 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
   但构建必然停在 XAML：XAML 编译器依赖 Windows 原生 `GenXbf.dll`（报 `WMC0621`）。
 - 本机装的是 **Visual Studio Community 2026**（`D:\Program Files\Microsoft Visual Studio\18\Community`）+
   Windows SDK `10.0.26100`；VS 只带 .NET **运行时**，不带 SDK —— 所以 `C:\tjt-tools\dotnet` 是必须的。
-- **Windows App Runtime 只装了 1.5 / 1.7**（缺 1.8）：`Tjt.App` 引用 WASDK `1.8.260804001`，其 `Bootstrap.TryInitialize`
-  需要 1.8 运行时。跑真机 GUI / 冒烟前要么装 1.8 运行时，要么改用 `WindowsAppSDKSelfContained=true` 自包含。
+- **Windows App Runtime**：`Tjt.App` 引用 WASDK `1.8.260804001`，`Bootstrap` 需要 1.8 运行时。
+  本机原先只有 1.5 / 1.7，**已在 2026-09-15 装上 1.8**（`windowsappruntimeinstall-x64.exe --quiet`），
+  所以本机可以正常跑 GUI 与冒烟。
+- **CI 上不跑运行时冒烟（重要结论，别再试）**：GitHub 的 windows runner 上 `Tjt.App.exe`
+  表现为"进程挂着 + **一行输出都没有**"——连写在 App 构造函数第一行的文件日志（`--log`）都没落盘，
+  说明卡点在 **WASDK 引导路径内部**，与我们的代码、材质、GPU 都无关（装过 1.8 运行时、加过
+  `--no-backdrop`、换过日志通道，三次实验都停在同一处）。
+  所以 CI 的 `winui-shell` job 只做**编译门禁**（真实 Windows SDK + XAML 编译器），
+  运行时验证一律走本机 `.tools/build-winui.ps1 -RunSmoke`。
+- **本机的两个冒烟组合（都实测通过）**：
+  - `-RunSmoke`：带材质 → `[backdrop] mode=mica-controller`；
+  - `-RunSmoke -NoBackdrop`：跳过材质 → `[backdrop] skipped`；
+  两者都产出 `[smoke] ok blocks=19 canvas=977x600`，`-DesktopLayer` 额外验证
+  `[desktop-layer] attach=ok owner=0x...` 与 `send-to-bottom=ok`。
+- **应用自己写日志文件**（`--log <path>`，见 `AppLog.cs`）：本地 `Start-Process` 重定向 stdout 能拿到输出，
+  但 GUI 子系统进程在别的宿主下可能拿不到 —— 文件通道是唯一可靠的，且**进程被强杀也保留最后阶段**。
+  自检另有 45 秒看门狗（超时即打印最后阶段并非零退出），避免 CI/脚本悬着。

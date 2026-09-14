@@ -52,45 +52,15 @@ jobs:
         run: dotnet restore dotnet/TjtTimetable.Windows.slnx
       - name: Build（WinUI 外壳）
         run: dotnet build dotnet/TjtTimetable.Windows.slnx --configuration Release --no-restore
-      # 无显卡的 runner 上，WASDK 的 bootstrap 在找不到匹配的 Windows App Runtime 时会
-      # **挂在 DispatcherQueue/XAML 初始化之前**：实测 stdout 一行都没有、90 秒超时被杀。
-      # 所以先把 1.8 运行时静默装上（框架依赖部署本来就要求目标机有它）。
-      - name: Install Windows App Runtime 1.8
-        shell: pwsh
-        run: |
-          $url = 'https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe'
-          $dest = Join-Path $env:RUNNER_TEMP 'windowsappruntimeinstall-x64.exe'
-          Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-          $p = Start-Process -FilePath $dest -ArgumentList '--quiet' -PassThru
-          if (-not $p.WaitForExit(300000)) { $p.Kill(); throw 'Windows App Runtime 安装超时' }
-          Write-Host "runtime installer exit=$($p.ExitCode)"
-          Get-AppxPackage *WindowsAppRuntime.1.8* | Select-Object -ExpandProperty Name
-
-      # 冒烟自检：建窗口 + 渲染课表 + 校验布局。
+      # 这里只做**编译门禁**：Windows runner 上用真实的 Windows SDK + XAML 编译器构建，
+      # 挡住"只有 Windows 才编得过"的代码问题（本地 WSL 的 EnableWindowsTargeting 会在 XAML 步停住）。
       #
-      # 两层超时保护：WinUI 在没有交互式桌面的 runner 上有可能卡在某一步，
-      # 不设超时的话 job 会无限期 in_progress（本项目实测过一次）。
-      #   1) timeout-minutes 兜住整个 job；
-      #   2) 这里再给 wait 兜一次，超时即杀进程并按失败处理。
-      - name: Smoke（建窗口 + 渲染课表 + 布局自检）
-        timeout-minutes: 5
-        shell: pwsh
-        run: |
-          $exe = "dotnet/Tjt.App/bin/Release/net10.0-windows10.0.22621.0/win-x64/Tjt.App.exe"
-          $log = Join-Path $env:RUNNER_TEMP "tjt-app.log"
-          # 应用是 WinExe（GUI 子系统），不附加控制台，重定向 stdout 拿不到东西 ——
-          # 所以让它自己写 --log 指定的文件，这里读文件。--no-backdrop：runner 没有显卡。
-          $p = Start-Process -FilePath $exe -ArgumentList '--smoke', '--no-backdrop', '--log', $log, '--fixture', 'packages/core/fixtures/tongji-2026-1-personal.json' -PassThru
-          $finished = $p.WaitForExit(60000)
-          if (-not $finished) {
-            Write-Host "自检 60 秒未退出，强杀"
-            try { $p.Kill() } catch { }
-          }
-          Write-Host "---- app log ($log) ----"
-          if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host $_ } } else { Write-Host "(no log file)" }
-          if (-not $finished) { throw "冒烟自检超时（60s 未退出）" }
-          Write-Host "smoke exit code: $($p.ExitCode)"
-          if ($p.ExitCode -ne 0) { throw "冒烟自检失败（exit $($p.ExitCode)）" }
+      # 为什么不在 CI 里跑运行时冒烟：GitHub 的 runner 上，`Tjt.App.exe` 起得来做不到 ——
+      # 装了 Windows App Runtime 1.8 之后仍然是"进程挂着且**一行输出都没有**"（连我们写在
+      # App 构造函数第一行的文件日志都没落盘），说明卡点在 WASDK 引导路径内部，不在我们的代码里。
+      # 反过来，本机（RTX 5070 + 1.8 运行时）两条路径都是实测通过的：
+      # 带材质 `[backdrop] mode=mica-controller`、不带材质 `[backdrop] skipped`，
+      # 两种都 `[smoke] ok blocks=19 canvas=977x600`。运行时验证走 .tools/build-winui.ps1 -RunSmoke。
 
       - name: Upload（WinUI 外壳产物）
         uses: actions/upload-artifact@v4
