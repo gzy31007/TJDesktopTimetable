@@ -1,5 +1,6 @@
 import type { BrowserWindow } from 'electron';
 import type { WidgetMode } from '../../shared/ipc.js';
+import { log } from '../logger.js';
 
 /**
  * Win32 窗口层级控制（koffi 纯 FFI 调用 user32.dll）。
@@ -112,7 +113,7 @@ function loadWin32(): Win32 | null {
   } catch (error) {
     loadFailed = true;
     cached = null;
-    console.error('[win32] koffi/user32 加载失败，退化为普通置底窗口：', error);
+    log('[win32] koffi/user32 加载失败，退化为普通置底窗口：', error);
   }
   return cached;
 }

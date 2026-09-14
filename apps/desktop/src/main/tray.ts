@@ -1,5 +1,6 @@
 import { app, Menu, nativeImage, shell, Tray } from 'electron';
 import { join } from 'node:path';
+import { log, revealLogFile } from './logger.js';
 import { loadSettings, saveSettings, userDataDir } from './store.js';
 import { createManageWindow } from './windows/manage.js';
 import { createWidgetWindow, reapplyLayer, setWidgetVisible } from './windows/widget.js';
@@ -20,6 +21,7 @@ export function createTray(): Tray {
   if (tray) return tray;
   const loaded = nativeImage.createFromPath(resolveIconPath());
   const icon = loaded.isEmpty() ? nativeImage.createFromDataURL(TRAY_FALLBACK_PNG) : loaded.resize({ width: 16, height: 16 });
+  log('[tray] 创建托盘', { iconPath: resolveIconPath(), iconEmpty: loaded.isEmpty() });
   tray = new Tray(icon);
   tray.setToolTip('同济桌面课表');
   tray.on('double-click', () => createManageWindow());
@@ -97,6 +99,7 @@ export function refreshTrayMenu(): void {
       },
       { type: 'separator' },
       { label: '打开数据目录', click: () => void shell.openPath(userDataDir()) },
+      { label: '查看启动日志', click: () => void shell.openPath(revealLogFile()) },
       { label: '退出', click: () => app.quit() },
     ]),
   );

@@ -48,8 +48,15 @@ pnpm dist:win      # WSL 内交叉打包 Windows 免安装版 → apps/desktop/d
 > 在 WSL 里做视觉调试：`pnpm dev:web` 后访问 `http://127.0.0.1:5199/widget/index.html`（挂件）
 > 与 `/manage/index.html`（设置）。浏览器模式使用内置示例课表并写入 localStorage，不需要 Electron。
 >
-> 打包产物是免安装目录，双击 `TJDesktopTimetable.exe` 即用；需要 NSIS 安装包时跑
-> GitHub Actions 的 **Build Windows** 工作流（本地打 NSIS 需要 wine）。
+> 打包产物是免安装目录，**必须放到 Windows 本地磁盘再运行**（例如拖到桌面）：从
+> `\\wsl.localhost\...` 这类 UNC 路径直接双击运行不可靠（Chromium 需要内存映射加载 pak 文件）。
+>
+> 首次启动没有课表时会**自动打开设置窗口**；关闭设置窗口后，课表挂件固定在桌面右下角（置底、不抢焦点）。
+> 如果感觉"双击没反应"，先看托盘图标是否存在，再查看 `%APPDATA%\TJDesktopTimetable\startup.log`
+> （托盘菜单 → 查看启动日志）。上一次实例没退出时，重复双击会被单实例锁静默挡掉：
+> `taskkill /F /IM TJDesktopTimetable.exe` 后再启动。
+>
+> 需要 NSIS 安装包时跑 GitHub Actions 的 **Build Windows** 工作流（本地打 NSIS 需要 wine）。
 
 ## 课表数据从哪来
 

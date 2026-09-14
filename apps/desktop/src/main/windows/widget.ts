@@ -1,8 +1,9 @@
 import { BrowserWindow, screen } from 'electron';
 import { join } from 'node:path';
 import type { WidgetSettings } from '../../shared/ipc.js';
-import { attachToDesktop, type LayerHandle } from '../win32/layer.js';
+import { attachToDesktop, isWin32Available, type LayerHandle } from '../win32/layer.js';
 import { loadSettings, saveSettings } from '../store.js';
+import { log } from '../logger.js';
 
 /**
  * 桌面挂件窗口。
@@ -68,11 +69,12 @@ function attachLayer(win: BrowserWindow, settings: WidgetSettings): void {
     mode: settings.mode,
     keepAtBottomIntervalMs: settings.keepAtBottomIntervalMs,
     onFallback: (reason) => {
-      console.warn('[widget] 层级回退：', reason);
+      log('[widget] 层级回退：', reason);
       saveSettings({ mode: 'desktop' });
       broadcast('widget:fallback', reason);
     },
   });
+  log('[widget] 层级模式', { requested: settings.mode, effective: layer.mode, win32: isWin32Available() });
   if (settings.clickThrough) win.setIgnoreMouseEvents(true, { forward: true });
   if (!settings.showWidget) layer.pause();
 }
@@ -111,14 +113,30 @@ export function createWidgetWindow(): BrowserWindow {
   });
 
   win.setMenuBarVisibility(false);
-  loadRenderer(win, 'widget');
-  attachLayer(win, settings);
-
-  win.once('ready-to-show', () => {
+  let revealed = false;
+  const reveal = (reason: string): void => {
+    if (revealed || win.isDestroyed()) return;
+    revealed = true;
+    log('[widget] 显示窗口', reason);
     if (loadSettings().showWidget) {
       win.showInactive();
       layer?.resume();
     }
+  };
+
+  loadRenderer(win, 'widget');
+  attachLayer(win, settings);
+
+  // 三重保险：透明窗口在部分 Windows 配置下不会触发 ready-to-show，
+  // 只靠它会导致"进程在跑但界面永不出现"。
+  win.once('ready-to-show', () => reveal('ready-to-show'));
+  win.webContents.on('did-finish-load', () => reveal('did-finish-load'));
+  setTimeout(() => reveal('timeout-fallback'), 3000);
+  win.webContents.on('did-fail-load', (_event, code, description, url) => {
+    log('[widget] 页面加载失败', { code, description, url });
+  });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    log('[widget] 渲染进程退出', details);
   });
 
   win.on('moved', persistBounds);
