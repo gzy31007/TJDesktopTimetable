@@ -30,6 +30,7 @@ const api: DesktopApi & {
   getTongjiRequest: () => ipcRenderer.invoke('tongji:request:get') as Promise<string>,
   saveTongjiRequest: (requestText: string) => ipcRenderer.invoke('tongji:request:save', requestText) as Promise<void>,
   fetchTongjiRequest: (requestText: string) => ipcRenderer.invoke('tongji:fetch', requestText) as Promise<TongjiFetchResult>,
+  setTitleBarTheme: (dark: boolean) => ipcRenderer.invoke('window:titlebar-theme', dark) as Promise<void>,
   beginDrag: () => ipcRenderer.send('widget:drag-start'),
   beginResize: () => ipcRenderer.send('widget:resize-start'),
   endPointer: () => ipcRenderer.send('widget:pointer-end'),

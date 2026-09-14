@@ -96,5 +96,7 @@ export interface DesktopApi {
   beginDrag(): void;
   beginResize(): void;
   endPointer(): void;
+  /** 同步系统窗口按钮配色（管理窗口自绘标题栏用）。 */
+  setTitleBarTheme(dark: boolean): Promise<void>;
   quit(): void;
 }

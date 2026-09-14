@@ -1,13 +1,33 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, nativeTheme } from 'electron';
 import { join } from 'node:path';
 import { log } from '../logger.js';
 
-/** 管理窗口：导入数据、勾选教学班、调外观。普通窗口（可缩放、有边框）。 */
+/** 管理窗口：导入数据、调外观。Win11 上使用系统 Mica 材质 + 自绘标题栏。 */
 
 let manageWindow: BrowserWindow | null = null;
 
+/** 标题栏配色（自绘标题栏 + 系统窗口按钮必须一致，否则按钮会糊在深/浅底上）。 */
+const TITLEBAR_COLORS = {
+  light: { color: '#00000000', symbolColor: '#1a1a1a' },
+  dark: { color: '#00000000', symbolColor: '#ffffff' },
+} as const;
+
+/** 标题栏高度需与渲染层 CSS 的 `.titlebar` 保持一致。 */
+const TITLEBAR_HEIGHT = 48;
+
 export function getManageWindow(): BrowserWindow | null {
   return manageWindow;
+}
+
+/** 随主题切换标题栏按钮颜色（渲染层切换深浅色时调用）。 */
+export function applyTitleBarTheme(dark: boolean): void {
+  const win = manageWindow;
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.setTitleBarOverlay({ ...TITLEBAR_COLORS[dark ? 'dark' : 'light'], height: TITLEBAR_HEIGHT });
+  } catch (error) {
+    log('[manage] 设置标题栏配色失败', String(error));
+  }
 }
 
 export function createManageWindow(): BrowserWindow {
@@ -19,13 +39,19 @@ export function createManageWindow(): BrowserWindow {
   }
   log('[manage] 创建窗口');
 
+  const dark = nativeTheme.shouldUseDarkColors;
   const win = new BrowserWindow({
-    width: 1040,
-    height: 760,
-    minWidth: 860,
-    minHeight: 600,
+    width: 1080,
+    height: 780,
+    minWidth: 880,
+    minHeight: 620,
     title: '同济桌面课表 · 设置',
-    backgroundColor: '#eef2f7',
+    // Mica 材质需要透明底色，否则会盖住系统绘制的那一层
+    backgroundColor: '#00000000',
+    backgroundMaterial: 'mica',
+    // 自绘标题栏：保留系统窗口按钮，其余交给渲染层（拖动区由 CSS 声明）
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { ...TITLEBAR_COLORS[dark ? 'dark' : 'light'], height: TITLEBAR_HEIGHT },
     show: false,
     autoHideMenuBar: true,
     webPreferences: {

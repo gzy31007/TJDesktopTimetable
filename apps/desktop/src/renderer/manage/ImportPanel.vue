@@ -42,9 +42,9 @@ const jsonPlaceholder = `或者把课表接口的响应 JSON 直接粘贴到这�
 </script>
 
 <template>
-  <section class="card">
-    <header class="card-head">
-      <h2>1 · 从 1 系统获取我的课表</h2>
+  <section class="f-card glass--edge">
+    <header class="f-card-head">
+      <h2>从 1 系统获取我的课表</h2>
       <button type="button" class="primary" :disabled="!requestReady || fetchBusy" @click="emit('fetch', requestText)">
         {{ fetchBusy ? '获取中…' : '获取我的课表' }}
       </button>
@@ -91,17 +91,17 @@ const jsonPlaceholder = `或者把课表接口的响应 JSON 直接粘贴到这�
     </ul>
   </section>
 
-  <section class="card">
-    <header class="card-head">
-      <h2>2 · 本地 JSON 导入</h2>
+  <section class="f-card glass--edge">
+    <header class="f-card-head">
+      <h2>本地 JSON 导入</h2>
       <button type="button" :disabled="!hasInput || busy" @click="emit('run')">
         {{ busy ? '解析中…' : '导入并应用' }}
       </button>
     </header>
 
     <label class="field">
-      <span>适配器</span>
-      <select :value="adapterId" @change="emit('update:adapterId', ($event.target as HTMLSelectElement).value)">
+      <span class="lbl">适配器</span>
+      <select class="f-select" :value="adapterId" @change="emit('update:adapterId', ($event.target as HTMLSelectElement).value)">
         <option value="">自动探测（推荐）</option>
         <option v-for="adapter in adapters" :key="adapter.id" :value="adapter.id">{{ adapter.displayName }}</option>
       </select>
@@ -118,7 +118,7 @@ const jsonPlaceholder = `或者把课表接口的响应 JSON 直接粘贴到这�
     <div class="row">
       <button type="button" @click="emit('pick')">选择 JSON 文件…</button>
       <button type="button" @click="emit('clear')">清空</button>
-      <span class="hint">粘贴请求里的响应也可以直接存成 JSON 再导入</span>
+      <span class="f-hint">粘贴请求里的响应也可以直接存成 JSON 再导入</span>
     </div>
 
     <ul v-if="files.length" class="file-list">
@@ -132,191 +132,148 @@ const jsonPlaceholder = `或者把课表接口的响应 JSON 直接粘贴到这�
 </template>
 
 <style scoped>
-.card {
-  border: 1px solid #d5dde8;
-  border-radius: 10px;
-  background: #fff;
-  padding: 12px 14px;
-}
-.card + .card {
-  margin-top: 12px;
-}
-.card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.card-head h2 {
-  font-size: 15px;
-  margin: 0;
-}
-button {
-  border: 1px solid #d5dde8;
-  background: #fff;
-  border-radius: 6px;
-  padding: 5px 12px;
-  font-size: 13px;
-  cursor: pointer;
-}
-button:hover:not(:disabled) {
-  border-color: #2563eb;
-  color: #2563eb;
-}
-button.primary {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
-}
-button.primary:hover:not(:disabled) {
-  background: #1d4ed8;
-  color: #fff;
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-button.link {
-  border: none;
-  color: #2563eb;
-  padding: 0 4px;
-}
 .field {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-  font-size: 13px;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
 }
-.field select {
-  flex: 1 1 auto;
-  padding: 4px 8px;
-  border: 1px solid #d5dde8;
-  border-radius: 6px;
-  font-size: 13px;
+
+.field .lbl {
+  font-size: var(--fs-body);
+  color: var(--text-2);
 }
+
 .paste {
   width: 100%;
-  min-height: 120px;
-  box-sizing: border-box;
-  border: 1px solid #d5dde8;
-  border-radius: 8px;
+  min-height: 116px;
   padding: 8px 10px;
-  font-family: Consolas, 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.5;
+  font-family: var(--font-num);
+  font-size: var(--fs-body);
+  line-height: 1.55;
   resize: vertical;
 }
+
 .paste.short {
-  min-height: 90px;
+  min-height: 84px;
 }
+
 .row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
 }
-.hint {
-  font-size: 12px;
-  color: #6b7280;
+
+.help {
+  margin-top: 10px;
+  font-size: var(--fs-body);
+  line-height: 1.7;
 }
+
+.help summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--fs-body);
+}
+
+.help ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.help .note {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+.error {
+  color: #c42b1c;
+  font-size: var(--fs-body);
+  margin: 10px 0 0;
+  line-height: 1.6;
+  padding: 7px 10px;
+  border-radius: var(--r-md);
+  background-color: rgba(196, 43, 28, 0.09);
+  border: 1px solid rgba(196, 43, 28, 0.2);
+}
+
 .file-list {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
+
 .file-list li {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 0;
+  padding: 4px 0;
 }
+
 .file-list .name {
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .file-list .size {
-  color: #6b7280;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
-.error {
-  color: #dc2626;
-  font-size: 12px;
-  margin: 8px 0 0;
-  line-height: 1.6;
-}
-.help {
-  font-size: 12px;
-  color: #4b5563;
-  margin-top: 8px;
-}
-.help summary {
-  cursor: pointer;
-}
-.help ol {
-  margin: 6px 0 0;
-  padding-left: 18px;
-  line-height: 1.7;
-}
-.help .note {
-  margin: 6px 0 0;
-  color: #6b7280;
-  line-height: 1.6;
-}
-.help code {
-  background: #f1f5f9;
-  padding: 0 3px;
-  border-radius: 3px;
-}
+
 .probes {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
+
 .probes li {
   display: flex;
   gap: 8px;
-  padding: 2px 0;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  margin-bottom: 4px;
 }
+
 .probes .label {
-  color: #6b7280;
-  flex: 0 0 72px;
+  color: var(--text-3);
+  flex: 0 0 76px;
 }
+
 .probes .value {
-  font-family: Consolas, monospace;
+  font-family: var(--font-num);
   word-break: break-all;
 }
+
 .diagnostics {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
+
 .diagnostics li {
   display: flex;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: #f8fafc;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: var(--r-sm);
+  line-height: 1.5;
 }
-.diagnostics li.warn {
-  background: #fffbeb;
-}
-.diagnostics li.error {
-  background: #fef2f2;
-  color: #b91c1c;
-}
+
 .diagnostics b {
   font-weight: 600;
   text-transform: uppercase;
   font-size: 10px;
   line-height: 16px;
+  flex: 0 0 auto;
 }
 </style>

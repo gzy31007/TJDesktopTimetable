@@ -18,6 +18,12 @@ apps/desktop/dist/
 apps/desktop/release/
 /output/
 
-# Windows 侧本地验收辅助脚本（含本机路径，不入库）
+# 本地部署/验收辅助脚本（含本机路径，不入库）
 .win-*.ps1
 .win-*.bat
+deploy-win.ps1
+
+# 本地视觉验收产物（截图/探针），不参与版本控制
+.shots/
+.tools/
+*.local.json

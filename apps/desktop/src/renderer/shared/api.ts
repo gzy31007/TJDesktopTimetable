@@ -26,6 +26,49 @@ export function getApi(): RendererApi | null {
 
 export const isMock = (): boolean => getApi() === null;
 
+/**
+ * `pnpm dev:web` 视觉调试用：允许用 URL 查询参数覆盖"今天/当前时间/主题"，
+ * 例如 `?today=2026-09-16&now=600&theme=dark`。桌面端（有 `window.api`）下不生效，
+ * 避免误改真实课表的当前周判断。
+ */
+export interface PreviewOverrides {
+  today?: string;
+  nowMinutes?: number;
+  theme?: 'light' | 'dark';
+}
+
+export function previewOverrides(): PreviewOverrides {
+  if (!isMock() || typeof window === 'undefined') return {};
+  const params = new URLSearchParams(window.location.search);
+  const overrides: PreviewOverrides = {};
+  const today = params.get('today');
+  if (today && /^\d{4}-\d{2}-\d{2}$/.test(today)) overrides.today = today;
+  const now = Number(params.get('now'));
+  if (Number.isFinite(now) && now >= 0 && now <= 24 * 60) overrides.nowMinutes = now;
+  const theme = params.get('theme');
+  if (theme === 'light' || theme === 'dark') overrides.theme = theme;
+  return overrides;
+}
+
+/**
+ * `?wall=dark|color` —— 仅浏览器预览：把 <html> 涂成壁纸色，用来模拟
+ * Electron 透明窗口底下真实的桌面背景（否则预览里窗后永远是白的，看不出玻璃效果）。
+ */
+export function applyPreviewWallpaper(): void {
+  if (!isMock() || typeof document === 'undefined') return;
+  const wall = new URLSearchParams(window.location.search).get('wall');
+  if (!wall) return;
+  const html = document.documentElement;
+  if (wall === 'dark') {
+    html.style.background = '#1b2430';
+    html.style.backgroundImage =
+      'radial-gradient(1000px 600px at 20% 15%, #35506b 0%, transparent 60%), radial-gradient(800px 500px at 85% 80%, #4a3b57 0%, transparent 62%)';
+  } else if (wall === 'color') {
+    html.style.background = '#2b3a55';
+    html.style.backgroundImage = 'linear-gradient(135deg, #2b3a55, #6d4b6b)';
+  }
+}
+
 const STORAGE_KEY = 'tjt.mock.state';
 
 function readMockState(): AppState {
@@ -70,6 +113,7 @@ export function createMockApi(): RendererApi {
     openManage: async () => {
       window.location.href = '/manage/index.html';
     },
+    setTitleBarTheme: async () => {},
     toggleWidget: async (visible?: boolean) =>
       update({ ...state, settings: { ...state.settings, showWidget: visible ?? !state.settings.showWidget } }),
     setClickThrough: async (enabled: boolean) =>

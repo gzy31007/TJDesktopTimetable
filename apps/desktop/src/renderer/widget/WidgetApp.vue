@@ -2,11 +2,18 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { localTodayIso, termWeekAt, todaysSessions, type Timetable, type WeekFilter } from '@tjt/core';
 import TimetableBoard from '../shared/TimetableBoard.vue';
-import { createMockApi, getApi } from '../shared/api';
+import { createMockApi, getApi, previewOverrides } from '../shared/api';
 import { DEFAULT_SETTINGS, type AppState, type WidgetSettings } from '../../shared/ipc';
+import '../shared/fluent.css';
+import './widget.css';
 
-/** 桌面挂件窗口：一条可拖动标题栏 + 课表网格 + 右下角缩放柄。 */
+/**
+ * 桌面挂件窗口：亚克力玻璃底板 + 可拖动命令条 + 课表网格 + 右下角缩放柄。
+ *
+ * 视觉分层：壳（玻璃底/圆角/阴影）→ 命令条（命令与摘要）→ 内容（网格）→ 状态栏（网格组件内）。
+ */
 
+const preview = previewOverrides();
 const api = getApi() ?? createMockApi();
 
 const state = ref<AppState>({ settings: { ...DEFAULT_SETTINGS }, timetable: null });
@@ -21,9 +28,16 @@ const timetable = computed<Timetable | null>(() => state.value.timetable);
 const courses = computed(() => timetable.value?.courses ?? []);
 
 const weekFilter = computed<WeekFilter>(() => settings.value.weekFilter);
-const dark = computed(() => (settings.value.theme === 'auto' ? prefersDark.matches : settings.value.theme === 'dark'));
+/** 网格组件暴露的 board：用来在工具条提示里说明"有多少时段被周次过滤"。 */
+const boardRef = ref<{ board: { hiddenSessions: number } } | null>(null);
+const hiddenSessions = computed(() => boardRef.value?.board.hiddenSessions ?? 0);
+const dark = computed(() => {
+  if (preview.theme) return preview.theme === 'dark';
+  return settings.value.theme === 'auto' ? prefersDark.matches : settings.value.theme === 'dark';
+});
 
-const today = localTodayIso();
+/** 预览参数只在 mock 模式生效（见 `shared/api.ts`）。 */
+const today = preview.today ?? localTodayIso();
 const week = computed(() => (timetable.value ? termWeekAt(timetable.value.term, today) : null));
 const todayCount = computed(() =>
   timetable.value ? todaysSessions(timetable.value.courses, timetable.value.term).length : 0,
@@ -114,36 +128,61 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="widget-shell"
-    :class="dark ? 'dark' : 'light'"
+    class="widget-shell fluent-root glass--edge"
+    :data-theme="dark ? 'dark' : 'light'"
     :style="{ '--shell-alpha': String(settings.opacity) }"
   >
     <div class="widget-bar" title="按住此处可拖动挂件" @pointerdown="onBarPointerDown" @pointerup="onPointerUp">
       <span class="title">{{ termName }}</span>
-      <span>{{ week ? `第 ${week} 周` : '假期' }}</span>
-      <span v-if="todayCount">今日 {{ todayCount }} 节</span>
+      <span class="meta">
+        <span>{{ week ? `第 ${week} 周` : '假期' }}</span>
+        <template v-if="todayCount"><span class="sep">·</span><span>今日 {{ todayCount }} 节</span></template>
+      </span>
       <span class="spacer" />
-      <button type="button" :title="`周次过滤：${filterLabel}`" @click="cycleWeekFilter">{{ filterLabel }}</button>
-      <button type="button" title="显示/隐藏周末" @click="applySettings({ showWeekend: !settings.showWeekend })">
-        {{ settings.showWeekend ? '含周末' : '仅工作日' }}
-      </button>
-      <button type="button" title="打开设置" @click="api.openManage()">设置</button>
-      <button type="button" title="隐藏挂件" @click="api.toggleWidget(false)">隐藏</button>
+      <span class="actions">
+        <button
+          class="f-pill"
+          type="button"
+          :title="`周次过滤：${filterLabel}${hiddenSessions ? `（${hiddenSessions} 个时段被过滤）` : ''}，点击切换`"
+          @click="cycleWeekFilter"
+        >
+          {{ filterLabel }}<span v-if="hiddenSessions" class="count">{{ hiddenSessions }}</span>
+        </button>
+        <button
+          class="f-pill"
+          :class="{ 'is-on': settings.showWeekend }"
+          type="button"
+          :title="settings.showWeekend ? '当前显示周末，点击仅显示工作日' : '当前仅工作日，点击显示周末'"
+          @click="applySettings({ showWeekend: !settings.showWeekend })"
+        >
+          {{ settings.showWeekend ? '含周末' : '仅工作日' }}
+        </button>
+        <span class="divider" />
+        <button class="f-pill" type="button" title="打开设置" @click="api.openManage()">设置</button>
+        <button class="f-pill" type="button" title="隐藏挂件（可从托盘恢复）" @click="api.toggleWidget(false)">
+          隐藏
+        </button>
+      </span>
     </div>
 
     <div class="widget-content">
       <div v-if="!timetable || !courses.length" class="widget-empty">
+        <span class="icon">▤</span>
         <p>还没有课表数据</p>
-        <button type="button" @click="api.openManage()">导入同济课表</button>
+        <button class="f-btn f-btn--accent" type="button" @click="api.openManage()">导入同济课表</button>
       </div>
       <TimetableBoard
         v-else
+        ref="boardRef"
         :courses="courses"
         :term="timetable.term"
         :week-filter="weekFilter"
         :show-weekend="settings.showWeekend"
         :trim-empty-slots="settings.trimEmptySlots"
         :interactive="true"
+        :dark="dark"
+        :today="preview.today"
+        :now-minutes="preview.nowMinutes"
         empty-hint="当前周次过滤下没有课"
         @pick="api.openManage()"
       />
@@ -160,3 +199,20 @@ onBeforeUnmount(() => {
     <div class="toast" :class="{ show: !!toast }">{{ toast }}</div>
   </div>
 </template>
+
+<style scoped>
+.widget-bar .sep {
+  color: var(--text-3);
+}
+
+/* 被周次过滤掉的时段数：贴在小角标里，省掉一整条状态栏 */
+.widget-bar .count {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background-color: var(--layer-strong);
+  color: var(--text-3);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+</style>

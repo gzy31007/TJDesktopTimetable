@@ -1,0 +1,570 @@
+/*
+ * Fluent / Aero-Glass 设计令牌与基础控件（挂件 + 管理窗口共用）。
+ *
+ * 设计语言对齐 Windows 11：
+ *   - 亚克力玻璃表面：半透明分层底色 + 顶部 1px 高光 + 低透明度描边 + 柔和外阴影；
+ *   - 圆角阶梯（4 / 7 / 8 / 12）、Fluent 字重与字号阶梯；
+ *   - 强调色取 Windows 默认 #0067C0（浅色）/ #60CDFF（深色）；
+ *   - 明暗主题由 `data-theme` 或 `prefers-color-scheme` 驱动。
+ *
+ * 该文件只声明"看得见的皮肤"，不含任何业务逻辑，故 core 分层约束不受影响
+ * （渲染层本来就可以自由使用 DOM / CSS）。
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* 字体：Win11 的 Segoe UI Variable 优先，回落到微软雅黑 / 苹方 */
+  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC',
+    system-ui, sans-serif;
+  --font-num: 'Segoe UI Variable Small', 'Segoe UI', 'Cascadia Mono', 'Microsoft YaHei UI', ui-monospace, monospace;
+
+  /* 字号阶梯（Fluent 2） */
+  --fs-caption: 11px;
+  --fs-body: 12px;
+  --fs-body-lg: 13px;
+  --fs-subtitle: 15px;
+  --fs-title: 17px;
+
+  /* 圆角阶梯 */
+  --r-xs: 4px;
+  --r-sm: 7px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  /* 动效 */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 90ms;
+  --dur: 160ms;
+}
+
+/* ---------------------------------------------------------------- 浅色主题 */
+:root,
+[data-theme='light'] {
+  --accent: #0067c0;
+  --accent-strong: #005ba1;
+  --accent-soft: rgba(0, 103, 192, 0.1);
+  --accent-ring: rgba(0, 103, 192, 0.32);
+
+  --text: #1a1a1a;
+  --text-2: #4f4f4f;
+  --text-3: #6e6e6e;
+  --text-on-accent: #ffffff;
+
+  --win-tint: rgba(253, 253, 254, 0.78);
+  --win-tint-2: rgba(250, 251, 253, 0.66);
+  --layer: rgba(255, 255, 255, 0.62);
+  --layer-2: rgba(255, 255, 255, 0.44);
+  --layer-strong: rgba(255, 255, 255, 0.78);
+  --layer-hover: rgba(255, 255, 255, 0.82);
+  --layer-press: rgba(240, 243, 247, 0.9);
+
+  --stroke: rgba(0, 0, 0, 0.07);
+  --stroke-strong: rgba(0, 0, 0, 0.13);
+  --stroke-top: rgba(255, 255, 255, 0.72);
+  --divider: rgba(0, 0, 0, 0.06);
+  /* 下拉列表等原生浮层需要不透明底色（半透明会让原生绘制露出白底） */
+  --popup-surface: #ffffff;
+  --popup-surface-hover: #f0f3f7;
+
+  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.14), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.07), 0 0 1px rgba(0, 0, 0, 0.12);
+  --shadow-shell: 0 16px 48px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.12);
+  --glass-noise: 0.028;
+
+  --grid-line: rgba(0, 0, 0, 0.055);
+  --grid-line-strong: rgba(0, 0, 0, 0.09);
+  --cell-weekend: rgba(0, 0, 0, 0.022);
+  --cell-today: rgba(0, 103, 192, 0.055);
+  --slot-ink: #6e6e6e;
+  --slot-current: #005ba1;
+
+  --block-ink: #17223a;
+  --block-ink-2: rgba(15, 23, 42, 0.62);
+  --block-tint: 0.13;
+  --block-tint-hover: 0.2;
+  --block-border: 0.24;
+  --stripe: rgba(255, 255, 255, 0.22);
+}
+
+/* ---------------------------------------------------------------- 深色主题 */
+[data-theme='dark'] {
+  --accent: #60cdff;
+  --accent-strong: #8adcff;
+  --accent-soft: rgba(96, 205, 255, 0.12);
+  --accent-ring: rgba(96, 205, 255, 0.36);
+
+  --text: #ffffff;
+  --text-2: #d6d6d6;
+  --text-3: #a8a8a8;
+  --text-on-accent: #003350;
+
+  --win-tint: rgba(32, 32, 32, 0.72);
+  --win-tint-2: rgba(28, 28, 28, 0.6);
+  --layer: rgba(255, 255, 255, 0.055);
+  --layer-2: rgba(255, 255, 255, 0.035);
+  --layer-strong: rgba(255, 255, 255, 0.085);
+  --layer-hover: rgba(255, 255, 255, 0.1);
+  --layer-press: rgba(255, 255, 255, 0.04);
+
+  --stroke: rgba(255, 255, 255, 0.085);
+  --stroke-strong: rgba(255, 255, 255, 0.14);
+  --stroke-top: rgba(255, 255, 255, 0.12);
+  --divider: rgba(255, 255, 255, 0.07);
+  --popup-surface: #2b2b2b;
+  --popup-surface-hover: #3a3a3a;
+
+  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.42), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(0, 0, 0, 0.4);
+  --shadow-shell: 0 18px 52px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.4);
+  --glass-noise: 0.02;
+
+  --grid-line: rgba(255, 255, 255, 0.055);
+  --grid-line-strong: rgba(255, 255, 255, 0.1);
+  --cell-weekend: rgba(255, 255, 255, 0.022);
+  --cell-today: rgba(96, 205, 255, 0.07);
+  --slot-ink: #a2a2a2;
+  --slot-current: #8adcff;
+
+  --block-ink: #ffffff;
+  --block-ink-2: rgba(255, 255, 255, 0.68);
+  --block-tint: 0.26;
+  --block-tint-hover: 0.34;
+  --block-border: 0.34;
+  --stripe: rgba(255, 255, 255, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --accent: #60cdff;
+    --accent-strong: #8adcff;
+    --accent-soft: rgba(96, 205, 255, 0.12);
+    --accent-ring: rgba(96, 205, 255, 0.36);
+
+    --text: #ffffff;
+    --text-2: #d6d6d6;
+    --text-3: #a8a8a8;
+    --text-on-accent: #003350;
+
+    --win-tint: rgba(32, 32, 32, 0.72);
+    --win-tint-2: rgba(28, 28, 28, 0.6);
+    --layer: rgba(255, 255, 255, 0.055);
+    --layer-2: rgba(255, 255, 255, 0.035);
+    --layer-strong: rgba(255, 255, 255, 0.085);
+    --layer-hover: rgba(255, 255, 255, 0.1);
+    --layer-press: rgba(255, 255, 255, 0.04);
+
+    --stroke: rgba(255, 255, 255, 0.085);
+    --stroke-strong: rgba(255, 255, 255, 0.14);
+    --stroke-top: rgba(255, 255, 255, 0.12);
+    --divider: rgba(255, 255, 255, 0.07);
+    --popup-surface: #2b2b2b;
+    --popup-surface-hover: #3a3a3a;
+
+    --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.42), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.07), 0 0 1px rgba(0, 0, 0, 0.12);
+    --shadow-shell: 0 18px 52px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.4);
+    --glass-noise: 0.02;
+
+    --grid-line: rgba(255, 255, 255, 0.055);
+    --grid-line-strong: rgba(255, 255, 255, 0.1);
+    --cell-weekend: rgba(255, 255, 255, 0.022);
+    --cell-today: rgba(96, 205, 255, 0.07);
+    --slot-ink: #a2a2a2;
+    --slot-current: #8adcff;
+
+    --block-ink: #ffffff;
+    --block-ink-2: rgba(255, 255, 255, 0.68);
+    --block-tint: 0.26;
+    --block-tint-hover: 0.34;
+    --block-border: 0.34;
+    --stripe: rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* ------------------------------------------------------------ 玻璃面板层 */
+.fluent-root {
+  font-family: var(--font-ui);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* 关键：data-theme 在根 div 上而不是 <html> 上，若不在这里声明 color-scheme，
+     Chromium 会用浅色渲染 <select> 的原生弹出列表 → 深色主题下变成白底浅字。 */
+  color-scheme: light;
+}
+
+[data-theme='dark'].fluent-root,
+.fluent-root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/* 亚克力玻璃基类：底色分层 + 顶部高光 + 细描边。 */
+.glass {
+  background-color: var(--glass-bg, var(--layer));
+  border: 1px solid var(--glass-stroke, var(--stroke));
+  box-shadow: var(--glass-shadow, none);
+}
+
+/* 顶部 1px 高光（Win11 亚克力的"灯带"），用伪元素画在内侧，不占布局。 */
+.glass--edge {
+  position: relative;
+}
+
+.glass--edge::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--stroke-top) 18%, var(--stroke-top) 82%, transparent);
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- 控件层 */
+.fluent-root button,
+.fluent-root select,
+.fluent-root input,
+.fluent-root textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* Fluent 标准按钮 */
+.f-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--stroke-strong);
+  background-color: var(--layer-strong);
+  color: var(--text);
+  font-size: var(--fs-body-lg);
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.f-btn:hover:not(:disabled) {
+  background-color: var(--layer-hover);
+}
+
+.f-btn:active:not(:disabled) {
+  background-color: var(--layer-press);
+}
+
+.f-btn:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.f-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.f-btn--subtle {
+  border-color: transparent;
+  background-color: transparent;
+}
+
+.f-btn--subtle:hover:not(:disabled) {
+  background-color: var(--layer-hover);
+  border-color: transparent;
+}
+
+.f-btn--accent {
+  background-color: var(--accent);
+  border-color: transparent;
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+.f-btn--accent:hover:not(:disabled) {
+  background-color: var(--accent-strong);
+}
+
+/* 胶囊按钮（挂件工具条、筛选器） */
+.f-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-color: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-body);
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.f-pill:hover {
+  background-color: var(--layer-hover);
+  color: var(--text);
+}
+
+.f-pill.is-on {
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.f-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 输入框 / 下拉框 */
+.f-input,
+.f-select,
+.f-textarea {
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--stroke-strong);
+  /* 输入框用"下沿加重"的 Fluent 观感：底部描边更明显 */
+  border-bottom-color: var(--text-3);
+  background-color: var(--layer-strong);
+  color: var(--text);
+  font-size: var(--fs-body-lg);
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.f-input::placeholder,
+.f-textarea::placeholder {
+  color: var(--text-3);
+}
+
+.f-input:hover,
+.f-select:hover,
+.f-textarea:hover {
+  background-color: var(--layer-hover);
+}
+
+.f-input:focus,
+.f-select:focus,
+.f-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  border-bottom-color: var(--accent);
+  box-shadow: inset 0 -1px 0 0 var(--accent);
+}
+
+.f-textarea {
+  font-family: var(--font-num);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.f-select {
+  appearance: none;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 14px) 13px, calc(100% - 9px) 13px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* Toggle 开关（Win11 风格） */
+.f-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: var(--fs-body-lg);
+  color: var(--text);
+  padding: 3px 0;
+}
+
+.f-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.f-switch .track {
+  flex: 0 0 auto;
+  position: relative;
+  width: 40px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--stroke-strong);
+  background-color: var(--layer-2);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.f-switch .track::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 11px;
+  height: 11px;
+  margin-top: -5.5px;
+  border-radius: 50%;
+  background-color: var(--text-2);
+  transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease), width var(--dur) var(--ease);
+}
+
+.f-switch input:checked + .track {
+  background-color: var(--accent);
+  border-color: transparent;
+}
+
+.f-switch input:checked + .track::after {
+  transform: translateX(19px);
+  background-color: var(--text-on-accent);
+  width: 13px;
+}
+
+.f-switch input:focus-visible + .track {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.f-switch:hover .track::after {
+  width: 13px;
+}
+
+.f-switch input:checked:hover + .track::after {
+  width: 15px;
+}
+
+/* 滑杆 */
+.f-range {
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.f-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 3px;
+  background-color: var(--stroke-strong);
+}
+
+.f-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -8px;
+  border-radius: 50%;
+  border: 5px solid var(--accent);
+  background-color: var(--layer-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: border-width var(--dur-fast) var(--ease);
+}
+
+.f-range:hover::-webkit-slider-thumb,
+.f-range:active::-webkit-slider-thumb {
+  border-width: 3px;
+}
+
+/* 卡片 / 分组标题 / 提示 */
+.f-card {
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+  background-color: var(--layer);
+  border: 1px solid var(--stroke);
+  box-shadow: var(--shadow-card);
+}
+
+.f-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.f-card-head h2 {
+  margin: 0;
+  font-size: var(--fs-subtitle);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.f-hint {
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.f-divider {
+  height: 1px;
+  background-color: var(--divider);
+  border: 0;
+  margin: 12px 0;
+}
+
+/* 强调色徽标 */
+.f-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+}
+
+.f-badge--ok {
+  background-color: rgba(16, 124, 16, 0.13);
+  color: #0b6a0b;
+}
+
+.f-badge--warn {
+  background-color: rgba(157, 93, 0, 0.14);
+  color: #9d5d00;
+}
+
+.f-badge--error {
+  background-color: rgba(196, 43, 28, 0.12);
+  color: #c42b1c;
+}
+
+/* 滚动条（Win11 细样式） */
+.f-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--stroke-strong) transparent;
+}
+
+.f-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.f-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.f-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--stroke-strong);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.f-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-3);
+  background-clip: content-box;
+}

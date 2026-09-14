@@ -111,6 +111,8 @@ export function createWidgetWindow(): BrowserWindow {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
+    // Win11：让系统给窗口加圆角（透明无边框窗口默认是直角）
+    ...(process.platform === 'win32' ? { roundedCorners: true } : {}),
     resizable: false,
     movable: true,
     minimizable: false,

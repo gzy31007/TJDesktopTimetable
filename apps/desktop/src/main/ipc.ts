@@ -7,7 +7,7 @@ import * as store from './store.js';
 import { log } from './logger.js';
 import { fetchViaPastedRequest } from './tongji.js';
 import { refreshTrayMenu } from './tray.js';
-import { createManageWindow } from './windows/manage.js';
+import { applyTitleBarTheme, createManageWindow } from './windows/manage.js';
 import {
   applyWidgetSettings,
   beginDrag,
@@ -101,6 +101,11 @@ export function registerIpc(): void {
 
   ipcMain.handle('window:manage', (): void => {
     createManageWindow();
+  });
+
+  // 渲染层切深浅主题时同步系统窗口按钮配色（自绘标题栏必须与按钮一致）
+  ipcMain.handle('window:titlebar-theme', (_event, dark: boolean): void => {
+    applyTitleBarTheme(Boolean(dark));
   });
 
   ipcMain.handle('widget:toggle', (_event, visible?: boolean): AppState => {
