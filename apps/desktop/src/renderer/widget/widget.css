@@ -20,9 +20,17 @@ body {
   font-family: var(--font-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif);
 }
 
+/* 四周边距：玻璃面板成为悬浮卡片，圆角不会被贴边的色块切成方角 */
+body {
+  padding: 9px;
+  box-sizing: border-box;
+}
+
 #app {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  /* 用 vh 而非 100%：body 的百分比高度在预览环境里会被水平滚动条吃掉一截，
+     导致玻璃卡片底部短一截 */
+  height: calc(100vh - 18px);
 }
 
 .widget-shell {
@@ -32,16 +40,37 @@ body {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  border-radius: 13px;
+  border-radius: 14px;
   border: 1px solid var(--stroke-strong);
-  background-color: var(--win-tint);
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 42%);
+  /* 亚克力质感：描边 + 顶部高光由 inset 阴影承担，避免"外框套内框"的 Win7 Aero 观感 */
+  background-color: var(--glass-shell);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0) 38%);
   color: var(--text);
   box-shadow: var(--shadow-shell), inset 0 1px 0 0 var(--stroke-top);
   overflow: hidden;
   isolation: isolate;
   /* 不透明度由设置驱动：玻璃底板越不透越"实"，文字与色块不受影响 */
   opacity: var(--shell-alpha, 1);
+}
+
+/* Win11 亚克力的细腻颗粒（SVG 噪声，比纯色更像毛玻璃；< 1% 体积开销） */
+.widget-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.5;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.24'/%3E%3C/svg%3E");
+  background-size: 120px 120px;
+}
+
+/* 内容层压在噪声之上 */
+.widget-bar,
+.widget-content {
+  z-index: 2;
 }
 
 [data-theme='dark'] .widget-shell {

@@ -111,8 +111,12 @@ export function createWidgetWindow(): BrowserWindow {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    // Win11：让系统给窗口加圆角（透明无边框窗口默认是直角）
-    ...(process.platform === 'win32' ? { roundedCorners: true } : {}),
+    /*
+     * Win11 真·毛玻璃：交给 DWM 做窗口级 Acrylic（系统对窗口背后的桌面做模糊 + 噪声）。
+     * 渲染层的 `backdrop-filter` 只能模糊本进程内容，永远做不出这个效果。
+     * 样式层保留半透明玻璃底作为兜底（< Win11 22H2 时材质不生效，界面仍可读）。
+     */
+    ...(process.platform === 'win32' ? { backgroundMaterial: 'acrylic' as const, roundedCorners: true } : {}),
     resizable: false,
     movable: true,
     minimizable: false,

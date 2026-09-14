@@ -154,7 +154,8 @@
   left: calc(var(--gutter-w) - 4px);
   right: 0;
   height: 0;
-  z-index: 4;
+  /* 压在色块之下：只作为背景刻度存在，不横穿课程文字（对齐"课表预览"的层次） */
+  z-index: 1;
   pointer-events: none;
 }
 
