@@ -270,9 +270,3 @@ body {
   transform: translate(-50%, 0);
 }
 
-/*
- * 失焦补偿：Acrylic 失焦时会变成偏蓝的冷灰，这里叠一层中性灰把它拉回中性。
- */
-.widget-shell.is-unfocused {
-  background-color: var(--glass-shell-blur);
-}

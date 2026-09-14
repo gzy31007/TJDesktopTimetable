@@ -15,8 +15,6 @@ import './widget.css';
  */
 
 const preview = previewOverrides();
-/** 窗口是否失焦：用于把 Acrylic 切走时那层偏蓝冷灰拉回中性。 */
-const unfocused = ref(false);
 const api = getApi() ?? createMockApi();
 
 const state = ref<AppState>({ settings: { ...DEFAULT_SETTINGS }, timetable: null });
@@ -114,26 +112,12 @@ onMounted(async () => {
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('blur', onPointerUp);
 
-  // 失焦时 Acrylic 会变成偏蓝冷灰：切到中性档位抵消
-  unfocused.value = !document.hasFocus();
-  window.addEventListener('blur', onWindowBlur);
-  window.addEventListener('focus', onWindowFocus);
 });
 
 // 主题（深浅）变化时同步窗口底色与 DWM 深色边框：mica 的取色跟窗口深浅走
 watch(dark, (value) => void api.setTitleBarTheme?.(value), { immediate: true });
 
-function onWindowBlur(): void {
-  unfocused.value = true;
-}
-
-function onWindowFocus(): void {
-  unfocused.value = !document.hasFocus();
-}
-
 onBeforeUnmount(() => {
-  window.removeEventListener('blur', onWindowBlur);
-  window.removeEventListener('focus', onWindowFocus);
   offState?.();
   offFallback?.();
   window.removeEventListener('pointerup', onPointerUp);
@@ -144,7 +128,6 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="widget-shell fluent-root"
-    :class="{ 'is-unfocused': unfocused }"
     :data-theme="theme"
     :style="{ '--shell-alpha': String(settings.opacity) }"
   >

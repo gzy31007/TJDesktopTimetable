@@ -135,17 +135,17 @@ export function createWidgetWindow(): BrowserWindow {
     // 非透明窗口忽略 alpha：必须给不透明实色，否则是黑底（mica 会画在黑上）
     backgroundColor: WIDGET_BASE_COLOR.dark,
     /*
-     * 材质选 mica（放弃 acrylic）：
-     * acrylic 在"Win+D 隐藏 → 恢复"之后 DWM 合成会失效 —— 窗口 IsWindowVisible 为真、
-     * z-order 与 owner 都正确（日志实测 coveredByShell:false），但屏幕上不出现，
-     * Electron 侧无法感知也无法修复。mica 没有这个合成路径问题，代价是只有壁纸
-     * 着色 + 极轻模糊，且失去"活跃/失焦"两态。
+     * 不启用系统材质（backgroundMaterial）。
      *
-     * hasShadow: false —— 窗口级投影就是"外部立体感"的来源；圆角仍交给 DWM。
+     * 原因链：acrylic 在"Win+D 隐藏 → 恢复"后 DWM 合成会失效（窗口可见、owner 与
+     * z-order 均正确但屏幕上不出现）；mica 没有该问题，但 DWM 会在窗口**获得焦点**
+     * 时改变材质色调（整体变灰/变实），而挂件是常年失焦的桌面元素，任何"激活态"
+     * 跳变都是干扰。渲染层只能用半透明底盖住大部分，做不到 100% 一致。
+     *
+     * 所以最终选择：不用材质，纯不透明底 + DWM 圆角 —— 显示与焦点状态完全无关。
+     * hasShadow: false 去掉窗口投影（那层"外部立体感"）。
      */
-    ...(process.platform === 'win32'
-      ? { backgroundMaterial: 'mica' as const, roundedCorners: true, hasShadow: false }
-      : {}),
+    ...(process.platform === 'win32' ? { roundedCorners: true, hasShadow: false } : {}),
     resizable: false,
     movable: true,
     minimizable: false,
