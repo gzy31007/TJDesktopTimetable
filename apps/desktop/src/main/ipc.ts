@@ -5,7 +5,7 @@ import type { Timetable } from '@tjt/core';
 import type { AdapterInfo, AppState, PickedFile, TongjiFetchResult, WidgetSettings } from '../shared/ipc.js';
 import * as store from './store.js';
 import { log } from './logger.js';
-import { fetchTongjiTimetable } from './tongji.js';
+import { fetchViaPastedRequest } from './tongji.js';
 import { refreshTrayMenu } from './tray.js';
 import { createManageWindow } from './windows/manage.js';
 import {
@@ -61,18 +61,18 @@ export function registerIpc(): void {
     })),
   );
 
-  ipcMain.handle('tongji:cookie:get', (): string => store.loadTongjiCookie());
+  ipcMain.handle('tongji:request:get', (): string => store.loadTongjiRequest());
 
-  ipcMain.handle('tongji:cookie:save', (_event, cookie: string): void => {
-    store.saveTongjiCookie(String(cookie ?? ''));
-    // 注意：绝不把 Cookie 内容写进日志
-    log('[tongji] Cookie 已更新', { length: String(cookie ?? '').trim().length });
+  ipcMain.handle('tongji:request:save', (_event, requestText: string): void => {
+    store.saveTongjiRequest(String(requestText ?? ''));
+    // 注意：绝不把请求内容（含 Cookie）写进日志，只记长度
+    log('[tongji] 抓取请求已保存', { length: String(requestText ?? '').trim().length });
   });
 
-  ipcMain.handle('tongji:fetch', async (_event, cookie: string): Promise<TongjiFetchResult> => {
-    const effective = String(cookie ?? '').trim() || store.loadTongjiCookie();
-    log('[tongji] 开始抓取个人课表', { hasCookie: effective.length > 0 });
-    const result = await fetchTongjiTimetable(effective);
+  ipcMain.handle('tongji:fetch', async (_event, requestText: string): Promise<TongjiFetchResult> => {
+    const effective = String(requestText ?? '').trim() || store.loadTongjiRequest();
+    log('[tongji] 开始抓取个人课表', { requestLength: effective.length });
+    const result = await fetchViaPastedRequest(effective);
     log('[tongji] 抓取结果', { ok: result.ok, message: result.message });
     return result;
   });

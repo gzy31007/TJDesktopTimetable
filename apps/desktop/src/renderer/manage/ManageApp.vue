@@ -32,9 +32,9 @@ const diagnostics = ref<Diagnostic[]>([]);
 const importError = ref('');
 const busy = ref(false);
 const toastMessage = ref('');
-const cookie = ref('');
+const requestText = ref('');
 const fetchBusy = ref(false);
-const probes = ref<{ path: string; status: number; note?: string }[]>([]);
+const probes = ref<{ label: string; value: string }[]>([]);
 
 let toastTimer: number | null = null;
 let offState: (() => void) | null = null;
@@ -93,25 +93,21 @@ async function runImport(): Promise<void> {
   }
 }
 
-/** 从 1 系统抓取（主进程发请求，Cookie 只存本地）。 */
-async function fetchFromTongji(nextCookie: string): Promise<void> {
+/** 从 1 系统抓取：把用户粘贴的浏览器请求原样发一次（主进程执行）。 */
+async function fetchFromTongji(request: string): Promise<void> {
   fetchBusy.value = true;
   importError.value = '';
   probes.value = [];
   try {
-    cookie.value = nextCookie;
-    await api.saveTongjiCookie(nextCookie);
-    const result: TongjiFetchResult = await api.fetchTongji(nextCookie);
-    probes.value = result.probes ?? [];
-    if (!result.ok || !result.timetableText) {
-      importError.value = result.message;
+    requestText.value = request;
+    await api.saveTongjiRequest(request);
+    const fetched: TongjiFetchResult = await api.fetchTongjiRequest(request);
+    probes.value = fetched.probes ?? [];
+    if (!fetched.ok || !fetched.timetableText) {
+      importError.value = fetched.message;
       return;
     }
-    const imported = importTimetable({
-      text: result.timetableText,
-      files: result.calendarText ? [{ name: 'school-calendar.json', text: result.calendarText }] : [],
-      adapterId: 'tongji-student',
-    });
+    const imported = importTimetable({ text: fetched.timetableText, adapterId: 'tongji-student' });
     importResult.value = imported;
     diagnostics.value = imported.diagnostics;
     await applyResult(imported);
@@ -155,7 +151,7 @@ async function updateSettings(patch: Partial<WidgetSettings>): Promise<void> {
 onMounted(async () => {
   state.value = await api.getState();
   adapters.value = await api.listAdapters();
-  cookie.value = await api.getTongjiCookie();
+  requestText.value = await api.getTongjiRequest();
   offState = api.onStateChanged?.((next) => (state.value = next)) ?? null;
 });
 
@@ -182,7 +178,7 @@ onBeforeUnmount(() => {
         <ImportPanel
           v-model:adapter-id="adapterId"
           v-model:pasted-text="pastedText"
-          v-model:cookie="cookie"
+          v-model:request-text="requestText"
           :adapters="adapters"
           :files="files"
           :diagnostics="diagnostics"

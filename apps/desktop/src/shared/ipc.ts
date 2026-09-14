@@ -71,10 +71,8 @@ export interface TongjiFetchResult {
   message: string;
   /** 课表接口响应原文（JSON 字符串），成功时提供。 */
   timetableText?: string;
-  /** 校历接口响应原文（可选，用于节次时间与当前周次）。 */
-  calendarText?: string;
-  /** 实际命中的接口路径与探测过程（排查用）。 */
-  probes?: { path: string; status: number; note?: string }[];
+  /** 诊断信息（请求、HTTP 状态、数据识别结论）。 */
+  probes?: { label: string; value: string }[];
 }
 
 /** preload 暴露到 `window.api` 的方法集合。 */
@@ -88,12 +86,12 @@ export interface DesktopApi {
   openManage(): Promise<void>;
   toggleWidget(visible?: boolean): Promise<AppState>;
   setClickThrough(enabled: boolean): Promise<AppState>;
-  /** 读取已保存的同济 1 系统 Cookie（为空表示未保存）。 */
-  getTongjiCookie(): Promise<string>;
-  /** 保存 Cookie（写入 userData/credentials.json，不入日志、不进版本库）。 */
-  saveTongjiCookie(cookie: string): Promise<void>;
-  /** 用 Cookie 从 1 系统抓取个人课表（+ 校历）。 */
-  fetchTongji(cookie: string): Promise<TongjiFetchResult>;
+  /** 读取上次粘贴的抓取请求（便于复用；含 Cookie，仅存本机）。 */
+  getTongjiRequest(): Promise<string>;
+  /** 保存粘贴的抓取请求。 */
+  saveTongjiRequest(requestText: string): Promise<void>;
+  /** 用粘贴的浏览器请求（Copy as cURL / PowerShell）抓取个人课表。 */
+  fetchTongjiRequest(requestText: string): Promise<TongjiFetchResult>;
   /** 挂件拖动 / 缩放的开始与结束（主进程跟随鼠标移动窗口）。 */
   beginDrag(): void;
   beginResize(): void;

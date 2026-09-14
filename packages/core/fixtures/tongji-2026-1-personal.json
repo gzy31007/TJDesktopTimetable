@@ -1,0 +1,961 @@
+{
+ "code": 200,
+ "msg": "",
+ "data": {
+  "calendarId": 122,
+  "selectedCourses": [
+   {
+    "course": {
+     "courseCode": "50002810095",
+     "newCourseCode": "PSE1226",
+     "courseName": "大学物理B2(I)",
+     "credits": 3.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124960363,
+     "teachClassCode": "5000281009505",
+     "newTeachClassCode": "PSE122605",
+     "times": [
+      {
+       "teachClassId": 1111111124960363,
+       "teachClassCode": "5000281009505",
+       "arrangeTimeId": 30078891,
+       "timeStart": 5,
+       "timeEnd": 6,
+       "dayOfWeek": 4,
+       "weeks": [
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15
+       ],
+       "value": "大学物理B2(I)(PSE122605) 欧凯(21158)  [1, 3, 5, 7, 9, 11, 13, 15] 南201 ",
+       "popover": "[5-6节] [1, 3, 5, 7, 9, 11, 13, 15] 大学物理B2(I)(PSE1226) 欧凯(21158)  南201 ",
+       "newValue": "大学物理B2(I)(PSE122605) 欧凯(21158)  [1, 3, 5, 7, 9, 11, 13, 15] 南201 ",
+       "newPopover": "[5-6节] [1, 3, 5, 7, 9, 11, 13, 15] 大学物理B2(I)(PSE1226) 欧凯(21158)  南201 ",
+       "teacherCode": "21158",
+       "roomId": "2473",
+       "teacherCodeI18n": "欧凯",
+       "roomIdI18n": "南201"
+      },
+      {
+       "teachClassId": 1111111124960363,
+       "teachClassCode": "5000281009505",
+       "arrangeTimeId": 30078892,
+       "timeStart": 7,
+       "timeEnd": 8,
+       "dayOfWeek": 3,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "大学物理B2(I)(PSE122605) 欧凯(21158)  [1-16] 南201 ",
+       "popover": "[7-8节] [1-16] 大学物理B2(I)(PSE1226) 欧凯(21158)  南201 ",
+       "newValue": "大学物理B2(I)(PSE122605) 欧凯(21158)  [1-16] 南201 ",
+       "newPopover": "[7-8节] [1-16] 大学物理B2(I)(PSE1226) 欧凯(21158)  南201 ",
+       "teacherCode": "21158",
+       "roomId": "2473",
+       "teacherCodeI18n": "欧凯",
+       "roomIdI18n": "南201"
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "50007220036",
+     "newCourseCode": "CST1216",
+     "courseName": "高级语言程序设计A1",
+     "credits": 3.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124960457,
+     "teachClassCode": "5000722003602",
+     "newTeachClassCode": "CST121602",
+     "times": [
+      {
+       "teachClassId": 1111111124960457,
+       "teachClassCode": "5000722003602",
+       "arrangeTimeId": 30080238,
+       "timeStart": 7,
+       "timeEnd": 8,
+       "dayOfWeek": 1,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "高级语言程序设计A1(CST121602) 沈坚(92765)  [1-16] 南313 ",
+       "popover": "[7-8节] [1-16] 高级语言程序设计A1(CST1216) 沈坚(92765)  南313 ",
+       "newValue": "高级语言程序设计A1(CST121602) 沈坚(92765)  [1-16] 南313 ",
+       "newPopover": "[7-8节] [1-16] 高级语言程序设计A1(CST1216) 沈坚(92765)  南313 ",
+       "teacherCode": "92765",
+       "roomId": "2486",
+       "teacherCodeI18n": "沈坚",
+       "roomIdI18n": "南313"
+      },
+      {
+       "teachClassId": 1111111124960457,
+       "teachClassCode": "5000722003602",
+       "arrangeTimeId": 30080239,
+       "timeStart": 1,
+       "timeEnd": 2,
+       "dayOfWeek": 3,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "高级语言程序设计A1(CST121602) 沈坚(92765)  [1-16] 南313 ",
+       "popover": "[1-2节] [1-16] 高级语言程序设计A1(CST1216) 沈坚(92765)  南313 ",
+       "newValue": "高级语言程序设计A1(CST121602) 沈坚(92765)  [1-16] 南313 ",
+       "newPopover": "[1-2节] [1-16] 高级语言程序设计A1(CST1216) 沈坚(92765)  南313 ",
+       "teacherCode": "92765",
+       "roomId": "2486",
+       "teacherCodeI18n": "沈坚",
+       "roomIdI18n": "南313"
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "122010",
+     "newCourseCode": "CMS1206",
+     "courseName": "线性代数B",
+     "credits": 3.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124959877,
+     "teachClassCode": "12201006",
+     "newTeachClassCode": "CMS120606",
+     "times": [
+      {
+       "teachClassId": 1111111124959877,
+       "teachClassCode": "12201006",
+       "arrangeTimeId": 30078774,
+       "timeStart": 3,
+       "timeEnd": 4,
+       "dayOfWeek": 2,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "线性代数B(CMS120606) 王琤(07073)  [1-16] 北301 ",
+       "popover": "[3-4节] [1-16] 线性代数B(CMS1206) 王琤(07073)  北301 ",
+       "newValue": "线性代数B(CMS120606) 王琤(07073)  [1-16] 北301 ",
+       "newPopover": "[3-4节] [1-16] 线性代数B(CMS1206) 王琤(07073)  北301 ",
+       "teacherCode": "07073",
+       "roomId": "2029",
+       "teacherCodeI18n": "王琤",
+       "roomIdI18n": "北301"
+      },
+      {
+       "teachClassId": 1111111124959877,
+       "teachClassCode": "12201006",
+       "arrangeTimeId": 30078775,
+       "timeStart": 5,
+       "timeEnd": 6,
+       "dayOfWeek": 4,
+       "weeks": [
+        2,
+        4,
+        6,
+        8,
+        10,
+        12,
+        14,
+        16
+       ],
+       "value": "线性代数B(CMS120606) 王琤(07073)  [2-16双] 北301 ",
+       "popover": "[5-6节] [2-16双] 线性代数B(CMS1206) 王琤(07073)  北301 ",
+       "newValue": "线性代数B(CMS120606) 王琤(07073)  [2-16双] 北301 ",
+       "newPopover": "[5-6节] [2-16双] 线性代数B(CMS1206) 王琤(07073)  北301 ",
+       "teacherCode": "07073",
+       "roomId": "2029",
+       "teacherCodeI18n": "王琤",
+       "roomIdI18n": "北301"
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "002137",
+     "newCourseCode": "CMA1109",
+     "courseName": "社会实践",
+     "credits": 0.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124959428,
+     "teachClassCode": "00213701",
+     "newTeachClassCode": "CMA110901",
+     "times": [
+      {
+       "teachClassId": 1111111124959428,
+       "teachClassCode": "00213701",
+       "arrangeTimeId": 30079549,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 6,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "社会实践(CMA110901) 运迪(13104)  [1-16] 线上课堂 ",
+       "popover": "[9-10节] [1-16] 社会实践(CMA1109) 运迪(13104)  线上课堂 ",
+       "newValue": "社会实践(CMA110901) 运迪(13104)  [1-16] 线上课堂 ",
+       "newPopover": "[9-10节] [1-16] 社会实践(CMA1109) 运迪(13104)  线上课堂 ",
+       "teacherCode": "13104",
+       "roomId": "0",
+       "teacherCodeI18n": "运迪",
+       "roomIdI18n": ""
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "50002440189",
+     "newCourseCode": "EIE1901",
+     "courseName": "专业导论（计算机与电子类）",
+     "credits": 1.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124959573,
+     "teachClassCode": "5000244018901",
+     "newTeachClassCode": "EIE190101",
+     "times": [
+      {
+       "teachClassId": 1111111124959573,
+       "teachClassCode": "5000244018901",
+       "arrangeTimeId": 30077339,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 3,
+       "weeks": [
+        10
+       ],
+       "value": "专业导论（计算机与电子类）(EIE190101) 汪子乔(24170)  [10] 北201 ",
+       "popover": "[9-10节] [10] 专业导论（计算机与电子类）(EIE1901) 汪子乔(24170)  北201 ",
+       "newValue": "专业导论（计算机与电子类）(EIE190101) 汪子乔(24170)  [10] 北201 ",
+       "newPopover": "[9-10节] [10] 专业导论（计算机与电子类）(EIE1901) 汪子乔(24170)  北201 ",
+       "teacherCode": "24170",
+       "roomId": "2011",
+       "teacherCodeI18n": "汪子乔",
+       "roomIdI18n": "北201"
+      },
+      {
+       "teachClassId": 1111111124959573,
+       "teachClassCode": "5000244018901",
+       "arrangeTimeId": 30077339,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 3,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "专业导论（计算机与电子类）(EIE190101) 陈启军(90055)  [1-4, 13-16] 北201 ",
+       "popover": "[9-10节] [1-4, 13-16] 专业导论（计算机与电子类）(EIE1901) 陈启军(90055)  北201 ",
+       "newValue": "专业导论（计算机与电子类）(EIE190101) 陈启军(90055)  [1-4, 13-16] 北201 ",
+       "newPopover": "[9-10节] [1-4, 13-16] 专业导论（计算机与电子类）(EIE1901) 陈启军(90055)  北201 ",
+       "teacherCode": "90055",
+       "roomId": "2011",
+       "teacherCodeI18n": "陈启军",
+       "roomIdI18n": "北201"
+      },
+      {
+       "teachClassId": 1111111124959573,
+       "teachClassCode": "5000244018901",
+       "arrangeTimeId": 30077339,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 3,
+       "weeks": [
+        11
+       ],
+       "value": "专业导论（计算机与电子类）(EIE190101) 赵才荣(13151)  [11] 北201 ",
+       "popover": "[9-10节] [11] 专业导论（计算机与电子类）(EIE1901) 赵才荣(13151)  北201 ",
+       "newValue": "专业导论（计算机与电子类）(EIE190101) 赵才荣(13151)  [11] 北201 ",
+       "newPopover": "[9-10节] [11] 专业导论（计算机与电子类）(EIE1901) 赵才荣(13151)  北201 ",
+       "teacherCode": "13151",
+       "roomId": "2011",
+       "teacherCodeI18n": "赵才荣",
+       "roomIdI18n": "北201"
+      },
+      {
+       "teachClassId": 1111111124959573,
+       "teachClassCode": "5000244018901",
+       "arrangeTimeId": 30077339,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 3,
+       "weeks": [
+        9
+       ],
+       "value": "专业导论（计算机与电子类）(EIE190101) 赵君峤(13182)  [9] 北201 ",
+       "popover": "[9-10节] [9] 专业导论（计算机与电子类）(EIE1901) 赵君峤(13182)  北201 ",
+       "newValue": "专业导论（计算机与电子类）(EIE190101) 赵君峤(13182)  [9] 北201 ",
+       "newPopover": "[9-10节] [9] 专业导论（计算机与电子类）(EIE1901) 赵君峤(13182)  北201 ",
+       "teacherCode": "13182",
+       "roomId": "2011",
+       "teacherCodeI18n": "赵君峤",
+       "roomIdI18n": "北201"
+      },
+      {
+       "teachClassId": 1111111124959573,
+       "teachClassCode": "5000244018901",
+       "arrangeTimeId": 30077339,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 3,
+       "weeks": [
+        7
+       ],
+       "value": "专业导论（计算机与电子类）(EIE190101) 王祝萍(07012)  [7] 北201 ",
+       "popover": "[9-10节] [7] 专业导论（计算机与电子类）(EIE1901) 王祝萍(07012)  北201 ",
+       "newValue": "专业导论（计算机与电子类）(EIE190101) 王祝萍(07012)  [7] 北201 ",
+       "newPopover": "[9-10节] [7] 专业导论（计算机与电子类）(EIE1901) 王祝萍(07012)  北201 ",
+       "teacherCode": "07012",
+       "roomId": "2011",
+       "teacherCodeI18n": "王祝萍",
+       "roomIdI18n": "北201"
+      },
+      {
+       "teachClassId": 1111111124959573,
+       "teachClassCode": "5000244018901",
+       "arrangeTimeId": 30077339,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 3,
+       "weeks": [
+        6
+       ],
+       "value": "专业导论（计算机与电子类）(EIE190101) 孟淼(20527)  [6] 北201 ",
+       "popover": "[9-10节] [6] 专业导论（计算机与电子类）(EIE1901) 孟淼(20527)  北201 ",
+       "newValue": "专业导论（计算机与电子类）(EIE190101) 孟淼(20527)  [6] 北201 ",
+       "newPopover": "[9-10节] [6] 专业导论（计算机与电子类）(EIE1901) 孟淼(20527)  北201 ",
+       "teacherCode": "20527",
+       "roomId": "2011",
+       "teacherCodeI18n": "孟淼",
+       "roomIdI18n": "北201"
+      },
+      {
+       "teachClassId": 1111111124959573,
+       "teachClassCode": "5000244018901",
+       "arrangeTimeId": 30077339,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 3,
+       "weeks": [
+        12
+       ],
+       "value": "专业导论（计算机与电子类）(EIE190101) 朱宏明(05117)  [12] 北201 ",
+       "popover": "[9-10节] [12] 专业导论（计算机与电子类）(EIE1901) 朱宏明(05117)  北201 ",
+       "newValue": "专业导论（计算机与电子类）(EIE190101) 朱宏明(05117)  [12] 北201 ",
+       "newPopover": "[9-10节] [12] 专业导论（计算机与电子类）(EIE1901) 朱宏明(05117)  北201 ",
+       "teacherCode": "05117",
+       "roomId": "2011",
+       "teacherCodeI18n": "朱宏明",
+       "roomIdI18n": "北201"
+      },
+      {
+       "teachClassId": 1111111124959573,
+       "teachClassCode": "5000244018901",
+       "arrangeTimeId": 30077339,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 3,
+       "weeks": [
+        8
+       ],
+       "value": "专业导论（计算机与电子类）(EIE190101) 李云辉(06107)  [8] 北201 ",
+       "popover": "[9-10节] [8] 专业导论（计算机与电子类）(EIE1901) 李云辉(06107)  北201 ",
+       "newValue": "专业导论（计算机与电子类）(EIE190101) 李云辉(06107)  [8] 北201 ",
+       "newPopover": "[9-10节] [8] 专业导论（计算机与电子类）(EIE1901) 李云辉(06107)  北201 ",
+       "teacherCode": "06107",
+       "roomId": "2011",
+       "teacherCodeI18n": "李云辉",
+       "roomIdI18n": "北201"
+      },
+      {
+       "teachClassId": 1111111124959573,
+       "teachClassCode": "5000244018901",
+       "arrangeTimeId": 30077339,
+       "timeStart": 9,
+       "timeEnd": 10,
+       "dayOfWeek": 3,
+       "weeks": [
+        5
+       ],
+       "value": "专业导论（计算机与电子类）(EIE190101) 王超(13128)  [5] 北201 ",
+       "popover": "[9-10节] [5] 专业导论（计算机与电子类）(EIE1901) 王超(13128)  北201 ",
+       "newValue": "专业导论（计算机与电子类）(EIE190101) 王超(13128)  [5] 北201 ",
+       "newPopover": "[9-10节] [5] 专业导论（计算机与电子类）(EIE1901) 王超(13128)  北201 ",
+       "teacherCode": "13128",
+       "roomId": "2011",
+       "teacherCodeI18n": "王超",
+       "roomIdI18n": "北201"
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "50002680007",
+     "newCourseCode": "SFS2228",
+     "courseName": "学术英语",
+     "credits": 2.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124960375,
+     "teachClassCode": "5000268000702",
+     "newTeachClassCode": "SFS222802",
+     "times": [
+      {
+       "teachClassId": 1111111124960375,
+       "teachClassCode": "5000268000702",
+       "arrangeTimeId": 30077633,
+       "timeStart": 3,
+       "timeEnd": 4,
+       "dayOfWeek": 3,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "学术英语(SFS222802) 汪洁(00750)  [1-16] 北211 ",
+       "popover": "[3-4节] [1-16] 学术英语(SFS2228) 汪洁(00750)  北211 ",
+       "newValue": "学术英语(SFS222802) 汪洁(00750)  [1-16] 北211 ",
+       "newPopover": "[3-4节] [1-16] 学术英语(SFS2228) 汪洁(00750)  北211 ",
+       "teacherCode": "00750",
+       "roomId": "2017",
+       "teacherCodeI18n": "汪洁",
+       "roomIdI18n": "北211"
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "50002850001",
+     "newCourseCode": "CAM0016",
+     "courseName": "大学美育",
+     "credits": 0.5,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124953849,
+     "teachClassCode": "5000285000103",
+     "newTeachClassCode": "CAM001603",
+     "times": [
+      {
+       "teachClassId": 1111111124953849,
+       "teachClassCode": "5000285000103",
+       "arrangeTimeId": 30064681,
+       "timeStart": 7,
+       "timeEnd": 8,
+       "dayOfWeek": 6,
+       "weeks": [
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15
+       ],
+       "value": "大学美育(CAM001603) 王鑫(21075)  [1, 3, 5, 7, 9, 11, 13, 15] 线上课堂 ",
+       "popover": "[7-8节] [1, 3, 5, 7, 9, 11, 13, 15] 大学美育(CAM0016) 王鑫(21075)  线上课堂 ",
+       "newValue": "大学美育(CAM001603) 王鑫(21075)  [1, 3, 5, 7, 9, 11, 13, 15] 线上课堂 ",
+       "newPopover": "[7-8节] [1, 3, 5, 7, 9, 11, 13, 15] 大学美育(CAM0016) 王鑫(21075)  线上课堂 ",
+       "teacherCode": "21075",
+       "roomId": "0",
+       "teacherCodeI18n": "王鑫",
+       "roomIdI18n": ""
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "50002950055",
+     "newCourseCode": "CMA1112",
+     "courseName": "习近平新时代中国特色社会主义思想概论",
+     "credits": 3.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124960512,
+     "teachClassCode": "5000295005513",
+     "newTeachClassCode": "CMA111213",
+     "times": [
+      {
+       "teachClassId": 1111111124960512,
+       "teachClassCode": "5000295005513",
+       "arrangeTimeId": 30080290,
+       "timeStart": 9,
+       "timeEnd": 11,
+       "dayOfWeek": 1,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "习近平新时代中国特色社会主义思想概论(CMA111213) 许国艳(12097)  [1-16] 一教202 ",
+       "popover": "[9-11节] [1-16] 习近平新时代中国特色社会主义思想概论(CMA1112) 许国艳(12097)  一教202 ",
+       "newValue": "习近平新时代中国特色社会主义思想概论(CMA111213) 许国艳(12097)  [1-16] 一教202 ",
+       "newPopover": "[9-11节] [1-16] 习近平新时代中国特色社会主义思想概论(CMA1112) 许国艳(12097)  一教202 ",
+       "teacherCode": "12097",
+       "roomId": "2429",
+       "teacherCodeI18n": "许国艳",
+       "roomIdI18n": "一教202"
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "50002810110",
+     "newCourseCode": "PSE1241",
+     "courseName": "大学物理实验B2(I)",
+     "credits": 1.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124960660,
+     "teachClassCode": "5000281011005",
+     "newTeachClassCode": "PSE124105",
+     "times": [
+      {
+       "teachClassId": 1111111124960660,
+       "teachClassCode": "5000281011005",
+       "arrangeTimeId": 30079253,
+       "timeStart": 3,
+       "timeEnd": 4,
+       "dayOfWeek": 5,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "大学物理实验B2(I)(PSE124105) 赫丽(00770)  [1-16] 物理馆2-4楼 ",
+       "popover": "[3-4节] [1-16] 大学物理实验B2(I)(PSE1241) 赫丽(00770)  物理馆2-4楼 ",
+       "newValue": "大学物理实验B2(I)(PSE124105) 赫丽(00770)  [1-16] 物理馆2-4楼 ",
+       "newPopover": "[3-4节] [1-16] 大学物理实验B2(I)(PSE1241) 赫丽(00770)  物理馆2-4楼 ",
+       "teacherCode": "00770",
+       "roomId": "0",
+       "teacherCodeI18n": "赫丽",
+       "roomIdI18n": ""
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "360002",
+     "newCourseCode": "AFD1601",
+     "courseName": "军训",
+     "credits": 2.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124959902,
+     "teachClassCode": "36000215",
+     "newTeachClassCode": "AFD160115",
+     "times": null
+    }
+   },
+   {
+    "course": {
+     "courseCode": "50005900073",
+     "newCourseCode": "CMS1221",
+     "courseName": "高等数学B(I)",
+     "credits": 5.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124959941,
+     "teachClassCode": "5000590007313",
+     "newTeachClassCode": "CMS122113",
+     "times": [
+      {
+       "teachClassId": 1111111124959941,
+       "teachClassCode": "5000590007313",
+       "arrangeTimeId": 30078138,
+       "timeStart": 5,
+       "timeEnd": 6,
+       "dayOfWeek": 1,
+       "weeks": [
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15
+       ],
+       "value": "高等数学B(I)(CMS122113) 张弢(00100)  [1, 3, 5, 7, 9, 11, 13, 15] 南229 ",
+       "popover": "[5-6节] [1, 3, 5, 7, 9, 11, 13, 15] 高等数学B(I)(CMS1221) 张弢(00100)  南229 ",
+       "newValue": "高等数学B(I)(CMS122113) 张弢(00100)  [1, 3, 5, 7, 9, 11, 13, 15] 南229 ",
+       "newPopover": "[5-6节] [1, 3, 5, 7, 9, 11, 13, 15] 高等数学B(I)(CMS1221) 张弢(00100)  南229 ",
+       "teacherCode": "00100",
+       "roomId": "2479",
+       "teacherCodeI18n": "张弢",
+       "roomIdI18n": "南229"
+      },
+      {
+       "teachClassId": 1111111124959941,
+       "teachClassCode": "5000590007313",
+       "arrangeTimeId": 30078139,
+       "timeStart": 3,
+       "timeEnd": 4,
+       "dayOfWeek": 4,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "高等数学B(I)(CMS122113) 张弢(00100)  [1-16] 南329 ",
+       "popover": "[3-4节] [1-16] 高等数学B(I)(CMS1221) 张弢(00100)  南329 ",
+       "newValue": "高等数学B(I)(CMS122113) 张弢(00100)  [1-16] 南329 ",
+       "newPopover": "[3-4节] [1-16] 高等数学B(I)(CMS1221) 张弢(00100)  南329 ",
+       "teacherCode": "00100",
+       "roomId": "2492",
+       "teacherCodeI18n": "张弢",
+       "roomIdI18n": "南329"
+      },
+      {
+       "teachClassId": 1111111124959941,
+       "teachClassCode": "5000590007313",
+       "arrangeTimeId": 30078140,
+       "timeStart": 1,
+       "timeEnd": 2,
+       "dayOfWeek": 5,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "高等数学B(I)(CMS122113) 张弢(00100)  [1-16] 南329 ",
+       "popover": "[1-2节] [1-16] 高等数学B(I)(CMS1221) 张弢(00100)  南329 ",
+       "newValue": "高等数学B(I)(CMS122113) 张弢(00100)  [1-16] 南329 ",
+       "newPopover": "[1-2节] [1-16] 高等数学B(I)(CMS1221) 张弢(00100)  南329 ",
+       "teacherCode": "00100",
+       "roomId": "2492",
+       "teacherCodeI18n": "张弢",
+       "roomIdI18n": "南329"
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "320053",
+     "newCourseCode": "DPE0034",
+     "courseName": "运动营养与健康",
+     "credits": 1.5,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124955358,
+     "teachClassCode": "32005302",
+     "newTeachClassCode": "DPE003402",
+     "times": [
+      {
+       "teachClassId": 1111111124955358,
+       "teachClassCode": "32005302",
+       "arrangeTimeId": 30064998,
+       "timeStart": 7,
+       "timeEnd": 8,
+       "dayOfWeek": 4,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+       ],
+       "value": "运动营养与健康(DPE003402) 秦黎黎(12214)  [1-12] 南307 ",
+       "popover": "[7-8节] [1-12] 运动营养与健康(DPE0034) 秦黎黎(12214)  南307 ",
+       "newValue": "运动营养与健康(DPE003402) 秦黎黎(12214)  [1-12] 南307 ",
+       "newPopover": "[7-8节] [1-12] 运动营养与健康(DPE0034) 秦黎黎(12214)  南307 ",
+       "teacherCode": "12214",
+       "roomId": "2481",
+       "teacherCodeI18n": "秦黎黎",
+       "roomIdI18n": "南307"
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "320001",
+     "newCourseCode": "DPE1101",
+     "courseName": "体育(1)",
+     "credits": 1.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124959778,
+     "teachClassCode": "32000191",
+     "newTeachClassCode": "DPE110191",
+     "times": [
+      {
+       "teachClassId": 1111111124959778,
+       "teachClassCode": "32000191",
+       "arrangeTimeId": 30078556,
+       "timeStart": 5,
+       "timeEnd": 6,
+       "dayOfWeek": 3,
+       "weeks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+       ],
+       "value": "体育(1)(DPE110191) 张铖(13011)  [1-16] 爱校路足球场（2号） ",
+       "popover": "[5-6节] [1-16] 体育(1)(DPE1101) 张铖(13011)  爱校路足球场（2号） ",
+       "newValue": "体育(1)(DPE110191) 张铖(13011)  [1-16] 爱校路足球场（2号） ",
+       "newPopover": "[5-6节] [1-16] 体育(1)(DPE1101) 张铖(13011)  爱校路足球场（2号） ",
+       "teacherCode": "13011",
+       "roomId": "0",
+       "teacherCodeI18n": "张铖",
+       "roomIdI18n": ""
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "50002950035",
+     "newCourseCode": "CMA1105",
+     "courseName": "大学生国家安全教育",
+     "credits": 1.0,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124960594,
+     "teachClassCode": "5000295003514",
+     "newTeachClassCode": "CMA110514",
+     "times": [
+      {
+       "teachClassId": 1111111124960594,
+       "teachClassCode": "5000295003514",
+       "arrangeTimeId": 30079693,
+       "timeStart": 5,
+       "timeEnd": 6,
+       "dayOfWeek": 2,
+       "weeks": [
+        9,
+        16
+       ],
+       "value": "大学生国家安全教育(CMA110514) 崔欣玉(17002)  [9, 16] 北129 ",
+       "popover": "[5-6节] [9, 16] 大学生国家安全教育(CMA1105) 崔欣玉(17002)  北129 ",
+       "newValue": "大学生国家安全教育(CMA110514) 崔欣玉(17002)  [9, 16] 北129 ",
+       "newPopover": "[5-6节] [9, 16] 大学生国家安全教育(CMA1105) 崔欣玉(17002)  北129 ",
+       "teacherCode": "17002",
+       "roomId": "2010",
+       "teacherCodeI18n": "崔欣玉",
+       "roomIdI18n": "北129"
+      }
+     ]
+    }
+   },
+   {
+    "course": {
+     "courseCode": "50002950063",
+     "newCourseCode": "CMA1116",
+     "courseName": "形势与政策(1)",
+     "credits": 0.5,
+     "calendarId": 122,
+     "calendarName": "2026-2027学年第1学期",
+     "teachClassId": 1111111124960572,
+     "teachClassCode": "5000295006330",
+     "newTeachClassCode": "CMA111630",
+     "times": [
+      {
+       "teachClassId": 1111111124960572,
+       "teachClassCode": "5000295006330",
+       "arrangeTimeId": 30079629,
+       "timeStart": 7,
+       "timeEnd": 8,
+       "dayOfWeek": 2,
+       "weeks": [
+        11,
+        12,
+        13,
+        14
+       ],
+       "value": "形势与政策(1)(CMA111630) 孙毅(22161)  [11-14] 南301 ",
+       "popover": "[7-8节] [11-14] 形势与政策(1)(CMA1116) 孙毅(22161)  南301 ",
+       "newValue": "形势与政策(1)(CMA111630) 孙毅(22161)  [11-14] 南301 ",
+       "newPopover": "[7-8节] [11-14] 形势与政策(1)(CMA1116) 孙毅(22161)  南301 ",
+       "teacherCode": "22161",
+       "roomId": "2480",
+       "teacherCodeI18n": "孙毅",
+       "roomIdI18n": "南301"
+      }
+     ]
+    }
+   }
+  ]
+ }
+}

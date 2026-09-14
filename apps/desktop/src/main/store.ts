@@ -18,8 +18,8 @@ const FILE_TIMETABLE = 'timetable.json';
 const FILE_CREDENTIALS = 'credentials.json';
 
 interface Credentials {
-  /** 同济 1 系统 Cookie 原文。仅存本地 userData，不入日志、不进版本库。 */
-  tongjiCookie?: string;
+  /** 上次粘贴的抓取请求全文（含 Cookie）。仅存本地 userData，不入日志、不进版本库。 */
+  tongjiRequest?: string;
   savedAt?: string;
 }
 
@@ -84,15 +84,15 @@ export function userDataDir(): string {
   return dataDir();
 }
 
-export function loadTongjiCookie(): string {
-  return readJson<Credentials>(FILE_CREDENTIALS)?.tongjiCookie ?? '';
+export function loadTongjiRequest(): string {
+  return readJson<Credentials>(FILE_CREDENTIALS)?.tongjiRequest ?? '';
 }
 
-export function saveTongjiCookie(cookie: string): void {
-  const trimmed = cookie.trim();
+export function saveTongjiRequest(requestText: string): void {
+  const trimmed = requestText.trim();
   if (!trimmed) {
     writeJson(FILE_CREDENTIALS, {});
     return;
   }
-  writeJson(FILE_CREDENTIALS, { tongjiCookie: trimmed, savedAt: new Date().toISOString() } satisfies Credentials);
+  writeJson(FILE_CREDENTIALS, { tongjiRequest: trimmed, savedAt: new Date().toISOString() } satisfies Credentials);
 }

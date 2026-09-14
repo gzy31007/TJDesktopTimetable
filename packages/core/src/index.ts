@@ -10,6 +10,8 @@ export * from './conflict.js';
 export * from './colors.js';
 export * from './layout.js';
 export * from './time.js';
+export * from './tongji-terms.js';
+export * from './http-request.js';
 export * from './import.js';
 export * from './adapters/types.js';
 export * from './adapters/registry.js';

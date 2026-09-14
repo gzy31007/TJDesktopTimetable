@@ -1,192 +1,121 @@
-import { TONGJI_ORIGIN } from '@tjt/core';
+import { parseHttpRequest } from '@tjt/core';
 import type { TongjiFetchResult } from '../shared/ipc.js';
 import { log } from './logger.js';
 
 /**
- * 同济 1 系统个人课表抓取。
+ * 用「用户从浏览器复制出来的请求」抓取个人课表。
  *
- * 思路：Cookie 由用户手动粘贴（不做自动登录 —— 1 系统 SSO 带短信增强，塞进桌面客户端不划算），
- * 拿到 Cookie 后由主进程发起请求（渲染层会被 CORS 拦）。
+ * 为什么不猜接口路径：1 系统的个人课表来自选课服务
+ * `POST /api/electionservice/student/{id}/getDataBk`，其中 `{id}` 是选课批次相关的内部 id，
+ * 无法稳定构造。让用户 F12 → Copy as cURL 粘一次最可靠，也天然带上了 Cookie 与 `x-token`。
  *
- * 接口路径不写死：先试一批候选路径，再从 1 系统前端 bundle 里正则捞 `timetable` 相关路径，
- * 命中"含 weekState/dayOfWeek 的 JSON 数组"就算成功。这样接口改名时也能自愈，
- * 抓不到时把每个候选的状态码回传，便于定位。
+ * 安全：Cookie 只在内存与本机 `credentials.json` 里，**任何日志都不打印其内容**。
  */
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-const TIMETABLE_CANDIDATES = [
-  '/api/arrangementservice/timetable/student',
-  '/api/arrangementservice/timetable/my',
-  '/api/arrangementservice/timetable/personal',
-  '/api/arrangementservice/timetable/studentTimeTable',
-  '/api/arrangementservice/timetable/current',
-  '/api/arrangementservice/student/timetable',
-  '/api/arrangementservice/timetable/major',
-];
-
-const CALENDAR_CANDIDATES = [
-  '/api/baseresservice/schoolCalendar/queryAll',
-  '/api/baseresservice/schoolCalendar/all',
-  '/api/baseresservice/schoolCalendar/list',
-  '/api/arrangementservice/schoolCalendar/queryAll',
-];
-
-interface ProbeRecord {
-  path: string;
-  status: number;
-  note?: string;
+/** 响应是否像同济课表数据。 */
+function looksLikeTimetable(payload: unknown): { ok: boolean; note: string } {
+  if (!payload || typeof payload !== 'object') return { ok: false, note: '响应不是 JSON 对象' };
+  const record = payload as Record<string, unknown>;
+  if ('message' in record && !('data' in record)) {
+    return { ok: false, note: `服务端返回：${String(record.message).slice(0, 80)}` };
+  }
+  const data = record.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const selected = (data as { selectedCourses?: unknown }).selectedCourses;
+    if (Array.isArray(selected)) return { ok: true, note: `selectedCourses ${selected.length} 门` };
+    return { ok: false, note: `data 字段：${Object.keys(data as object).slice(0, 8).join(', ')}` };
+  }
+  if (Array.isArray(data)) return { ok: true, note: `data 数组 ${data.length} 条` };
+  return { ok: false, note: `顶层字段：${Object.keys(record).slice(0, 8).join(', ')}` };
 }
 
-async function httpGet(
-  path: string,
-  cookie: string,
-  timeoutMs = 20_000,
-): Promise<{ status: number; text: string; contentType: string }> {
+export async function fetchViaPastedRequest(requestText: string): Promise<TongjiFetchResult> {
+  const spec = parseHttpRequest(requestText);
+  if (!spec) {
+    return {
+      ok: false,
+      message:
+        '没能从粘贴的内容里解析出请求。请在 F12 → Network 里右键该请求 → Copy → Copy as cURL，然后原样粘贴到上面。',
+    };
+  }
+
+  const cookie = spec.headers['cookie'] ?? '';
+  if (!cookie) {
+    return {
+      ok: false,
+      message: '粘贴的请求里没有 Cookie：请用 "Copy as cURL"（会带上全部请求头），而不是只复制 URL。',
+    };
+  }
+
+  const headers: Record<string, string> = { 'user-agent': UA, accept: 'application/json, text/plain, */*' };
+  for (const [key, value] of Object.entries(spec.headers)) {
+    if (key === 'host' || key === 'content-length' || key === 'accept-encoding') continue;
+    headers[key] = value;
+  }
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  let status = 0;
+  let text = '';
   try {
-    const res = await fetch(`${TONGJI_ORIGIN}${path}`, {
-      headers: {
-        cookie,
-        'user-agent': UA,
-        accept: 'application/json, text/plain, */*',
-        'x-requested-with': 'XMLHttpRequest',
-      },
+    const res = await fetch(spec.url, {
+      method: spec.method,
+      headers,
+      ...(spec.body !== undefined ? { body: spec.body } : {}),
       signal: controller.signal,
     });
-    return { status: res.status, text: await res.text(), contentType: res.headers.get('content-type') ?? '' };
+    status = res.status;
+    text = await res.text();
   } catch (error) {
-    log('[tongji] 请求失败', path, error instanceof Error ? error.message : String(error));
-    return { status: 0, text: '', contentType: '' };
+    log('[tongji] 请求异常', error instanceof Error ? error.message : String(error));
+    return { ok: false, message: `请求失败：${error instanceof Error ? error.message : String(error)}` };
   } finally {
     clearTimeout(timer);
   }
-}
 
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-}
+  const probes = [
+    { label: '请求', value: `${spec.method} ${spec.url}` },
+    { label: 'HTTP', value: String(status) },
+    { label: '来源', value: spec.source },
+    { label: '响应大小', value: `${text.length} 字节` },
+  ];
 
-function dataArrayOf(payload: unknown): unknown[] | null {
-  if (Array.isArray(payload)) return payload;
-  if (payload && typeof payload === 'object' && 'data' in payload) {
-    const data = (payload as { data: unknown }).data;
-    if (Array.isArray(data)) return data;
-    if (Array.isArray((data as { records?: unknown })?.records)) {
-      return (data as { records: unknown[] }).records;
-    }
-  }
-  return null;
-}
-
-function isTimetablePayload(payload: unknown): boolean {
-  const list = dataArrayOf(payload);
-  if (!list?.length) return false;
-  return list.some((item) => {
-    if (!item || typeof item !== 'object') return false;
-    const record = item as Record<string, unknown>;
-    return 'weekState' in record && 'dayOfWeek' in record;
-  });
-}
-
-function isCalendarPayload(payload: unknown): boolean {
-  const list = dataArrayOf(payload);
-  if (!list?.length) return false;
-  return list.some((item) => {
-    if (!item || typeof item !== 'object') return false;
-    const record = item as Record<string, unknown>;
-    return 'noWeekendWorkTimes' in record || ('beginDay' in record && 'weekNum' in record);
-  });
-}
-
-/** 从前端 bundle 里捞 `timetable` / `schoolCalendar` 相关 API 路径，补充候选。 */
-async function discoverPathsFromBundle(cookie: string, probes: ProbeRecord[]): Promise<string[]> {
-  const discovered = new Set<string>();
-  const home = await httpGet('/', cookie, 20_000);
-  probes.push({ path: '/', status: home.status, note: `首页 ${home.contentType}` });
-  if (home.status !== 200) return [];
-
-  const scripts = [...home.text.matchAll(/<script[^>]+src="([^"]+)"/g)]
-    .map((m) => m[1])
-    .filter((value): value is string => Boolean(value));
-  for (const src of scripts.slice(0, 12)) {
-    const url = src.startsWith('http') ? src : `${TONGJI_ORIGIN}${src.startsWith('/') ? '' : '/'}${src}`;
-    let text = '';
-    try {
-      const res = await fetch(url, { headers: { cookie, 'user-agent': UA } });
-      text = await res.text();
-    } catch {
-      continue;
-    }
-    for (const match of text.matchAll(/["'`](\/api\/[a-zA-Z0-9/_-]*(?:timetable|schedule|arrange)[a-zA-Z0-9/_-]*)["'`]/g)) {
-      const path = match[1];
-      if (path && !discovered.has(path)) discovered.add(path);
-    }
-  }
-  if (discovered.size) {
-    probes.push({ path: '<bundle>', status: 200, note: `从 JS 发现 ${discovered.size} 个候选路径` });
-  }
-  return [...discovered];
-}
-
-/** 用 Cookie 抓取个人课表（并尝试顺带抓校历）。 */
-export async function fetchTongjiTimetable(cookie: string): Promise<TongjiFetchResult> {
-  const trimmed = cookie.trim();
-  if (!trimmed) return { ok: false, message: '请先填入 1 系统 Cookie。' };
-
-  const probes: ProbeRecord[] = [];
-  const discovered = await discoverPathsFromBundle(trimmed, probes);
-  const candidates = [...new Set([...TIMETABLE_CANDIDATES, ...discovered])];
-
-  let timetableText: string | undefined;
-  let timetablePath = '';
-  for (const path of candidates) {
-    const res = await httpGet(path, trimmed);
-    const payload = res.status === 200 ? parseJson(res.text) : null;
-    const hit = payload !== null && isTimetablePayload(payload);
-    probes.push({ path, status: res.status, note: hit ? '命中课表数据' : undefined });
-    if (hit) {
-      timetableText = res.text;
-      timetablePath = path;
-      break;
-    }
-  }
-
-  if (!timetableText) {
-    const unauthorized = probes.some((p) => p.status === 401 || p.status === 403);
-    log('[tongji] 抓取失败', { probes });
+  if (status !== 200) {
     return {
       ok: false,
-      message: unauthorized
-        ? 'Cookie 可能已失效（接口返回 401/403）：请在浏览器重新登录 1 系统后复制新的 Cookie。'
-        : '没有找到个人课表接口。请把下面的探测结果发给我，我按真实路径调整；也可以先用「本地 JSON 导入」。',
+      message:
+        status === 401 || status === 403
+          ? '登录态已失效（HTTP 401/403）：请重新登录 1 系统，再复制一次请求。'
+          : `服务端返回 HTTP ${status}${text ? `：${text.slice(0, 120)}` : ''}`,
       probes,
     };
   }
 
-  let calendarText: string | undefined;
-  for (const path of CALENDAR_CANDIDATES) {
-    const res = await httpGet(path, trimmed);
-    const payload = res.status === 200 ? parseJson(res.text) : null;
-    const hit = payload !== null && isCalendarPayload(payload);
-    probes.push({ path, status: res.status, note: hit ? '命中校历' : undefined });
-    if (hit) {
-      calendarText = res.text;
-      break;
-    }
+  let payload: unknown = null;
+  try {
+    payload = JSON.parse(text) as unknown;
+  } catch {
+    return { ok: false, message: '响应不是合法 JSON（可能复制到了 HTML 页面请求，请换成 getDataBk 那条）。', probes };
   }
 
+  const verdict = looksLikeTimetable(payload);
+  probes.push({ label: '数据识别', value: verdict.note });
+  if (!verdict.ok) {
+    return {
+      ok: false,
+      message: `这份响应里没有个人课表数据（${verdict.note}）。请在课表/选课页面刷新后，复制其中那条返回 200 且体积较大的请求。`,
+      probes,
+    };
+  }
+
+  log('[tongji] 抓取成功', { note: verdict.note, bytes: text.length });
   return {
     ok: true,
-    message: `已从 ${timetablePath} 获取课表${calendarText ? '，并取得校历' : '（未取到校历，将使用内置节次时间）'}。`,
-    timetableText,
-    ...(calendarText ? { calendarText } : {}),
+    message: `获取成功：${verdict.note}，已交给解析器。`,
+    timetableText: text,
     probes,
   };
 }

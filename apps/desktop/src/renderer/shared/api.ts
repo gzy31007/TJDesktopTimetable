@@ -74,9 +74,9 @@ export function createMockApi(): RendererApi {
       update({ ...state, settings: { ...state.settings, showWidget: visible ?? !state.settings.showWidget } }),
     setClickThrough: async (enabled: boolean) =>
       update({ ...state, settings: { ...state.settings, clickThrough: enabled } }),
-    getTongjiCookie: async () => '',
-    saveTongjiCookie: async () => {},
-    fetchTongji: async () => ({
+    getTongjiRequest: async () => '',
+    saveTongjiRequest: async () => {},
+    fetchTongjiRequest: async () => ({
       ok: false,
       message: '浏览器预览模式不支持网络抓取（请在桌面应用里使用）。',
     }),
