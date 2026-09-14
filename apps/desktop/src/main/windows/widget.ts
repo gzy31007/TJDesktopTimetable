@@ -41,6 +41,29 @@ function isDarkTheme(theme: string | undefined): boolean {
   return theme === 'glass';
 }
 
+/**
+ * 系统材质 → BrowserWindow 参数的映射。
+ *
+ * 真机结论（2026-09-14）：云母不需要透明窗口；亚克力必须透明窗口才糊得出来，
+ * 代价是 `transparent: true` 之后 DWM 不再给圆角（要不要 CSS 兜圆角另说）。
+ * `backgroundMaterial` 只在创建时有效，所以切换材质必须重建窗口。
+ */
+function resolveMaterial(material: WidgetSettings['material']): {
+  backgroundMaterial: string | null;
+  transparent: boolean;
+} {
+  switch (material) {
+    case 'mica':
+      return { backgroundMaterial: 'mica', transparent: false };
+    case 'mica-alt':
+      return { backgroundMaterial: 'tabbed', transparent: false };
+    case 'acrylic':
+      return { backgroundMaterial: 'acrylic', transparent: true };
+    default:
+      return { backgroundMaterial: null, transparent: false };
+  }
+}
+
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 440;
 const MIN_WIDTH = 320;
@@ -149,30 +172,40 @@ export function createWidgetWindow(): BrowserWindow {
   const bounds = resolveBounds(settings);
   // 初始底色必须按当前主题决定：写死深色会让浅色主题顶着深底，叠上白色玻璃就是一片灰
   const startDark = isDarkTheme(settings.theme);
+  const material = resolveMaterial(settings.material);
   const win = new BrowserWindow({
     ...bounds,
     frame: false,
     /*
-     * 不透明窗口：Win11 的 Acrylic 与圆角都由 DWM 绘制，透明窗口拿不到圆角
-     * （`transparent: true` 时 DWM 会跳过圆角与阴影），所以这里交给 DWM 全权处理；
-     * 渲染层背景保持透明，材质与圆角自然对齐。
+     * 材质与透明度的搭配：
+     * - 纯色 / 云母 / 云母 Alt：非透明窗口 + `backgroundMaterial`，圆角交给 DWM；
+     * - 亚克力：必须透明窗口才糊得出来，代价是拿不到 DWM 圆角。
+     * 非透明窗口会忽略 `backgroundColor` 的 alpha，给透明色只会得到黑底。
      */
-    transparent: false,
-    // 非透明窗口忽略 alpha：必须给不透明实色，否则是黑底
-    backgroundColor: startDark ? WIDGET_BASE_COLOR.dark : WIDGET_BASE_COLOR.light,
+    ...(material.transparent
+      ? { transparent: true, backgroundColor: '#00000000' }
+      : {
+          transparent: false,
+          // 非透明窗口忽略 alpha：必须给不透明实色，否则是黑底
+          backgroundColor: startDark ? WIDGET_BASE_COLOR.dark : WIDGET_BASE_COLOR.light,
+        }),
+    ...(material.backgroundMaterial && process.platform === 'win32'
+      ? { backgroundMaterial: material.backgroundMaterial as 'mica' | 'acrylic' | 'tabbed' }
+      : {}),
     /*
-     * 不用任何系统材质：材质在挂件上不可用（真机实测，见下）。
      * hasShadow: false 去掉窗口投影（那层"外部立体感"）。
      *
-     * ── 为什么挂件不能开 backgroundMaterial ──
-     * "Win+D 隐藏 → ShowWindow 恢复"之后 DWM 合成会失效：窗口 IsWindowVisible 为真、
-     * owner 与 z-order 全对（诊断 coveredByShell:false、排位在 Progman 之前），但屏幕上
-     * 就是不出现，Electron 侧无法感知也修不好。**Acrylic 与 Mica 都会**（各回归过一次），
-     * 关掉材质后完全正常。挂件常年置底失焦、又天天被 Win+D 扫，所以一律不用材质。
+     * ── 材质的历史结论与现状 ──
+     * 旧结论是"挂件一律不开 `backgroundMaterial`"：当时开启材质后，Win+D（隐藏 →
+     * `ShowWindow` 恢复）会让 DWM 合成失效 —— 窗口 `IsWindowVisible` 为真、owner 与
+     * z-order 全对，但屏幕上就是不出现。
      *
-     * 观感交给渲染层：底色取 --layer-strong（与"课表预览"同源），视觉上与设置窗口一致。
+     * 2026-09-14 层级层重写后，挂件**不再被 Win+D 隐藏**（owner 挂在 `SHELLDLL_DefView`
+     * 上，3 次 Win+D 实测 0 条 hide/minimize），那条结论的触发前提已经消失。
+     * 因此材质重新做成可选设置，默认仍是 `solid`（纯色）——材质是否稳定**待真机回归**，
+     * 不稳就退回默认，不影响用户。
      */
-    ...(process.platform === 'win32' ? { roundedCorners: true, hasShadow: false } : {}),
+    ...(process.platform === 'win32' ? { roundedCorners: !material.transparent, hasShadow: false } : {}),
     resizable: false,
     movable: true,
     minimizable: false,
@@ -265,6 +298,28 @@ export function createWidgetWindow(): BrowserWindow {
   });
 
   widgetWindow = win;
+  return win;
+}
+
+/**
+ * 重建挂件窗口。
+ *
+ * `backgroundMaterial` 只在 `new BrowserWindow()` 时生效（运行时用
+ * `setBackgroundMaterial()` 即使 `DwmGetWindowAttribute` 读回 accepted 也不出模糊），
+ * 所以切换材质只能重建窗口：销毁旧的 → 按新设置创建 → 需要可见就显示出来。
+ */
+export function recreateWidgetWindow(): BrowserWindow {
+  const old = widgetWindow;
+  if (old && !old.isDestroyed()) {
+    offMessages?.();
+    offMessages = null;
+    layer?.detach();
+    layer = null;
+    widgetWindow = null;
+    old.destroy();
+  }
+  const win = createWidgetWindow();
+  if (loadSettings().showWidget) setWidgetVisible(true);
   return win;
 }
 

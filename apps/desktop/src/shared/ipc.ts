@@ -10,6 +10,17 @@ export type WidgetMode = 'desktop' | 'wallpaper';
  */
 export type ThemeMode = 'moe' | 'glass' | 'crystal';
 export type WeekFilterMode = 'all' | 'odd' | 'even';
+/**
+ * 挂件窗口的系统材质（Win11 原生合成）。
+ *
+ * - `solid`：不透明实色底（**默认**，最稳；材质出问题时可随时退回这里）；
+ * - `mica` / `mica-alt`：云母 / 云母 Alt（取壁纸色调，克制）；
+ * - `acrylic`：亚克力（模糊最强，代价是必须透明窗口 → 拿不到 DWM 圆角）。
+ *
+ * 注意：`backgroundMaterial` **只在 `new BrowserWindow()` 时声明有效**，
+ * 运行时改不了 —— 所以切换材质要重建挂件窗口（见 widget.ts 的 recreateWidgetWindow）。
+ */
+export type WindowMaterial = 'solid' | 'mica' | 'mica-alt' | 'acrylic';
 
 export interface WidgetSettings {
   /** desktop = 置底可交互；wallpaper = WorkerW 壁纸层（贴桌面图标之下）。 */
@@ -34,7 +45,9 @@ export interface WidgetSettings {
   showWidget: boolean;
   launchAtLogin: boolean;
   theme: ThemeMode;
-  /** 置底保险定时器（毫秒）；0 表示不启用。 */
+  /** 窗口系统材质（Win11 原生合成）；默认纯色。 */
+  material: WindowMaterial;
+  /** owner 巡检间隔（毫秒，0 = 关闭）。语义已变：只查 owner 是否丢失，不再重压 z-order。 */
   keepAtBottomIntervalMs: number;
 }
 
@@ -49,7 +62,8 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   showWidget: true,
   launchAtLogin: false,
   theme: 'glass',
-  keepAtBottomIntervalMs: 1000,
+  material: 'solid',
+  keepAtBottomIntervalMs: 5000,
 };
 
 export interface AdapterInfo {

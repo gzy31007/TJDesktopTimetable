@@ -14,6 +14,7 @@ import {
   beginDrag,
   beginResize,
   createWidgetWindow,
+  recreateWidgetWindow,
   endPointer,
   setWidgetVisible,
 } from './windows/widget.js';
@@ -32,7 +33,15 @@ export function registerIpc(): void {
 
   ipcMain.handle('settings:update', (_event, patch: Partial<WidgetSettings>): AppState => {
     const next = store.saveSettings(patch ?? {});
-    applyWidgetSettings(patch ?? {}, next);
+    /*
+     * 材质必须在**窗口创建时**声明（运行时 `setBackgroundMaterial()` 不出效果），
+     * 所以改材质要走"重建挂件窗口"这条路，不能只 applyWidgetSettings。
+     */
+    if (patch?.material !== undefined) {
+      recreateWidgetWindow();
+    } else {
+      applyWidgetSettings(patch ?? {}, next);
+    }
     if (patch?.launchAtLogin !== undefined) {
       app.setLoginItemSettings({ openAtLogin: next.launchAtLogin });
     }

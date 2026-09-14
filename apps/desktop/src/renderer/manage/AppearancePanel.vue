@@ -60,6 +60,20 @@ void props;
       </label>
 
       <label class="field">
+        <span class="lbl">窗口材质</span>
+        <select
+          class="f-select"
+          :value="settings.material"
+          @change="emit('update', { material: ($event.target as HTMLSelectElement).value as WidgetSettings['material'] })"
+        >
+          <option value="solid">纯色（默认，最稳）</option>
+          <option value="mica">云母（取壁纸色调）</option>
+          <option value="mica-alt">云母 Alt（层次更明显）</option>
+          <option value="acrylic">亚克力（模糊最强，无 DWM 圆角）</option>
+        </select>
+      </label>
+
+      <label class="field">
         <span class="lbl">
           不透明度
           <b>{{ Math.round(settings.opacity * 100) }}%</b>

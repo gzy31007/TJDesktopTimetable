@@ -31,14 +31,20 @@ docs/                 架构、数据模型、适配器指南
 - 测试：core 的每个公开函数都要有单测；同济个人课表适配器由 `test/e2e-timetable.spec.ts` 端到端覆盖（导入 → 布局 → 时间 → 单双周过滤）。
 - 视觉规范：Win11 Fluent / 亚克力玻璃。设计令牌与基础控件在 `apps/desktop/src/renderer/shared/fluent.css`（色彩分级、圆角、阴影、明暗主题、`.f-btn`/`.f-pill`/`.f-switch`/`.f-card`），课表皮肤在 `shared/board.css`，挂件外壳在 `widget/widget.css`，管理窗口在 `manage/`。改渲染先读这几份，不要再引入一次性硬编码色值。
   - 历史基准（网格参数、色板、条纹特殊块、单双周并排）仍可对照 `/root/trivial/tongji-timetable/select_preview.html`，但视觉语言以 Fluent 令牌为准。
-  - **挂件窗口材质（最终选型，2026-09-14 三次定稿：不用系统材质）**：`transparent: false` + **不设 `backgroundMaterial`** + DWM 圆角（`main/win32/dwm.ts` 的 `applyRoundedCorners`）+ **不透明实色底**（浅 `#f3f3f3` / 深 `#202020`，随主题经 `applyWidgetTheme()` 切换）。渲染层 `--glass-shell` 给半透明底提供玻璃层次，圆角不自绘，`hasShadow: false`（去掉窗口投影那层外部立体感）。
-    **硬结论：挂件一律不开 `backgroundMaterial`——Acrylic 和 Mica 都会在"Win+D 隐藏 → ShowWindow 恢复"后 DWM 合成失效**（窗口 `IsWindowVisible` 为真、owner 与 z-order 全对、诊断 `coveredByShell:false`，但屏幕上就是不出现，Electron 侧无法感知也修不好）。两者各回归过一次：`acrylic` 版与"照抄设置窗口加回 `mica`"版都在 Win+D 后消失，去掉材质即恢复。
-    **2026-09-14 晚补充**：这条结论的触发前提是"窗口被 Win+D 隐藏 → `ShowWindow` 恢复"；新层级层已让窗口**不被隐藏**（见下方"桌面 owner"条目），所以材质可能重新可用——**待回归验证**，验证通过前仍按"挂件不开材质"执行。
-    附带代价：不用材质 = 没有壁纸色调；若为了色调开材质，就会周期性丢窗口，不划算。观感改由渲染层底 `--glass-shell`（与"课表预览"同源，取 `--layer-strong` 同值）承担。
-  - **为什么不给挂件用 Acrylic / Mica（重要）**：Acrylic 在"Win+D 隐藏 → 恢复"之后 **DWM 合成会失效**——实测窗口 `IsWindowVisible` 为真、owner 正确、z-order 也正确（诊断字段 `coveredByShell:false`、排位在 Progman 之前），但屏幕上就是不出现，Electron 侧无法感知也修不好（`webContents.invalidate()` + bounds 抖动只能治一时）。它另有两个固有代价：失焦被 DWM 切成不活跃（变灰发蓝）、必须 `transparent: true` 而透明窗口拿不到 DWM 圆角。
+  - **挂件窗口材质（2026-09-14 四次定稿：材质回归成功，改成可选设置）**：`settings.material` = `solid`（默认，不透明实色底）/ `mica` / `mica-alt` / `acrylic`，在「设置 → 显示与行为 → 窗口材质」里切。映射见 `windows/widget.ts` 的 `resolveMaterial()`：
+    - `solid`：`transparent: false` + 不设 `backgroundMaterial`，DWM 圆角 + 不透明实色底（浅 `#fafafa` / 深 `#202020`，随 `applyWidgetTheme()` 切换），`hasShadow: false`；
+    - `mica` / `mica-alt`：非透明窗口 + `backgroundMaterial: 'mica' | 'tabbed'`，**保住 DWM 圆角**；
+    - `acrylic`：**必须 `transparent: true`** 才糊得出来，代价是 `roundedCorners` 关掉（拿不到 DWM 圆角）。
+    **切换材质必须重建窗口**（`recreateWidgetWindow()`）：`backgroundMaterial` 只在 `new BrowserWindow()` 时生效，运行时 `setBackgroundMaterial()` 即使 `DwmGetWindowAttribute` 读回 accepted 也不出模糊。
+    **材质结论的变迁（重要，别再引用旧结论）**：旧硬结论是"挂件一律不开 `backgroundMaterial`"，理由是 Acrylic 与 Mica 都会在"Win+D 隐藏 → `ShowWindow` 恢复"之后 DWM 合成失效（`IsWindowVisible` 为真、owner 与 z-order 全对，但屏幕上不出现）。**该结论的触发前提已经消失**：新层级层让挂件压根不被隐藏（见"桌面 owner"条目）。
+    2026-09-14 晚真机回归（每次都用 `Shell.Application`/`keybd_event` 触发 Win+D，并以第三方窗口被最小化作为阳性对照）：
+    - `mica`：Win+D 后 `IsWindowVisible=True / IsIconic=False`，截取的挂件矩形里**壁纸与完整挂件内容同屏**（说明挂件画在桌面之上、没有被藏起来）；
+    - `acrylic`：同样 `True/False`，截图是**完整的课表 + 工具条 + 亚克力面板**。
+    所以材质重新可用；默认仍是 `solid`（最稳），材质不稳时用户随时能退回。观感层次仍由渲染层 `--glass-shell`（与"课表预览"同源，取 `--layer-strong` 同值）承担。
+  - **Acrylic 的固有代价（与 Win+D 无关，仍然成立）**：失焦时被 DWM 切成不活跃（变灰发蓝）；必须 `transparent: true`，而透明窗口拿不到 DWM 圆角（要圆角就得用 `mica` 或 CSS 自绘）。
   - **非透明窗口不能用透明底色**：`transparent: false` 时 `backgroundColor` 的 alpha 会被忽略，给 `#00000000` 得到黑底（材质画在黑上 = 一块死色）。必须给不透明实色。
   - **材质只在窗口创建时声明有效**：`backgroundMaterial` 写在 `new BrowserWindow({...})` 里才生效。运行时再设（Electron 的 `setBackgroundMaterial`，或 koffi 直写 `DWMWA_SYSTEMBACKDROP_TYPE`）即使 `DwmGetWindowAttribute` 读回 `accepted: 3` 也不出模糊。
-  - **`tabbed`（Mica Alt）同样不要用在挂件上**：它和 mica/acrylic 走同一条 DWM 材质路径，按上一条结论一样会在 Win+D 后丢窗口。管理窗口可以用，挂件不要。
+  - **`tabbed`（Mica Alt）现在也能用在挂件上**：它与 mica/acrylic 同走 DWM 材质路径，而材质回归已通过；管理窗口仍按原样用 `mica`。
   - **不要用 `SetWindowRgn` 给透明窗口裁圆角**：实测拖动缩放约 12 秒后主进程**无日志直接重启**（原生层崩溃）；且 `transparent: true` 本身就拿不到 DWM 圆角。对应 DeskBox（WinUI 3 `MicaController`/`DesktopAcrylicController` + `SystemBackdropConfiguration`）的等价做法就是"非透明窗口 + `backgroundMaterial` + DWM 圆角属性"。
   - 管理窗口用主进程 `backgroundMaterial: 'mica'` + 自绘标题栏（`titleBarOverlay`，右侧留 `clamp(138px, 11vw, 190px)` 给系统按钮，深浅主题经 `window:titlebar-theme` 同步）。
   - **`.tt .grid-bg` 必须保留 `display: grid` + `grid-template-columns/rows`**：缺了这两行，77 个 `.cell` 会塌成 1px 高、边框全堆在顶部，看起来就是"列头下方一条莫名其妙的灰带"（排查时用 CDP 探针量 `.cell` 尺寸最快：正常应是 `colw × rowh`）。
