@@ -58,10 +58,12 @@ export interface Win32 {
   GetAncestor: AnyFn;
   GetParent: AnyFn;
   GetWindow: AnyFn;
+  GetWindowRect: AnyFn;
   RegisterWindowMessageW: AnyFn;
 }
 
-/** `GetWindowLongPtrW` 的索引：数值型扩展样式。 */
+/** `GetWindowLongPtrW` 的索引：基本样式 / 扩展样式。 */
+export const GWL_STYLE = -16;
 export const GWL_EXSTYLE = -20;
 export const WS_EX_TOOLWINDOW = 0x00000080;
 export const WS_EX_NOACTIVATE = 0x08000000;
@@ -183,6 +185,7 @@ export function loadWin32(): Win32 | null {
       GetAncestor: user32.func('__stdcall', 'GetAncestor', 'void *', ['void *', 'uint32']) as AnyFn,
       GetParent: user32.func('__stdcall', 'GetParent', 'void *', ['void *']) as AnyFn,
       GetWindow: user32.func('__stdcall', 'GetWindow', 'void *', ['void *', 'uint32']) as AnyFn,
+      GetWindowRect: user32.func('__stdcall', 'GetWindowRect', 'int32', ['void *', 'void *']) as AnyFn,
       RegisterWindowMessageW: user32.func('__stdcall', 'RegisterWindowMessageW', 'uint32', ['str16']) as AnyFn,
     };
   } catch (error) {

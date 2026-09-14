@@ -4,6 +4,7 @@ import type { WidgetSettings } from '../../shared/ipc.js';
 import {
   attachToDesktop,
   ensureWidgetVisible,
+  logLayerDiagnostics,
   logZOrder,
   beginNativeMove,
   isLeftButtonDown,
@@ -209,6 +210,20 @@ export function createWidgetWindow(): BrowserWindow {
   loadRenderer(win, 'widget');
   attachLayer(win, settings);
   offMessages = watchDesktopLayerMessages(win, onDesktopLayerMessage);
+
+  /*
+   * 启动自检：1s / 3s / 6s 各打一行"Electron 视角 vs Win32 视角"。
+   *
+   * 排查"Electron 说 visible=true、屏幕上看不见"这类偏差时，必须同时看两边的说法
+   * —— 之前只信 Electron 的 `isVisible()`，结果漏掉了"窗口其实已经被改成了子窗口/
+   * owner 没写进去"这种 Win32 侧的事实。
+   */
+  for (const delay of [1000, 3000, 6000]) {
+    setTimeout(() => {
+      const target = widgetWindow;
+      if (target && !target.isDestroyed()) logLayerDiagnostics(target, `startup+${delay}ms`);
+    }, delay);
+  }
 
   // 三重保险：透明窗口在部分 Windows 配置下不会触发 ready-to-show，
   // 只靠它会导致"进程在跑但界面永不出现"。

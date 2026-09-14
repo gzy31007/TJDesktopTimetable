@@ -116,16 +116,19 @@ export function attachToDesktopHost(api: Win32, hwnd: number, host: number): boo
     originalOwners.set(hwnd, getCurrentOwner(api, hwnd) ?? 0);
   }
 
-  if (getCurrentOwner(api, hwnd) !== host) {
-    api.SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, host);
-  }
+  const before = getCurrentOwner(api, hwnd);
+  if (before === host) return true;
+
+  api.SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, host);
 
   if (getCurrentOwner(api, hwnd) !== host) {
-    log('[win32] 桌面宿主 owner 写入失败，还原原 owner', { hwnd, host });
+    log('[win32] 桌面宿主 owner 写入失败，还原原 owner', { hwnd, host, before });
     restoreOriginalOwner(api, hwnd);
     invalidateDesktopHostCache();
     return false;
   }
+  // 只在 owner 真的发生变化时记一行（静息会被频繁调用，每次都打会淹掉日志）
+  log('[win32] 已挂到桌面宿主', { hwnd, host, before, source: 'SHELLDLL_DefView' });
   return true;
 }
 

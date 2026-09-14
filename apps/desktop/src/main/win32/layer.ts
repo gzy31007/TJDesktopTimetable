@@ -3,6 +3,8 @@ import type { WidgetMode } from '../../shared/ipc.js';
 import { log } from '../logger.js';
 import {
   HTCAPTION,
+  GWL_EXSTYLE,
+  GWL_STYLE,
   SW_HIDE,
   WM_DISPLAYCHANGE,
   WM_SETTINGCHANGE,
@@ -465,6 +467,54 @@ function findWorkerW(api: Win32): number | null {
 
   if (shellViewParent === null) return null;
   return hwndOrNull(api.FindWindowExW(null, shellViewParent, 'WorkerW', null));
+}
+
+/**
+ * 层级自检：把 Electron 视角与 Win32 视角的窗口状态并排打出来。
+ *
+ * 排查"窗口在屏幕上不出现/位置不对"时必须同时看两边的说法：
+ * Electron 的 `isVisible()` / `getBounds()` 与 Win32 的 `IsWindowVisible` /
+ * `GetWindowRect` / owner 可能不一致（例如句柄被 Chromium 换掉、样式改动导致重建）。
+ */
+export function logLayerDiagnostics(window: BrowserWindow, reason: string): void {
+  const api = loadWin32();
+  if (!api || window.isDestroyed()) return;
+  const hwnd = toHwnd(window);
+  let rect = 'n/a';
+  try {
+    const r = Buffer.alloc(16);
+    api.GetWindowRect(hwnd, r);
+    rect = [r.readInt32LE(0), r.readInt32LE(4), r.readInt32LE(8), r.readInt32LE(12)].join(',');
+  } catch {
+    /* 忽略：诊断失败不该影响主流程 */
+  }
+  const style = Number(api.GetWindowLongPtrW(hwnd, GWL_STYLE));
+  const exStyle = Number(api.GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
+  // 父窗口链：如果窗口意外变成了某个窗口的子窗口，EnumWindows 就看不到它，
+  // 这里把链条打出来（正常应当是空链 = 顶层窗口）。
+  const parents: string[] = [];
+  let cursor = hwndOrNull(api.GetParent(hwnd));
+  let guard = 0;
+  while (cursor !== null && guard < 8) {
+    parents.push(`${windowClassName(api, cursor)}(0x${cursor.toString(16)})`);
+    cursor = hwndOrNull(api.GetParent(cursor));
+    guard += 1;
+  }
+  log('[win32] 层级自检', {
+    reason,
+    hwnd,
+    electron: { visible: window.isVisible(), bounds: window.getBounds() },
+    win32: {
+      visible: Number(api.IsWindowVisible(hwnd)) !== 0,
+      iconic: Number(api.IsIconic(hwnd)) !== 0,
+      owner: getCurrentOwner(api, hwnd),
+      rect,
+      style: `0x${(style >>> 0).toString(16)}`,
+      exStyle: `0x${(exStyle >>> 0).toString(16)}`,
+      isChild: (style & 0x40000000) !== 0,
+      parents,
+    },
+  });
 }
 
 /** 当前是否处于桌面层静息（渲染层/设置面板可用来解释行为）。 */
