@@ -42,6 +42,7 @@ jobs:
   winui-shell:
     # WinUI 3 只能 Windows 构建；net10.0-windows10.0.22621.0 要求 Windows SDK 22621。
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -51,13 +52,27 @@ jobs:
         run: dotnet restore dotnet/TjtTimetable.Windows.slnx
       - name: Build（WinUI 外壳）
         run: dotnet build dotnet/TjtTimetable.Windows.slnx --configuration Release --no-restore
+      # 冒烟自检：建窗口 + 渲染课表 + 校验布局。
+      #
+      # 两层超时保护：WinUI 在没有交互式桌面的 runner 上有可能卡在某一步，
+      # 不设超时的话 job 会无限期 in_progress（本项目实测过一次）。
+      #   1) timeout-minutes 兜住整个 job；
+      #   2) 这里再给 wait 兜一次，超时即杀进程并按失败处理。
       - name: Smoke（建窗口 + 渲染课表 + 布局自检）
+        timeout-minutes: 5
         shell: pwsh
         run: |
           $exe = "dotnet/Tjt.App/bin/Release/net10.0-windows10.0.22621.0/win-x64/Tjt.App.exe"
           $out = Join-Path $env:RUNNER_TEMP "tjt-smoke.out.txt"
           $err = Join-Path $env:RUNNER_TEMP "tjt-smoke.err.txt"
-          $p = Start-Process -FilePath $exe -ArgumentList '--smoke', '--fixture', 'packages/core/fixtures/tongji-2026-1-personal.json' -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+          $p = Start-Process -FilePath $exe -ArgumentList '--smoke', '--fixture', 'packages/core/fixtures/tongji-2026-1-personal.json' -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+          if (-not $p.WaitForExit(90000)) {
+            Write-Host "冒烟自检 90 秒未退出，强杀进程"
+            try { $p.Kill() } catch { }
+            Write-Host "---- stdout ----"; if (Test-Path $out) { Get-Content $out | ForEach-Object { Write-Host $_ } }
+            Write-Host "---- stderr ----"; if (Test-Path $err) { Get-Content $err | ForEach-Object { Write-Host $_ } }
+            throw "冒烟自检超时（90s 未退出）"
+          }
           Write-Host "---- stdout ----"; Get-Content $out | ForEach-Object { Write-Host $_ }
           Write-Host "---- stderr ----"; Get-Content $err | ForEach-Object { Write-Host $_ }
           Write-Host "smoke exit code: $($p.ExitCode)"

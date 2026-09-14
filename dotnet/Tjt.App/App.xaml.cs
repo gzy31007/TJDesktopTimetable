@@ -72,10 +72,13 @@ public partial class App : Application
         {
             if (options.Smoke)
             {
-                Environment.ExitCode = SmokePassed ? 0 : 1;
-                // 用 Exit() 让消息循环正常收尾（退出码走 Environment.ExitCode）；
-                // 直接硬退会让 WinUI 的清理路径被跳过，日志也来不及刷。
-                Current.Exit();
+                // 冒烟模式一律**硬退出**：实测 Application.Exit() 在这种"窗口从未激活"的路径上
+                // 会让进程挂住（退出消息投给消息循环，而循环在窗口激活前不推进），
+                // CI 上表现为 job 无限期 in_progress。自检是纯短命进程，不需要 WinUI 的清理路径，
+                // 用 Environment.Exit 保证一定结束（退出码直接决定 CI 成败）。
+                Console.Out.Flush();
+                Console.Error.Flush();
+                Environment.Exit(SmokePassed ? 0 : 1);
             }
         }
     }
