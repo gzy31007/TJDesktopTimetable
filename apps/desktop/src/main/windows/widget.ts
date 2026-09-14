@@ -73,6 +73,8 @@ let widgetWindow: BrowserWindow | null = null;
 let layer: LayerHandle | null = null;
 /** 桌面层级消息订阅（窗口销毁时取消）。 */
 let offMessages: (() => void) | null = null;
+/** 越界夹回的去抖句柄（见 scheduleClampIntoWorkArea）。 */
+let clampTimer: NodeJS.Timeout | null = null;
 /** WM_SETTINGCHANGE 去抖句柄：这条消息在系统里很吵，必须合并。 */
 let layerMessageTimer: NodeJS.Timeout | null = null;
 let dragging = false;
@@ -89,12 +91,25 @@ function resolveBounds(settings: WidgetSettings): { x: number; y: number; width:
 
   if (stored) {
     const area = screen.getDisplayNearestPoint({ x: stored.x, y: stored.y }).workArea;
-    const onScreen =
-      stored.x + width > area.x &&
-      stored.x < area.x + area.width &&
-      stored.y + height > area.y &&
-      stored.y < area.y + area.height;
-    if (onScreen) return { x: Math.round(stored.x), y: Math.round(stored.y), width, height };
+    const fullyInside =
+      stored.x >= area.x &&
+      stored.y >= area.y &&
+      stored.x + width <= area.x + area.width &&
+      stored.y + height <= area.y + area.height;
+    if (fullyInside) return { x: Math.round(stored.x), y: Math.round(stored.y), width, height };
+
+    /*
+     * 部分越界：**夹回工作区**而不是整块退回默认位置。
+     *
+     * 旧判断只要求"和工作区有交集"，于是一个被拖到屏幕右边缘外的挂件会被原样恢复 ——
+     * 右下角的缩放手柄也跟着跑到屏幕外，用户再也点不到（实测：越界 104px 后拖手柄无任何反应）。
+     */
+    return {
+      x: Math.round(Math.min(Math.max(stored.x, area.x), area.x + Math.max(0, area.width - width))),
+      y: Math.round(Math.min(Math.max(stored.y, area.y), area.y + Math.max(0, area.height - height))),
+      width,
+      height,
+    };
   }
 
   const area = screen.getPrimaryDisplay().workArea;
@@ -289,6 +304,10 @@ export function createWidgetWindow(): BrowserWindow {
       clearTimeout(layerMessageTimer);
       layerMessageTimer = null;
     }
+    if (clampTimer) {
+      clearTimeout(clampTimer);
+      clampTimer = null;
+    }
     offMessages?.();
     offMessages = null;
     layer?.detach();
@@ -327,6 +346,40 @@ export function persistBounds(): void {
   if (!win || win.isDestroyed()) return;
   const bounds = win.getBounds();
   saveSettings({ bounds, displayId: screen.getDisplayMatching(bounds).id });
+  scheduleClampIntoWorkArea();
+}
+
+/**
+ * 把窗口夹回所在显示器的工作区。
+ *
+ * 为什么需要：`-webkit-app-region: drag` 走的是系统原生 move loop，**不限制越界** ——
+ * 挂件可以被拖到屏幕外（实测右边缘越界 104px），而右下角的缩放手柄一旦跑到屏幕外就
+ * 再也点不到，用户只能靠拖回来救。
+ *
+ * 为什么去抖而不是每次 `moved` 都夹：原生拖动期间 `moved` 连续触发，当场 `setBounds`
+ * 会和系统 move loop 抢位置（手感变"粘"）。停手 220ms 后再夹一次，既不影响拖动，
+ * 又保证松手后挂件是完整可见的。
+ */
+function scheduleClampIntoWorkArea(): void {
+  if (clampTimer) clearTimeout(clampTimer);
+  clampTimer = setTimeout(() => {
+    clampTimer = null;
+    clampWidgetIntoWorkArea();
+  }, 220);
+}
+
+function clampWidgetIntoWorkArea(): void {
+  const win = widgetWindow;
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const area = screen.getDisplayMatching(bounds).workArea;
+  const x = Math.min(Math.max(bounds.x, area.x), area.x + Math.max(0, area.width - bounds.width));
+  const y = Math.min(Math.max(bounds.y, area.y), area.y + Math.max(0, area.height - bounds.height));
+  if (x === bounds.x && y === bounds.y) return;
+  log('[widget] 挂件越出工作区，已夹回', { from: `${bounds.x},${bounds.y}`, to: `${x},${y}` });
+  const next = { ...bounds, x, y };
+  win.setBounds(next);
+  saveSettings({ bounds: next, displayId: screen.getDisplayMatching(next).id });
 }
 
 /** 应用外观 / 层级相关设置（周次过滤、透明度这类纯渲染项由渲染层处理）。 */
@@ -426,9 +479,16 @@ export function beginResize(): void {
   const bounds = win.getBounds();
   const [startWidth = DEFAULT_WIDTH, startHeight = DEFAULT_HEIGHT] = win.getSize();
   const area = screen.getDisplayMatching(bounds).workArea;
-  // 不允许拖出所在显示器的工作区
-  const maxWidth = Math.max(MIN_WIDTH, area.x + area.width - bounds.x);
-  const maxHeight = Math.max(MIN_HEIGHT, area.y + area.height - bounds.y);
+  /*
+   * 上限 = 工作区右/下边界到窗口左/上边界的距离，但**不得小于当前尺寸**、也不超过工作区
+   * 本身。加了这一层是因为：窗口若已（部分）越出右边界，`room` 会小于当前宽度，用户一按
+   * 手柄窗口就先"缩一下"——越界应该由 `clampWidgetIntoWorkArea()` 夹回来解决，
+   * 而不是把用户的窗口缩小。
+   */
+  const roomWidth = area.x + area.width - bounds.x;
+  const roomHeight = area.y + area.height - bounds.y;
+  const maxWidth = Math.max(MIN_WIDTH, Math.min(area.width, Math.max(startWidth, roomWidth)));
+  const maxHeight = Math.max(MIN_HEIGHT, Math.min(area.height, Math.max(startHeight, roomHeight)));
 
   startPointerLoop(() => {
     if (!resizing || win.isDestroyed() || !isLeftButtonDown()) {

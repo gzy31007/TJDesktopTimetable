@@ -73,9 +73,9 @@ void props;
         </select>
       </label>
 
-      <label class="field">
+      <label class="field" title="只影响卡片底板与桌面的混合程度，文字与色块始终保持清晰">
         <span class="lbl">
-          不透明度
+          背景不透明度
           <b>{{ Math.round(settings.opacity * 100) }}%</b>
         </span>
         <input
