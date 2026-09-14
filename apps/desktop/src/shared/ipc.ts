@@ -21,6 +21,15 @@ export type WeekFilterMode = 'all' | 'odd' | 'even';
  * 运行时改不了 —— 所以切换材质要重建挂件窗口（见 widget.ts 的 recreateWidgetWindow）。
  */
 export type WindowMaterial = 'solid' | 'mica' | 'mica-alt' | 'acrylic';
+/**
+ * 挂件窗口圆角档位（走 DWM 的 `DWMWA_WINDOW_CORNER_PREFERENCE`）。
+ *
+ * Win11 的 DWM 只有三档（默认 / 标准圆角 / 小圆角）+ 直角，所以这里按用户能理解的方式命名：
+ * `system` 跟随系统、`round` 标准（8px 级）、`small` 更小、`square` 直角。
+ * 注意：`material: 'acrylic'` 时窗口是透明的，DWM **不给透明窗口裁圆角** —— 那一档在
+ * 亚克力下不生效（这是系统限制，不是设置没保存）。
+ */
+export type WindowCorner = 'system' | 'round' | 'small' | 'square';
 
 export interface WidgetSettings {
   /** desktop = 贴桌面层（owner 挂桌面图标视图，静息落点按前台三选一）；wallpaper = WorkerW 壁纸层（贴桌面图标之下）。 */
@@ -47,6 +56,8 @@ export interface WidgetSettings {
   theme: ThemeMode;
   /** 窗口系统材质（Win11 原生合成）；默认纯色。 */
   material: WindowMaterial;
+  /** 窗口圆角档位；默认标准圆角。 */
+  corner: WindowCorner;
   /** owner 巡检间隔（毫秒，0 = 关闭）。语义已变：只查 owner 是否丢失，不再重压 z-order。 */
   keepAtBottomIntervalMs: number;
 }
@@ -63,6 +74,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   launchAtLogin: false,
   theme: 'glass',
   material: 'solid',
+  corner: 'round',
   keepAtBottomIntervalMs: 5000,
 };
 

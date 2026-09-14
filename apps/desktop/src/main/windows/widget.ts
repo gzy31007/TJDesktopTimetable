@@ -16,7 +16,7 @@ import {
 } from '../win32/layer.js';
 import { loadSettings, saveSettings } from '../store.js';
 import { clampIntoWorkArea, defaultBounds, resolveSize, type Rect } from './geometry.js';
-import { applyDarkFrame, applyRoundedCorners } from '../win32/dwm.js';
+import { applyDarkFrame, applyRoundedCorners, type CornerPreference } from '../win32/dwm.js';
 import { log } from '../logger.js';
 
 /**
@@ -35,6 +35,25 @@ const CORNER_RADIUS = 14;
  * 跟随主题在深浅之间切换，浅色底特意取亮白——底色偏灰会让叠加的白色玻璃看起来一片灰。
  */
 const WIDGET_BASE_COLOR = { light: '#fafafa', dark: '#202020' } as const;
+
+/**
+ * 设置里的圆角档位 → DWM 的 `DWM_WINDOW_CORNER_PREFERENCE`。
+ *
+ * DWM 只有四档（default / donotround / round / roundsmall），这里只做命名映射，
+ * 不引入额外的自绘圆角（自绘需要裁窗口形状，实测会让主进程崩溃）。
+ */
+function cornerPreference(corner: WidgetSettings['corner']): CornerPreference {
+  switch (corner) {
+    case 'system':
+      return 'default';
+    case 'small':
+      return 'roundsmall';
+    case 'square':
+      return 'donotround';
+    default:
+      return 'round';
+  }
+}
 
 /** 三种外观里只有 `glass` 是深色底（与 renderer/shared/theme.ts 的 isDarkTheme 一致）。 */
 function isDarkTheme(theme: string | undefined): boolean {
@@ -233,8 +252,8 @@ export function createWidgetWindow(): BrowserWindow {
 
   win.setMenuBarVisibility(false);
 
-  // 圆角交给 DWM；同时按初始主题同步深色边框
-  applyRoundedCorners(win, 'round');
+  // 圆角交给 DWM（档位由设置决定）；同时按初始主题同步深色边框
+  applyRoundedCorners(win, cornerPreference(settings.corner));
   applyDarkFrame(win, startDark);
 
 
@@ -383,6 +402,10 @@ export function applyWidgetSettings(patch: Partial<WidgetSettings>, next: Widget
 
   if (patch.mode !== undefined || patch.desktopLayer !== undefined) {
     attachLayer(win, next);
+  }
+  if (patch.corner !== undefined) {
+    // DWM 属性可以运行时改，不需要重建窗口（材质才需要重建）
+    applyRoundedCorners(win, cornerPreference(next.corner));
   }
   if (patch.clickThrough !== undefined) {
     win.setIgnoreMouseEvents(next.clickThrough, { forward: true });

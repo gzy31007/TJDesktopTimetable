@@ -73,6 +73,20 @@ void props;
         </select>
       </label>
 
+      <label class="field">
+        <span class="lbl">窗口圆角</span>
+        <select
+          class="f-select"
+          :value="settings.corner"
+          @change="emit('update', { corner: ($event.target as HTMLSelectElement).value as WidgetSettings['corner'] })"
+        >
+          <option value="system">跟随系统</option>
+          <option value="round">标准圆角</option>
+          <option value="small">小圆角</option>
+          <option value="square">直角</option>
+        </select>
+      </label>
+
       <label class="field" title="只影响卡片底板与桌面的混合程度，文字与色块始终保持清晰">
         <span class="lbl">
           背景不透明度

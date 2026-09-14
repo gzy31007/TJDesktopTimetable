@@ -97,6 +97,7 @@ docs/                 架构、数据模型、适配器指南
 - 自实现拖动/缩放分支（WorkerW 子窗口用）必须双兜底：渲染层 `setPointerCapture` + 主进程 `GetAsyncKeyState(VK_LBUTTON)`。
 - **拖动/缩放期间必须 `layer.pause()`**：owner 巡检会在拖动中途重挂 owner、和拖动抢 z-order（旧实现是每秒 `SetWindowPos(HWND_BOTTOM)`，已删除）。
 - Windows 侧排查可用 WSL interop 直接调 `cmd.exe` / `powershell.exe`，但**参数里的引号与反斜杠会被 interop 再处理一次**：把逻辑写进 `.ps1`/`.bat` 再执行，不要在 `cmd /c` 里堆嵌套引号（`tasklist /FI "IMAGENAME eq x"` 这种就会解析失败）。`.ps1` 用 Windows PowerShell 5 执行时按 ANSI 读取，**脚本内容必须是纯 ASCII**（含中文注释会因引号配对错乱而解析失败）。
+- **改用户 `settings.json` 之前必须先停掉应用**：运行中的实例会在 `moved`/`resized` 等时机 `saveSettings()` 回写，而 `Stop-Process` 是强杀、退出路径不保证执行 —— 先改文件再杀进程，改动会被旧实例的内存值覆盖（实测："恢复挂件位置"这一步就这么白做了一次，`941×719` 被写回成 `819×535`）。正确顺序：**stop → 改 → start**（脚本见 `.tools/stop.ps1` / `.tools/start.ps1`）。
 - **合成鼠标输入的三个坑**（本机验收反复踩到，用 `.tools/` 下的脚本时注意）：
   1. `SetCursorPos` 只挪光标、**不产生鼠标输入消息** —— 所以它测不出 hover（`:hover` 不触发）、也测不出点击；要真实输入得用 `mouse_event(MOUSEEVENTF_MOVE|MOUSEEVENTF_ABSOLUTE, x, y, ...)`，坐标是按主屏归一化到 0..65535 的（`x = 虚拟x * 65535 / 虚拟宽`）。
   2. **PowerShell 不是 DPI 感知进程**：`GetWindowRect` / `SetCursorPos` 用的是虚拟坐标，而应用日志里的 `rect` 是物理坐标（本机 2560×1600 / 缩放 150% → 虚拟 1707×1067，差 1.5 倍）；混用会得到"窗口没动/hover 没反应"的假结论。`CopyFromScreen` 反而吃物理坐标。
