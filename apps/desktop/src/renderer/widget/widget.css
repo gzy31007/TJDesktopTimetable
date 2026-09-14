@@ -42,13 +42,35 @@ body {
   flex-direction: column;
   /* 对齐设置窗口：整窗不加自绘边框与立体感，边界交给 DWM 圆角 + 材质 */
   border: none;
-  background-color: var(--glass-shell);
-  transition: background-color 200ms var(--ease);
+  /*
+   * 底板画在 `::before` 上，**不透明度只作用在它身上**。
+   *
+   * 旧写法是给整个 `.widget-shell` 加 `opacity: var(--shell-alpha)`，结果是"不透明度"
+   * 调到 0.3 时**连文字和色块一起变透**（再叠上内容层的 0.685 系数，实测几乎读不出来）。
+   * 按 DeskBox 的语义，这个设置只管背景混合程度，内容必须始终清晰。
+   */
+  background-color: transparent;
   color: var(--text);
   overflow: hidden;
   isolation: isolate;
-  /* 不透明度由设置驱动：玻璃底板越不透越"实"，文字与色块不受影响 */
-  opacity: var(--shell-alpha, 1);
+}
+
+/* 底板层：承载主题底色 / 材质色调，并单独承接"不透明度"设置 */
+.widget-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-color: var(--glass-shell);
+  /*
+   * 下限 0.55：这个设置只调"背景混合程度"，不能把内容对比度也一起调没。
+   * 实测 alpha=0.35 时底板几乎全透，深色壁纸会直接顶上来，浅色主题的深字 + 0.05 的
+   * 网格线全部糊掉（这正是 DeskBox 文档里那句"不要为了更透明而牺牲内容边界"）。
+   * 所以滑杆保留可见效果（0.55 → 1），但不会低到读不清。
+   */
+  opacity: calc(0.55 + 0.45 * var(--shell-alpha, 1));
+  transition: background-color 200ms var(--ease), opacity 160ms var(--ease);
+  pointer-events: none;
 }
 
 /*
@@ -60,10 +82,16 @@ body {
  * 所以材质在挂件上定位为"色调层"：主题底板仍是可读性的保证，材质负责把壁纸的颜色与
  * 模糊带进来；边界用 1px 内描边表达（inset 阴影不改布局）。
  */
+.widget-shell[data-material='mica']::before,
+.widget-shell[data-material='mica-alt']::before,
+.widget-shell[data-material='acrylic']::before {
+  background-color: color-mix(in srgb, var(--glass-shell) 62%, transparent);
+}
+
+/* 描边不跟着底板变透：它是卡片的边界，任何时候都该看得见 */
 .widget-shell[data-material='mica'],
 .widget-shell[data-material='mica-alt'],
 .widget-shell[data-material='acrylic'] {
-  background-color: color-mix(in srgb, var(--glass-shell) 62%, transparent);
   box-shadow: inset 0 0 0 1px var(--stroke);
 }
 
@@ -73,10 +101,11 @@ body {
   z-index: 2;
 }
 
-/* 面板级半透明度：让网格与色块跟着一起变透，而不是整窗发灰 */
-.widget-content {
-  opacity: calc(0.55 + 0.45 * var(--shell-alpha, 1));
-}
+/*
+ * 内容保持全不透明。
+ * 旧写法在这里再乘一个 `0.55 + 0.45 * alpha`，是想让网格跟着变透，
+ * 但与外壳的 opacity 叠乘之后（0.3 × 0.685 = 0.2）文字直接不可读 —— 已删除。
+ */
 
 /* ------------------------------------------------------------------ 卡片头 */
 .widget-bar {
