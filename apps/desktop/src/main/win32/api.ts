@@ -25,6 +25,8 @@ export interface KoffiLike {
   pointer(type: unknown): unknown;
   register(fn: (...args: unknown[]) => unknown, type: unknown): unknown;
   unregister(handle: unknown): void;
+  struct(name: string, definition: Record<string, unknown>): unknown;
+  sizeof(type: unknown): number;
 }
 
 export interface Win32 {

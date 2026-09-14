@@ -17,6 +17,7 @@ import {
 import { loadSettings, saveSettings } from '../store.js';
 import { clampIntoWorkArea, defaultBounds, resolveSize, type Rect } from './geometry.js';
 import { applyDarkFrame, applyRoundedCorners, type CornerPreference } from '../win32/dwm.js';
+import { applyAccentBlur, clearAccentBlur } from '../win32/accent.js';
 import { log } from '../logger.js';
 
 /**
@@ -78,6 +79,9 @@ function resolveMaterial(material: WidgetSettings['material']): {
       return { backgroundMaterial: 'tabbed', transparent: false };
     case 'acrylic':
       return { backgroundMaterial: 'acrylic', transparent: true };
+    case 'accent':
+      // 模糊与色调由 SetWindowCompositionAttribute 画在窗口背后，必须透明窗口才看得见
+      return { backgroundMaterial: null, transparent: true };
     default:
       return { backgroundMaterial: null, transparent: false };
   }
@@ -255,6 +259,17 @@ export function createWidgetWindow(): BrowserWindow {
   // 圆角交给 DWM（档位由设置决定）；同时按初始主题同步深色边框
   applyRoundedCorners(win, cornerPreference(settings.corner));
   applyDarkFrame(win, startDark);
+  /*
+   * 强调色毛玻璃：必须等窗口真的显示出来再设（隐藏窗口设了不生效）。
+   * 顺带覆盖"创建时 material=accent 但那时还没 show"的顺序问题。
+   */
+  if (settings.material === 'accent') {
+    const enableAccent = (): void => {
+      if (!win.isDestroyed()) applyAccentBlur(win, { dark: startDark });
+    };
+    win.once('show', () => setTimeout(enableAccent, 60));
+    setTimeout(enableAccent, 1200);
+  }
 
 
   let revealed = false;
@@ -564,6 +579,13 @@ export function applyWidgetTheme(dark: boolean): void {
   if (!win || win.isDestroyed()) return;
   win.setBackgroundColor(dark ? WIDGET_BASE_COLOR.dark : WIDGET_BASE_COLOR.light);
   applyDarkFrame(win, dark);
+  // 强调色毛玻璃的色调跟着主题走（深色主题给深色调），否则切主题后底色与文字对不上
+  if (loadSettings().material === 'accent') applyAccentBlur(win, { dark });
+}
+
+/** 切回非 accent 材质时把强调色策略关掉（否则窗口背后还残留一层模糊）。 */
+export function disableAccentBlur(window: BrowserWindow): void {
+  clearAccentBlur(window);
 }
 
 export function reapplyLayer(): void {

@@ -15,12 +15,15 @@ export type WeekFilterMode = 'all' | 'odd' | 'even';
  *
  * - `solid`：不透明实色底（**默认**，最稳；材质出问题时可随时退回这里）；
  * - `mica` / `mica-alt`：云母 / 云母 Alt（取壁纸色调，克制）；
- * - `acrylic`：亚克力（模糊最强，代价是必须透明窗口 → 拿不到 DWM 圆角）。
+ * - `acrylic`：DWM 亚克力（模糊最强，代价是必须透明窗口 → 拿不到 DWM 圆角）；
+ * - `accent`：强调色毛玻璃（`SetWindowCompositionAttribute`）。**当前实验性、界面不暴露**：
+ *   实测调用成功但无任何视觉效果 —— Electron 的透明窗口带 `WS_EX_NOREDIRECTIONBITMAP`，
+ *   没有重定向表面的窗口会忽略 accent 策略。实现保留在 `win32/accent.ts` 里备查。
  *
  * 注意：`backgroundMaterial` **只在 `new BrowserWindow()` 时声明有效**，
  * 运行时改不了 —— 所以切换材质要重建挂件窗口（见 widget.ts 的 recreateWidgetWindow）。
  */
-export type WindowMaterial = 'solid' | 'mica' | 'mica-alt' | 'acrylic';
+export type WindowMaterial = 'solid' | 'mica' | 'mica-alt' | 'acrylic' | 'accent';
 /**
  * 挂件窗口圆角档位（走 DWM 的 `DWMWA_WINDOW_CORNER_PREFERENCE`）。
  *

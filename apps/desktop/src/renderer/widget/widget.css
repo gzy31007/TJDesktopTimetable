@@ -88,6 +88,31 @@ body {
   background-color: color-mix(in srgb, var(--glass-shell) 62%, transparent);
 }
 
+/*
+ * 暗色主题（glass）下把底板几乎**全部让给系统材质**。
+ *
+ * 上一版对深浅主题一律压 62%，结果暗色主题的 `--glass-shell`（rgba(44,44,46,0.85)）
+ * 叠上去就是一块近黑的实心板 —— 云母/亚克力的色调与"随壁纸取色"完全看不到，
+ * 用户看到的就是"纯黑背景"。
+ *
+ * 暗色主题不需要那层保护：浅色文字压在深色材质上本来就清晰。浅色主题（moe/crystal）
+ * 仍然保留 62%，否则深色壁纸会把深色文字顶掉（那是另一侧的对比度问题）。
+ */
+/*
+ * `accent`（强调色毛玻璃）的底板一律压到 10%：模糊与色调由系统画在窗口背后，
+ * 而那个色调是我们按主题传进去的（深色主题给深、浅色给浅），所以对比度仍然可控，
+ * 不需要像 DWM 材质那样靠主题底板去救。
+ */
+.widget-shell[data-material='accent']::before {
+  background-color: color-mix(in srgb, var(--glass-shell) 10%, transparent);
+}
+
+.widget-shell[data-theme='glass'][data-material='mica']::before,
+.widget-shell[data-theme='glass'][data-material='mica-alt']::before,
+.widget-shell[data-theme='glass'][data-material='acrylic']::before {
+  background-color: color-mix(in srgb, var(--glass-shell) 12%, transparent);
+}
+
 /* 描边不跟着底板变透：它是卡片的边界，任何时候都该看得见 */
 .widget-shell[data-material='mica'],
 .widget-shell[data-material='mica-alt'],
