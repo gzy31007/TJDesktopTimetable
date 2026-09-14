@@ -1,0 +1,152 @@
+/* 课表网格样式 —— 视觉基准：/root/trivial/tongji-timetable/select_preview.html */
+
+.tt-root {
+  --bg: #ffffff;
+  --line: #d5dde8;
+  --line-soft: #e8edf4;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  position: relative;
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+  color: var(--text);
+}
+
+.tt {
+  position: relative;
+  min-width: 0;
+}
+
+.tt .col-head {
+  position: absolute;
+  top: 0;
+  height: var(--header-h);
+  line-height: var(--header-h);
+  width: var(--colw);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line-soft);
+  z-index: 2;
+}
+
+.tt .col-head.today {
+  color: var(--accent);
+}
+
+.tt .col-head.today::after {
+  content: '';
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.tt .slot-labels {
+  position: absolute;
+  left: 0;
+  width: var(--off);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.tt .slot-labels div {
+  position: absolute;
+  right: 8px;
+  line-height: 1.15;
+}
+
+.tt .slot-labels div.current {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tt .grid-bg {
+  position: absolute;
+  left: var(--off);
+  display: grid;
+  grid-template-columns: repeat(var(--cols), var(--colw));
+  grid-template-rows: repeat(var(--rows), var(--rowh));
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.tt .grid-bg .cell {
+  border-right: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg);
+}
+
+.tt .grid-bg .cell.weekend {
+  background: #f8fafc;
+}
+
+.tt .grid-bg .cell.today {
+  background: #eff6ff;
+}
+
+.tt .block {
+  position: absolute;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  user-select: none;
+  transition: filter 0.15s ease;
+}
+
+.tt .block:hover {
+  filter: brightness(1.06);
+}
+
+.tt .block .nm {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tt .block .rm,
+.tt .block .wk {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+
+.tt .block .wk {
+  font-size: 11px;
+  opacity: 0.78;
+}
+
+.tt .block.special {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.22) 0 6px, transparent 6px 12px);
+  border: 2px dashed rgba(255, 255, 255, 0.75);
+}
+
+.tt .block.special .wk {
+  opacity: 1;
+  font-weight: 600;
+}
+
+.tt .empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 0 24px;
+}
