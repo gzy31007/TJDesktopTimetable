@@ -27,9 +27,14 @@ import { log } from '../logger.js';
 const CORNER_RADIUS = 14;
 /**
  * 窗口底色：非透明窗口忽略 alpha，必须是实色（给透明色会得到黑底）。
- * mica 在不可用时它就退化成普通实底，因此跟随主题在深浅之间切换。
+ * 跟随主题在深浅之间切换，浅色底特意取亮白——底色偏灰会让叠加的白色玻璃看起来一片灰。
  */
-const WIDGET_BASE_COLOR = { light: '#f3f3f3', dark: '#202020' } as const;
+const WIDGET_BASE_COLOR = { light: '#fafafa', dark: '#202020' } as const;
+
+/** 三种外观里只有 `glass` 是深色底（与 renderer/shared/theme.ts 的 isDarkTheme 一致）。 */
+function isDarkTheme(theme: string | undefined): boolean {
+  return theme === 'glass';
+}
 
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 440;
@@ -123,6 +128,8 @@ export function createWidgetWindow(): BrowserWindow {
 
   const settings = loadSettings();
   const bounds = resolveBounds(settings);
+  // 初始底色必须按当前主题决定：写死深色会让浅色主题顶着深底，叠上白色玻璃就是一片灰
+  const startDark = isDarkTheme(settings.theme);
   const win = new BrowserWindow({
     ...bounds,
     frame: false,
@@ -132,8 +139,8 @@ export function createWidgetWindow(): BrowserWindow {
      * 渲染层背景保持透明，材质与圆角自然对齐。
      */
     transparent: false,
-    // 非透明窗口忽略 alpha：必须给不透明实色，否则是黑底（mica 会画在黑上）
-    backgroundColor: WIDGET_BASE_COLOR.dark,
+    // 非透明窗口忽略 alpha：必须给不透明实色，否则是黑底
+    backgroundColor: startDark ? WIDGET_BASE_COLOR.dark : WIDGET_BASE_COLOR.light,
     /*
      * 不启用系统材质（backgroundMaterial）。
      *
@@ -164,8 +171,9 @@ export function createWidgetWindow(): BrowserWindow {
 
   win.setMenuBarVisibility(false);
 
-  // 圆角交给 DWM（对应 DeskBox 的 MicaController/AcrylicController 路线）
+  // 圆角交给 DWM；同时按初始主题同步深色边框
   applyRoundedCorners(win, 'round');
+  applyDarkFrame(win, startDark);
 
 
   let revealed = false;
