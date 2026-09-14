@@ -27,3 +27,6 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
+
+      - name: Build（主进程 / 预加载 / 渲染层）
+        run: pnpm build
