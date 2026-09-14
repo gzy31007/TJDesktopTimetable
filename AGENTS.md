@@ -28,7 +28,7 @@ docs/                 架构、数据模型、适配器指南
 ## 任务规范
 
 - 提交：Conventional Commits（英文类型 + 中文简述），例：`feat(core): 增加同济专业课表适配器`；推送前必须 `pnpm test && pnpm typecheck`。
-- 测试：core 的每个公开函数都要有单测；同济适配器必须过黄金测试（fixture 解析结果与 `tongji-2026-1-major.expected.json` 逐条一致）。
+- 测试：core 的每个公开函数都要有单测；同济个人课表适配器由 `test/e2e-timetable.spec.ts` 端到端覆盖（导入 → 布局 → 时间 → 单双周过滤）。
 - 视觉基准：`/root/trivial/tongji-timetable/select_preview.html`（网格参数、色板、条纹特殊块、单双周并排、冲突红闪）。改渲染前先对照它。
 - 代理：WSL 内装依赖优先用国内镜像直连（快 30 倍，CI 也适用）：
   `pnpm install --registry=https://registry.npmmirror.com`
@@ -37,7 +37,8 @@ docs/                 架构、数据模型、适配器指南
 
 ## 易错知识点
 
-- 同济 `timetable/major` 返回的是**专业培养计划里的全部平行教学班**（实测 147 条排课记录 / 128 个教学班），**不是学生已选课表**，因此导入后必须走"勾选"流程；只有 `preselect` 字段可以跳过勾选。
+- **已移除**「专业培养计划（`timetable/major`）适配器」与「教学班勾选」流程：现在只支持个人课表导入即用。若用户误把培养计划数据导进来（同一门课多个教学班），适配器会给 `tongji.looksLikePlan` 警告。
+- 个人课表与培养计划是**同一套后端字段**（`dayOfWeek` / `weekState` / `timeStart` / `roomName` …），区别只在数据范围，所以字段映射逻辑可复用。
 - `weekState` 是 16 位周次掩码，bit0 = 第 1 周；单双周掩码不要硬编码 `0x5555/0xAAAA`（只对 16 周成立），按 `term.totalWeeks` 生成。
 - `dayOfWeek` 取值 1–7，**7 = 周日**（注意与 JS `Date.getDay()` 的 0=周日 区分）。
 - 教学班去重键用 `teachingClassId`（数字），`code` 是教学班代码字符串（如 `00213702`），`courseCode` 是课程代码（如 `002137`），三者不可混用。
@@ -63,6 +64,6 @@ docs/                 架构、数据模型、适配器指南
 ## 注意事项
 
 - 仓库 Public：fixtures 与文档中不得出现学号、姓名、cookie、token 等任何个人凭据。
-- 本阶段**不做** 1 系统自动登录抓取（SSO + 短信增强链路复杂）；`adapters/tongji-student.ts` 只留占位接口，等抓包结果再补字段映射。
+- **不做** 1 系统自动登录（SSO 带短信增强，塞进桌面客户端不划算）：改为用户手动粘贴 Cookie，主进程 `main/tongji.ts` 发起请求并探测接口路径。Cookie 存 `credentials.json`，**任何日志都不得打印 Cookie 内容**。
 - 窗口默认「桌面层 + 置底」：Owner 设为桌面图标层（Win+D 后仍可见、不被图标遮挡），z-order 压在普通窗口之下；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
 - 拖动用 `-webkit-app-region: drag`（见上）；点击挂件会让它获得焦点，这是移除 `WS_EX_NOACTIVATE` 的代价，属于有意取舍。

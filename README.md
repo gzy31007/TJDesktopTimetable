@@ -8,7 +8,7 @@
 
 - **贴桌面**：窗口挂到桌面图标层（Owner = `SHELLDLL_DefView`）——浮在桌面图标之上、被普通窗口覆盖，**按 Win+D 显示桌面后依然可见**；可拖动（拖标题栏）、可缩放，位置尺寸与显示器记忆。
 - **一眼看懂今天**：当前教学周高亮、今日列高亮、单周 / 双周 / 全部周次过滤、非全周课用条纹虚线区分。
-- **导入即用**：粘贴或导入同济课表 JSON（专业课表 + 校历）→ 自动归一化 → 勾选自己的教学班（自动冲突拦截）→ 保存。
+- **导入即用**：粘贴 Cookie 从 1 系统一键获取个人课表，或导入本地 JSON；解析成功立即上桌面，**无需挑选教学班**。
 - **可扩展**：`@tjt/core` 是纯 TypeScript，零 Electron 依赖；适配器注册表 + 统一课表模型，未来可加其他学校，也可复用到 Web。
 - **离线**：所有数据落本地 JSON，不联网、不上传。
 
@@ -22,12 +22,12 @@
                                           │                      │
                                           └──────▶ Vue 渲染层 ◀──┘
                                                    ├─ 桌面挂件窗口（置底、可交互）
-                                                   └─ 管理窗口（导入 / 勾选 / 外观）
+                                                   └─ 管理窗口（导入 / 外观）
 ```
 
 ```
 packages/core/          @tjt/core：模型、周次掩码、冲突检测、网格布局、时间推算、适配器注册表
-  src/adapters/         每个学校一个文件；tongji-major（已实现）、tongji-student（占位）、generic（通用 JSON/ICS）
+  src/adapters/         每个学校一个文件；tongji-student（同济个人课表）、preview-html（排课工具导出）、generic（通用 JSON）
 apps/desktop/           Electron 应用：main（窗口/托盘/Win32）、preload（IPC 桥）、renderer（Vue 3）
 docs/                   architecture.md · data-model.md · adapter-guide.md
 ```
@@ -63,12 +63,22 @@ pnpm dist:win      # WSL 内交叉打包 Windows 免安装版 → apps/desktop/d
 
 本阶段不做自动登录抓取（1 系统 SSO + 短信验证码链路不适合放进桌面客户端）。手动获取一次：
 
-1. 浏览器登录 [1 系统](https://1.tongji.edu.cn/)，打开个人专业课表页面（`/StudentMajorTimeTable`）。
-2. F12 → Network，抓取课表接口响应（`timetable/major`，约 147 条排课记录）与校历接口响应，各存一份 JSON。
-3. 在小组件"管理窗口 → 导入"里粘贴或选择这两个文件。
-4. 勾选自己实际要上的教学班（平行班会自动做时间冲突拦截），保存。
+两种方式，任选其一：
 
-> 拿到"个人已选课表"接口的抓包结果后，只需在 `packages/core/src/adapters/` 里补字段映射，界面与窗口层无需改动。
+**A. 从 1 系统直接获取（推荐）**
+
+1. 浏览器登录 [1 系统](https://1.tongji.edu.cn/)，打开"我的课表"页面。
+2. F12 → **Network** → 刷新页面 → 点一条发往 `1.tongji.edu.cn` 的请求 → **Headers → Request Headers** 里的 `Cookie:` 值整串复制。
+3. 打开小组件"设置"窗口，粘贴 Cookie → 点 **获取我的课表**。
+4. 自动抓取课表（并尝试顺带抓校历）→ 立即应用到桌面。
+
+> Cookie 只保存在本机 `%APPDATA%\TJDesktopTimetable\credentials.json`，不会上传、不进日志；用完可在浏览器退出登录使其失效。
+> 接口路径不写死：程序会先试候选路径，再从 1 系统前端 bundle 里发现 `timetable` 相关路径；失败时把每个候选的 HTTP 状态码列出来，便于定位。
+
+**B. 本地 JSON 导入**
+
+1. 同上抓包，把个人课表接口响应另存为 JSON（可选再存一份校历响应）。
+2. 设置窗口 → 选择 JSON 文件 → **导入并应用**。
 
 ## 扩展其他学校
 
@@ -77,7 +87,7 @@ pnpm dist:win      # WSL 内交叉打包 Windows 免安装版 → apps/desktop/d
 ## 路线图
 
 - [x] M1 核心库：统一模型、周次/冲突/布局/时间算法、同济适配器 + 单测（50 用例全绿）
-- [x] M2 管理窗口：导入面板、教学班勾选、冲突拦截、外观设置
+- [x] M2 管理窗口：导入面板（Cookie 抓取 / 本地 JSON）、外观设置
 - [x] M3 桌面挂件窗口：置底、拖动缩放、托盘、开机自启
 - [x] M4 Windows 交叉打包出 `win-unpacked`、CI（typecheck + test）
 - [ ] M5 Windows 真机验收与细节打磨

@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Timetable } from '@tjt/core';
-import type { AdapterInfo, AppState, DesktopApi, PickedFile, WidgetSettings } from '../shared/ipc.js';
+import type {
+  AdapterInfo,
+  AppState,
+  DesktopApi,
+  PickedFile,
+  TongjiFetchResult,
+  WidgetSettings,
+} from '../shared/ipc.js';
 
 /**
  * 渲染层唯一的对外通道（contextIsolation 开启，渲染层拿不到 Node）。
@@ -20,6 +27,9 @@ const api: DesktopApi & {
   openManage: () => ipcRenderer.invoke('window:manage') as Promise<void>,
   toggleWidget: (visible?: boolean) => ipcRenderer.invoke('widget:toggle', visible) as Promise<AppState>,
   setClickThrough: (enabled: boolean) => ipcRenderer.invoke('widget:click-through', enabled) as Promise<AppState>,
+  getTongjiCookie: () => ipcRenderer.invoke('tongji:cookie:get') as Promise<string>,
+  saveTongjiCookie: (cookie: string) => ipcRenderer.invoke('tongji:cookie:save', cookie) as Promise<void>,
+  fetchTongji: (cookie: string) => ipcRenderer.invoke('tongji:fetch', cookie) as Promise<TongjiFetchResult>,
   beginDrag: () => ipcRenderer.send('widget:drag-start'),
   beginResize: () => ipcRenderer.send('widget:resize-start'),
   endPointer: () => ipcRenderer.send('widget:pointer-end'),

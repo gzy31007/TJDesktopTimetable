@@ -21,7 +21,7 @@
    ┌──────────────────────────────── apps/desktop ────────────────────────────────┐         │
    │ main（窗口 / 托盘 / Win32 置底 / IO）  ←→  preload（contextBridge IPC）        │         │
    │                                             ▼                                │         │
-   │ renderer（Vue 3）: 桌面挂件窗口（TimetableBoard） + 管理窗口（导入 / 勾选 / 外观）│         │
+   │ renderer（Vue 3）: 桌面挂件窗口（TimetableBoard） + 管理窗口（导入 / 外观）│         │
    └──────────────────────────────────────────────────────────────────────────────┘         │
                                                                                             │
                     WorkerW / HWND_BOTTOM 置底 ◀── koffi 调用 user32.dll ──────────────────┘
@@ -45,16 +45,16 @@
   → inputTexts()                     收集所有文本片段
   → registry.best()                  各适配器 detect() 打分（0..1），最高分胜出
   → adapter.parse()                  → ImportResult { term, courses | candidates, preselect, diagnostics }
-  → materializeTimetable(result, 勾选) → Timetable（只含用户勾选的教学班）
+  → materializeTimetable(result)      → Timetable（个人课表直接落盘）
   → 落盘 + 通知渲染层刷新
 ```
 
 `ImportResult` 有意区分两种语义：
 
-- `courses`：**个人已选课表**（拿到"我的课表"接口后直接填充，用户不需要勾选）；
-- `candidates` + `preselect`：**候选池**（如同济专业课表返回专业培养计划的全部平行教学班，必须勾选）。
+- `courses`：**个人课表**——同济 1 系统「我的课表」走这条路，导入即用；
+- `candidates` + `preselect`：**候选池**（平行班清单，需要用户勾选）。这是留给其他学校/培养计划类数据源的通用能力，本项目当前 UI 不使用。
 
-UI 只需处理"有 candidates 就显示勾选面板"，因此未来接入个人课表接口无需改界面。
+同济适配器已从"专业课表（`timetable/major`，需勾选）"切换为"个人课表（导入即用）"；数据获取支持本地 JSON 与 Cookie 抓取两条路。
 
 ## 窗口层设计
 

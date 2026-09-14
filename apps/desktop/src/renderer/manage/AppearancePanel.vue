@@ -3,22 +3,22 @@ import type { WidgetSettings } from '../../shared/ipc';
 
 /** 外观与行为设置（写回主进程 settings.json）。 */
 
-const props = defineProps<{ settings: WidgetSettings; dirty: boolean; saving: boolean }>();
+const props = defineProps<{ settings: WidgetSettings; dirty?: boolean; saving?: boolean }>();
 
 const emit = defineEmits<{
   (event: 'update', patch: Partial<WidgetSettings>): void;
   (event: 'save'): void;
   (event: 'reset'): void;
 }>();
+
+void props;
 </script>
 
 <template>
   <section class="card">
     <header class="card-head">
       <h2>3 · 显示与行为</h2>
-      <button type="button" class="primary" :disabled="!dirty || saving" @click="emit('save')">
-        {{ saving ? '保存中…' : '保存课表' }}
-      </button>
+      <span class="hint">导入后立即生效，无需再点保存</span>
     </header>
 
     <div class="grid">

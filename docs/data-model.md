@@ -34,7 +34,9 @@ interface Timetable { schemaVersion: 1, term, courses, source: { adapterId, adap
 - `Term.startDate` = **第 1 周周一**。同济校历的 `beginDay` 是北京时间午夜的毫秒时间戳（`1789315200000` → `2026-09-14`），适配器用 `msToIsoDate` 换算后再对齐到周一。
 - `dayOfWeek` 7 = 周日；JS `Date.getDay()` 0 = 周日，转换见 `dayNumberToWeekday`。
 
-## 同济 `timetable/major` 字段映射
+## 同济个人课表字段映射
+
+> 个人课表与专业培养计划（`timetable/major`）是同一套后端字段，区别只在数据范围；当前只使用个人课表。
 
 | 原始字段 | 模型字段 | 说明 |
 |---|---|---|

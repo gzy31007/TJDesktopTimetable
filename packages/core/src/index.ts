@@ -13,7 +13,11 @@ export * from './time.js';
 export * from './import.js';
 export * from './adapters/types.js';
 export * from './adapters/registry.js';
-export { tongjiMajorAdapter, TONGJI_MAJOR_ADAPTER_ID, parseTeachersFromValue } from './adapters/tongji-major.js';
-export { tongjiStudentAdapter, TONGJI_STUDENT_ADAPTER_ID } from './adapters/tongji-student.js';
+export {
+  tongjiStudentAdapter,
+  TONGJI_STUDENT_ADAPTER_ID,
+  TONGJI_ORIGIN,
+  parseTeachersFromValue,
+} from './adapters/tongji-student.js';
 export { previewHtmlAdapter, PREVIEW_HTML_ADAPTER_ID, extractDataObject, classesToCourses } from './adapters/preview-html.js';
 export { genericJsonAdapter, GENERIC_ADAPTER_ID } from './adapters/generic.js';

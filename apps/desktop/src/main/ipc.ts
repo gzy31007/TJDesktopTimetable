@@ -2,8 +2,10 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { readFileSync } from 'node:fs';
 import { defaultRegistry } from '@tjt/core';
 import type { Timetable } from '@tjt/core';
-import type { AdapterInfo, AppState, PickedFile, WidgetSettings } from '../shared/ipc.js';
+import type { AdapterInfo, AppState, PickedFile, TongjiFetchResult, WidgetSettings } from '../shared/ipc.js';
 import * as store from './store.js';
+import { log } from './logger.js';
+import { fetchTongjiTimetable } from './tongji.js';
 import { refreshTrayMenu } from './tray.js';
 import { createManageWindow } from './windows/manage.js';
 import {
@@ -58,6 +60,22 @@ export function registerIpc(): void {
       canFetch: Boolean(adapter.canFetch),
     })),
   );
+
+  ipcMain.handle('tongji:cookie:get', (): string => store.loadTongjiCookie());
+
+  ipcMain.handle('tongji:cookie:save', (_event, cookie: string): void => {
+    store.saveTongjiCookie(String(cookie ?? ''));
+    // 注意：绝不把 Cookie 内容写进日志
+    log('[tongji] Cookie 已更新', { length: String(cookie ?? '').trim().length });
+  });
+
+  ipcMain.handle('tongji:fetch', async (_event, cookie: string): Promise<TongjiFetchResult> => {
+    const effective = String(cookie ?? '').trim() || store.loadTongjiCookie();
+    log('[tongji] 开始抓取个人课表', { hasCookie: effective.length > 0 });
+    const result = await fetchTongjiTimetable(effective);
+    log('[tongji] 抓取结果', { ok: result.ok, message: result.message });
+    return result;
+  });
 
   ipcMain.handle('files:pick', async (): Promise<PickedFile[]> => {
     const result = await dialog.showOpenDialog({

@@ -64,6 +64,19 @@ export interface PickedFile {
   text: string;
 }
 
+/** 网络抓取结果（同济 1 系统）。 */
+export interface TongjiFetchResult {
+  ok: boolean;
+  /** 面向用户的结果说明。 */
+  message: string;
+  /** 课表接口响应原文（JSON 字符串），成功时提供。 */
+  timetableText?: string;
+  /** 校历接口响应原文（可选，用于节次时间与当前周次）。 */
+  calendarText?: string;
+  /** 实际命中的接口路径与探测过程（排查用）。 */
+  probes?: { path: string; status: number; note?: string }[];
+}
+
 /** preload 暴露到 `window.api` 的方法集合。 */
 export interface DesktopApi {
   getState(): Promise<AppState>;
@@ -75,6 +88,12 @@ export interface DesktopApi {
   openManage(): Promise<void>;
   toggleWidget(visible?: boolean): Promise<AppState>;
   setClickThrough(enabled: boolean): Promise<AppState>;
+  /** 读取已保存的同济 1 系统 Cookie（为空表示未保存）。 */
+  getTongjiCookie(): Promise<string>;
+  /** 保存 Cookie（写入 userData/credentials.json，不入日志、不进版本库）。 */
+  saveTongjiCookie(cookie: string): Promise<void>;
+  /** 用 Cookie 从 1 系统抓取个人课表（+ 校历）。 */
+  fetchTongji(cookie: string): Promise<TongjiFetchResult>;
   /** 挂件拖动 / 缩放的开始与结束（主进程跟随鼠标移动窗口）。 */
   beginDrag(): void;
   beginResize(): void;

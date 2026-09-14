@@ -7,7 +7,7 @@
 ```ts
 // packages/core/src/adapters/types.ts
 interface SchoolAdapter {
-  id: string;              // 稳定 id，例如 'tongji-major'
+  id: string;              // 稳定 id，例如 'tongji-student'
   displayName: string;     // 导入面板展示名
   version: string;         // 语义化版本
   description: string;     // 一句话说明
@@ -22,7 +22,7 @@ interface SchoolAdapter {
 | 数据来源 | 填法 | UI 行为 |
 |---|---|---|
 | 学生**已选**课表 | `courses: Course[]`（`candidates` 留空） | 直接显示课表 |
-| 培养计划 / 平行班清单 | `candidates: Course[]`（`courses` 留空）+ `preselect` | 进入勾选面板，自动冲突拦截 |
+| 培养计划 / 平行班清单 | `candidates: Course[]`（`courses` 留空）+ `preselect` | 进入勾选面板，自动冲突拦截（**当前 UI 未启用**，同济已改用个人课表） |
 
 ## 步骤
 

@@ -15,6 +15,13 @@ import { DEFAULT_SETTINGS, type AppState, type WidgetSettings } from '../shared/
 
 const FILE_SETTINGS = 'settings.json';
 const FILE_TIMETABLE = 'timetable.json';
+const FILE_CREDENTIALS = 'credentials.json';
+
+interface Credentials {
+  /** 同济 1 系统 Cookie 原文。仅存本地 userData，不入日志、不进版本库。 */
+  tongjiCookie?: string;
+  savedAt?: string;
+}
 
 function dataDir(): string {
   const dir = app.getPath('userData');
@@ -75,4 +82,17 @@ export function getState(): AppState {
 /** 数据目录路径（设置页里展示，便于用户备份 / 排查）。 */
 export function userDataDir(): string {
   return dataDir();
+}
+
+export function loadTongjiCookie(): string {
+  return readJson<Credentials>(FILE_CREDENTIALS)?.tongjiCookie ?? '';
+}
+
+export function saveTongjiCookie(cookie: string): void {
+  const trimmed = cookie.trim();
+  if (!trimmed) {
+    writeJson(FILE_CREDENTIALS, {});
+    return;
+  }
+  writeJson(FILE_CREDENTIALS, { tongjiCookie: trimmed, savedAt: new Date().toISOString() } satisfies Credentials);
 }

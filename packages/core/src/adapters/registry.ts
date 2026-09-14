@@ -1,6 +1,5 @@
 import { genericJsonAdapter } from './generic.js';
 import { previewHtmlAdapter } from './preview-html.js';
-import { tongjiMajorAdapter } from './tongji-major.js';
 import { tongjiStudentAdapter } from './tongji-student.js';
 import type { ImportInput, SchoolAdapter } from './types.js';
 
@@ -35,7 +34,6 @@ export function createRegistry(adapters: readonly SchoolAdapter[]): AdapterRegis
 
 /** 内置适配器（按优先级：具体学校优先于通用格式）。 */
 export const builtinAdapters: readonly SchoolAdapter[] = [
-  tongjiMajorAdapter,
   tongjiStudentAdapter,
   previewHtmlAdapter,
   genericJsonAdapter,
