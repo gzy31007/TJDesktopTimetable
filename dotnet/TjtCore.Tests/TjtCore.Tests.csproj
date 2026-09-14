@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TjtCore\TjtCore.csproj" />
+    <!-- 挂件视觉层（纯 net10.0）：几何/染色/文案的单测也跑在这里，Linux 上就能验证 -->
+    <ProjectReference Include="..\Tjt.Widget\Tjt.Widget.csproj" />
   </ItemGroup>
 
   <!--

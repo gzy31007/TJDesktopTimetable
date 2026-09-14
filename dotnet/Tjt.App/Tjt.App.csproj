@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    WinUI 3 外壳（**只在 Windows 上能编译**）。
+
+    刻意与 dotnet/TjtTimetable.slnx 分开：那个解决方案是平台无关的（net10.0），
+    Linux/CI 都能 `dotnet test`；把本工程加进去会让 Linux 上的构建整片失败。
+    能在 Linux 上验证的部分已经全部沉到 `Tjt.Widget`，这里只剩窗口与 Win32 胶水。
+
+    关键属性：
+    - `WindowsPackageType None`：非打包（unpackaged）应用，由 WASDK 的 auto-initializer
+      在生成的 Main 里定位并加载 Windows App Runtime，不需要 MSIX / 自签名证书；
+    - `UseWinUI true`：XAML 编译器 + WinUI 引用；
+    - `RuntimeIdentifier win-x64`：WinUI 原生资产按 RID 解析；
+    - 不设 `WindowsAppSDKSelfContained`（框架依赖）：CI runner 与用户机器都装了
+      Windows App Runtime；要免安装分发时再开自包含。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <RootNamespace>Tjt.App</RootNamespace>
+    <AssemblyName>Tjt.App</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- 只支持 x64（与 RuntimeIdentifier 一致），显式声明以免 CI 上出现"未指定平台"歧义 -->
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 固定精确版本：与 Windows App SDK 1.8 稳定线对齐（2.x 尚未用于本项目） -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260804001" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TjtCore\TjtCore.csproj" />
+    <ProjectReference Include="..\Tjt.Widget\Tjt.Widget.csproj" />
+  </ItemGroup>
+
+  <!--
+    脱敏黄金数据：**直接复用 TS 侧那一份**（单一真源），启动时读它当作"当前课表"，
+    找不到时退回内置样例（见 DemoData.cs）。`Link` + CopyToOutputDirectory 的用法与
+    TjtCore.Tests 一致，避免依赖运行时的工作目录。
+  -->
+  <ItemGroup>
+    <Content Include="..\..\packages\core\fixtures\tongji-2026-1-personal.json"
+             Link="fixtures\tongji-2026-1-personal.json"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

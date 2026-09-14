@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Tjt.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="TJDesktopTimetable">
+    <!--
+      只声明一个宿主 Grid：课表内容全部在代码里搭（BoardRenderer）。
+      这样 XAML 编译器要处理的东西最少，"画"的部分也就没有第二套声明式真相。
+    -->
+    <Grid x:Name="Host" />
+</Window>

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    挂件的**平台无关**视觉层：几何 + 色块染色 + 文案压缩。
+
+    为什么单独一个库而不是写进 Tjt.App：
+    - Tjt.App 是 WinUI（`net10.0-windows…`，只能在 Windows 上编译），里面的逻辑一旦混进去，
+      Linux/CI 就没法验证，只能靠"推上去看 CI"这种最慢的反馈回路；
+    - 本库只有 `net10.0` + 对 Tjt.Core 的引用，能在 Linux 上编译和跑单测，
+      于是"并排块的像素矩形 / 染色 / 名称压缩"这些真会算错的规则，本地就能钉住。
+
+    约束：本库**不得**引用 WinUI / XAML / Win32（那是 Tjt.App 的职责），
+    只允许纯计算 + Tjt.Core 的模型与配色。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Tjt.Widget</RootNamespace>
+    <AssemblyName>Tjt.Widget</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TjtCore\TjtCore.csproj" />
+  </ItemGroup>
+
+</Project>

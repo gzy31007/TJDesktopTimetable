@@ -1,0 +1,152 @@
+using Microsoft.UI.Xaml;
+using Tjt.App.Data;
+using Tjt.App.Win32;
+
+namespace Tjt.App;
+
+/// <summary>
+/// 应用入口。
+///
+/// 这里只做三件事：解析命令行 → 从 core 取课表 → 建窗口；课表本身怎么算、怎么画分别在
+/// <c>Tjt.Widget</c> 与 <c>Rendering</c> 里。
+///
+/// <c>--smoke</c> 是给 CI 用的**自检模式**：建窗口、渲染一遍、校验布局、退出。
+/// 它不调用 <c>Activate()</c>，所以不会往 runner 的桌面上弹窗；布局校验走 XAML 的
+/// <c>Measure/Arrange</c>，不依赖真实合成，因此在无显卡的 runner 上也能跑。
+/// </summary>
+public partial class App : Application
+{
+    private readonly List<MainWindow> _windows = [];
+
+    /// <summary>构造应用；标志位必须在实例化（触发 <c>Application.Start</c>）之前设好。</summary>
+    public App()
+    {
+        InitializeComponent();
+        UnhandledException += OnUnhandledException;
+    }
+
+    /// <summary>冒烟自检结果；<c>false</c> 会让进程以非零码退出（CI 视为失败）。</summary>
+    public bool SmokePassed { get; private set; } = true;
+
+    /// <summary>
+    /// 当前启动用的命令行选项。刻意用静态字段而不是构造参数：
+    /// XAML 生成的 <c>Main</c> 会 <c>new App()</c>，没有传参的位置。
+    /// </summary>
+    internal static AppStartupOptions Startup { get; set; } = new();
+
+    /// <inheritdoc />
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        var options = Startup;
+        Console.WriteLine($"[start] smoke={options.Smoke} desktopLayer={options.DesktopLayer} size={options.Width}x{options.Height}");
+
+        try
+        {
+            var loaded = AppHost.Load(options.FixturePath);
+            Console.WriteLine($"[data] source={loaded.Source} courses={loaded.Timetable.Courses.Count} sessions={SessionCount(loaded)}");
+
+            var window = new MainWindow();
+            _windows.Add(window);
+            window.Initialize(options, loaded);
+            Console.WriteLine($"[backdrop] mode={window.BackdropMode}");
+
+            if (options.Smoke)
+            {
+                SmokePassed = VerifySmoke(window, loaded);
+                return; // finally 里收尾
+            }
+
+            window.ShowWidget();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[fatal] {ex}");
+            SmokePassed = false;
+        }
+        finally
+        {
+            if (options.Smoke)
+            {
+                Environment.ExitCode = SmokePassed ? 0 : 1;
+                // 用 Exit() 让消息循环正常收尾（退出码走 Environment.ExitCode）；
+                // 直接硬退会让 WinUI 的清理路径被跳过，日志也来不及刷。
+                Current.Exit();
+            }
+        }
+    }
+
+    /// <summary>冒烟自检：布局信息必须自洽，且至少画出一块课表。</summary>
+    private static bool VerifySmoke(MainWindow window, LoadedTimetable loaded)
+    {
+        var problems = new List<string>();
+        var layout = window.Layout;
+        if (layout is null)
+        {
+            problems.Add("窗口没有产出布局信息");
+        }
+        else
+        {
+            if (layout.CanvasWidth <= 0 || layout.CanvasHeight <= 0)
+            {
+                problems.Add($"画布尺寸非法：{layout.CanvasWidth}x{layout.CanvasHeight}");
+            }
+
+            if (layout.Days != 7) problems.Add($"列数应为 7，实际 {layout.Days}");
+            if (layout.Slots <= 0) problems.Add($"节次行数应大于 0，实际 {layout.Slots}");
+
+            // 色块数必须等于"可见时段的条数"（周次过滤后仍可见的那些）
+            var expected = loaded.Timetable.Courses.Sum(course => course.Sessions.Count);
+            if (layout.Blocks != expected)
+            {
+                problems.Add($"色块数 {layout.Blocks} 与可见时段数 {expected} 不一致");
+            }
+        }
+
+        if (string.Equals(window.BackdropMode, "none", StringComparison.Ordinal))
+        {
+            // 材质拿不到不算失败（无显卡 / 老系统的 runner 上本来就没有 Mica），但要留痕
+            Console.WriteLine("[smoke] warn: 材质不可用，退回无材质窗口");
+        }
+
+        if (problems.Count == 0)
+        {
+            Console.WriteLine($"[smoke] ok blocks={layout!.Blocks} canvas={layout.CanvasWidth:0}x{layout.CanvasHeight:0} title={layout.Title}");
+            return true;
+        }
+
+        foreach (var problem in problems) Console.Error.WriteLine($"[smoke] fail: {problem}");
+        return false;
+    }
+
+    private static int SessionCount(LoadedTimetable loaded) =>
+        loaded.Timetable.Courses.Sum(course => course.Sessions.Count);
+
+    /// <summary>关掉所有窗口（冒烟模式下窗口没被激活过，<c>Close()</c> 同样有效）。</summary>
+    private void QuitAll()
+    {
+        foreach (var window in _windows.ToArray())
+        {
+            try
+            {
+                window.Teardown();
+                window.Close();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[shutdown] 关闭窗口失败：{ex.Message}");
+            }
+        }
+
+        _windows.Clear();
+    }
+
+    /// <summary>
+    /// 兜底：任何未处理异常都要把退出码置为非零，否则 CI 会把崩溃当成功。
+    /// </summary>
+    private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        Console.Error.WriteLine($"[fatal] 未处理异常：{e.Exception}");
+        SmokePassed = false;
+        Environment.ExitCode = 1;
+    }
+}
