@@ -1,7 +1,14 @@
 import { BrowserWindow, screen } from 'electron';
 import { join } from 'node:path';
 import type { WidgetSettings } from '../../shared/ipc.js';
-import { attachToDesktop, beginNativeMove, isLeftButtonDown, isWin32Available, type LayerHandle } from '../win32/layer.js';
+import {
+  applyRoundedRegion,
+  attachToDesktop,
+  beginNativeMove,
+  isLeftButtonDown,
+  isWin32Available,
+  type LayerHandle,
+} from '../win32/layer.js';
 import { loadSettings, saveSettings } from '../store.js';
 import { log } from '../logger.js';
 
@@ -14,6 +21,8 @@ import { log } from '../logger.js';
  *   与系统非客户区拖动冲突），结束后落盘位置。
  */
 
+/** 玻璃卡片的圆角半径（与 widget.css 的 .widget-shell 保持一致）。 */
+const CORNER_RADIUS = 14;
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 440;
 const MIN_WIDTH = 320;
@@ -135,6 +144,22 @@ export function createWidgetWindow(): BrowserWindow {
   });
 
   win.setMenuBarVisibility(false);
+
+  /**
+   * 圆角裁切：透明窗口 + Acrylic 会得到"整个矩形都被模糊"的方块玻璃，
+   * 且 DWM 在透明窗口上不画圆角，所以这里用 region 把窗口形状裁圆。
+   * Electron 的 width/height 是 DIP，SetWindowRgn 要物理像素，按缩放比换算。
+   */
+  const clipCorners = (): void => {
+    if (process.platform !== 'win32' || win.isDestroyed()) return;
+    const [width = 0, height = 0] = win.getSize();
+    const scale = screen.getDisplayMatching(win.getBounds()).scaleFactor || 1;
+    applyRoundedRegion(win, width * scale, height * scale, CORNER_RADIUS * scale);
+  };
+  clipCorners();
+  win.on('resize', clipCorners);
+  win.on('moved', clipCorners);
+
   let revealed = false;
   const reveal = (reason: string): void => {
     if (revealed || win.isDestroyed()) return;

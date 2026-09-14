@@ -20,17 +20,17 @@ body {
   font-family: var(--font-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif);
 }
 
-/* 四周边距：玻璃面板成为悬浮卡片，圆角不会被贴边的色块切成方角 */
+/*
+ * 内容铺满窗口：窗口形状本身就是圆角矩形（主进程用 SetWindowRgn 裁的），
+ * 卡片与窗口重合 —— 这样 Acrylic 只画在圆角内，不会出现"方块玻璃板"。
+ */
 body {
-  padding: 9px;
   box-sizing: border-box;
 }
 
 #app {
   width: 100%;
-  /* 用 vh 而非 100%：body 的百分比高度在预览环境里会被水平滚动条吃掉一截，
-     导致玻璃卡片底部短一截 */
-  height: calc(100vh - 18px);
+  height: 100vh;
 }
 
 .widget-shell {

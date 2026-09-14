@@ -49,6 +49,10 @@ interface Win32 {
   ReleaseCapture: AnyFn;
   SendMessageW: AnyFn;
   GetAsyncKeyState: AnyFn;
+  // 圆角裁切（GDI 区域）：透明窗口拿不到 DWM 圆角，只能自己把窗口形状裁成圆角矩形
+  CreateRoundRectRgn: AnyFn;
+  SetWindowRgn: AnyFn;
+  DeleteObject: AnyFn;
 }
 
 const GWL_EXSTYLE = -20;
@@ -90,6 +94,7 @@ function loadWin32(): Win32 | null {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const koffi = require('koffi') as KoffiLike;
     const user32 = koffi.load('user32.dll');
+    const gdi32 = koffi.load('gdi32.dll');
     const EnumWindowsCb = koffi.proto('__stdcall', 'EnumWindowsCb', 'int32', ['void *', 'intptr_t']);
     cached = {
       koffi,
@@ -129,6 +134,17 @@ function loadWin32(): Win32 | null {
         'intptr_t',
       ]) as AnyFn,
       GetAsyncKeyState: user32.func('__stdcall', 'GetAsyncKeyState', 'int16', ['int32']) as AnyFn,
+      CreateRoundRectRgn: gdi32.func('__stdcall', 'CreateRoundRectRgn', 'void *', [
+        'int',
+        'int',
+        'int',
+        'int',
+        'int',
+        'int',
+      ]) as AnyFn,
+      // fRedraw = 0：不立刻重绘，由调用方自己决定时机
+      SetWindowRgn: user32.func('__stdcall', 'SetWindowRgn', 'int32', ['void *', 'void *', 'int32']) as AnyFn,
+      DeleteObject: gdi32.func('__stdcall', 'DeleteObject', 'int32', ['void *']) as AnyFn,
     };
   } catch (error) {
     loadFailed = true;
@@ -171,6 +187,30 @@ export function isLeftButtonDown(): boolean {
   if (!api) return false;
   try {
     return (Number(api.GetAsyncKeyState(VK_LBUTTON)) & 0x8000) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 把窗口形状裁成圆角矩形（半径单位是窗口像素）。
+ *
+ * 透明无边框窗口不会得到 DWM 的圆角，而窗口级 Acrylic 又会铺满整个矩形，
+ * 所以必须自己裁：这样系统材质只画在圆角内，观感才是"圆角玻璃卡片"。
+ *
+ * 返回 false 表示当前平台不适用；调用方（窗口 resize）需要重新裁一次。
+ */
+export function applyRoundedRegion(window: BrowserWindow, width: number, height: number, radius: number): boolean {
+  const api = loadWin32();
+  if (!api || window.isDestroyed() || width <= 0 || height <= 0) return false;
+  const hwnd = toHwnd(window);
+  try {
+    const r = Math.max(0, Math.round(radius));
+    const region = api.CreateRoundRectRgn(0, 0, Math.round(width) + 1, Math.round(height) + 1, r, r);
+    if (!region) return false;
+    api.SetWindowRgn(hwnd, region, 0);
+    // 交给系统后由系统负责释放
+    return true;
   } catch {
     return false;
   }
