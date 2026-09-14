@@ -142,18 +142,18 @@ export function createWidgetWindow(): BrowserWindow {
     // 非透明窗口忽略 alpha：必须给不透明实色，否则是黑底
     backgroundColor: startDark ? WIDGET_BASE_COLOR.dark : WIDGET_BASE_COLOR.light,
     /*
-     * 材质与底色都对齐设置窗口：mica + 近不透明的渲染层底色（见 shared/fluent.css 的 --glass-shell）。
-     * acrylic 曾因"Win+D 隐藏→恢复"后 DWM 合成失效（窗口可见但不显示）而弃用。
+     * 不用任何系统材质：材质在挂件上不可用（真机实测，见下）。
      * hasShadow: false 去掉窗口投影（那层"外部立体感"）。
+     *
+     * ── 为什么挂件不能开 backgroundMaterial ──
+     * "Win+D 隐藏 → ShowWindow 恢复"之后 DWM 合成会失效：窗口 IsWindowVisible 为真、
+     * owner 与 z-order 全对（诊断 coveredByShell:false、排位在 Progman 之前），但屏幕上
+     * 就是不出现，Electron 侧无法感知也修不好。**Acrylic 与 Mica 都会**（各回归过一次），
+     * 关掉材质后完全正常。挂件常年置底失焦、又天天被 Win+D 扫，所以一律不用材质。
+     *
+     * 观感交给渲染层：底色取 --layer-strong（与"课表预览"同源），视觉上与设置窗口一致。
      */
-    /*
-     * 对齐设置窗口的组合：material + 近不透明渲染层底。
-     * 之前 mica 会让"选中变灰"，根因是渲染层底只有 72~78%、材质透出来；
-     * 设置窗口的 `.manage` 用 ~90% 底，所以看不出焦点跳变。这里照抄。
-     */
-    ...(process.platform === 'win32'
-      ? { backgroundMaterial: 'mica' as const, roundedCorners: true, hasShadow: false }
-      : {}),
+    ...(process.platform === 'win32' ? { roundedCorners: true, hasShadow: false } : {}),
     resizable: false,
     movable: true,
     minimizable: false,

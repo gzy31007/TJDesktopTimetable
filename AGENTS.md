@@ -32,11 +32,12 @@ docs/                 架构、数据模型、适配器指南
 - 视觉规范：Win11 Fluent / 亚克力玻璃。设计令牌与基础控件在 `apps/desktop/src/renderer/shared/fluent.css`（色彩分级、圆角、阴影、明暗主题、`.f-btn`/`.f-pill`/`.f-switch`/`.f-card`），课表皮肤在 `shared/board.css`，挂件外壳在 `widget/widget.css`，管理窗口在 `manage/`。改渲染先读这几份，不要再引入一次性硬编码色值。
   - 历史基准（网格参数、色板、条纹特殊块、单双周并排）仍可对照 `/root/trivial/tongji-timetable/select_preview.html`，但视觉语言以 Fluent 令牌为准。
   - **挂件窗口材质（最终选型，2026-09-14 三次定稿：不用系统材质）**：`transparent: false` + **不设 `backgroundMaterial`** + DWM 圆角（`main/win32/dwm.ts` 的 `applyRoundedCorners`）+ **不透明实色底**（浅 `#f3f3f3` / 深 `#202020`，随主题经 `applyWidgetTheme()` 切换）。渲染层 `--glass-shell` 给半透明底提供玻璃层次，圆角不自绘，`hasShadow: false`（去掉窗口投影那层外部立体感）。
-    退到"无材质"的完整原因链：**acrylic** 在 Win+D 隐藏→恢复后 DWM 合成失效（窗口 `IsWindowVisible` 为真、owner 与 z-order 均正确，但屏幕上不出现）；**mica** 虽无此问题，但 DWM 会在窗口**获得焦点**时改变材质色调——挂件一点就整窗变灰/变实，而挂件是常年失焦的桌面元素，任何"激活态"跳变都是干扰，渲染层半透明底只能盖住约 3/4、做不到一致。**不用材质**时显示与焦点状态完全无关，代价是没有壁纸色调。
+    **硬结论：挂件一律不开 `backgroundMaterial`——Acrylic 和 Mica 都会在"Win+D 隐藏 → ShowWindow 恢复"后 DWM 合成失效**（窗口 `IsWindowVisible` 为真、owner 与 z-order 全对、诊断 `coveredByShell:false`，但屏幕上就是不出现，Electron 侧无法感知也修不好）。两者各回归过一次：`acrylic` 版与"照抄设置窗口加回 `mica`"版都在 Win+D 后消失，去掉材质即恢复。
+    附带代价：不用材质 = 没有壁纸色调；若为了色调开材质，就会周期性丢窗口，不划算。观感改由渲染层底 `--glass-shell`（与"课表预览"同源，取 `--layer-strong` 同值）承担。
   - **为什么不给挂件用 Acrylic / Mica（重要）**：Acrylic 在"Win+D 隐藏 → 恢复"之后 **DWM 合成会失效**——实测窗口 `IsWindowVisible` 为真、owner 正确、z-order 也正确（诊断字段 `coveredByShell:false`、排位在 Progman 之前），但屏幕上就是不出现，Electron 侧无法感知也修不好（`webContents.invalidate()` + bounds 抖动只能治一时）。它另有两个固有代价：失焦被 DWM 切成不活跃（变灰发蓝）、必须 `transparent: true` 而透明窗口拿不到 DWM 圆角。
   - **非透明窗口不能用透明底色**：`transparent: false` 时 `backgroundColor` 的 alpha 会被忽略，给 `#00000000` 得到黑底（材质画在黑上 = 一块死色）。必须给不透明实色。
   - **材质只在窗口创建时声明有效**：`backgroundMaterial` 写在 `new BrowserWindow({...})` 里才生效。运行时再设（Electron 的 `setBackgroundMaterial`，或 koffi 直写 `DWMWA_SYSTEMBACKDROP_TYPE`）即使 `DwmGetWindowAttribute` 读回 `accepted: 3` 也不出模糊。
-  - **`tabbed`（Mica Alt）备选**：任务管理器用的就是它，比 mica 对比度更高、底纹更明显。要更重的层次感时把 `backgroundMaterial` 换成 `'tabbed'` 即可（Win11 23H2+，低于该版本 DWM 会忽略并退化成 mica/纯色）。
+  - **`tabbed`（Mica Alt）同样不要用在挂件上**：它和 mica/acrylic 走同一条 DWM 材质路径，按上一条结论一样会在 Win+D 后丢窗口。管理窗口可以用，挂件不要。
   - **不要用 `SetWindowRgn` 给透明窗口裁圆角**：实测拖动缩放约 12 秒后主进程**无日志直接重启**（原生层崩溃）；且 `transparent: true` 本身就拿不到 DWM 圆角。对应 DeskBox（WinUI 3 `MicaController`/`DesktopAcrylicController` + `SystemBackdropConfiguration`）的等价做法就是"非透明窗口 + `backgroundMaterial` + DWM 圆角属性"。
   - 管理窗口用主进程 `backgroundMaterial: 'mica'` + 自绘标题栏（`titleBarOverlay`，右侧留 `clamp(138px, 11vw, 190px)` 给系统按钮，深浅主题经 `window:titlebar-theme` 同步）。
   - **`.tt .grid-bg` 必须保留 `display: grid` + `grid-template-columns/rows`**：缺了这两行，77 个 `.cell` 会塌成 1px 高、边框全堆在顶部，看起来就是"列头下方一条莫名其妙的灰带"（排查时用 CDP 探针量 `.cell` 尺寸最快：正常应是 `colw × rowh`）。
