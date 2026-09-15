@@ -276,6 +276,7 @@ public sealed partial class MainWindow : Window
         }
 
         AppLog.Line($"[window] 已恢复上次位置 bounds={bounds} correction={correction} → client={clientWidth}x{clientHeight}dip");
+        AppLog.Line($"[window] 恢复后实测 {MeasureGeometry()}");
         return true;
     }
 
@@ -345,8 +346,14 @@ public sealed partial class MainWindow : Window
             Math.Max(0, measured.Width - (int)Math.Round(client.Width / scale)),
             Math.Max(0, measured.Height - (int)Math.Round(client.Height / scale)));
 
-        // 位置永远按实测存（拖动就是位置变化的唯一来源）
-        var stored = _userSizedRecently
+        // 位置永远按实测存（拖动就是位置变化的唯一来源）。
+        //
+        // 尺寸只在"用户真的改了尺寸"时才按实测存：`WM_EXITSIZEMOVE` 对**纯移动**也会触发，
+        // 若不加这层判断，一次拖动就会把 Windows snap 出来的尺寸写成"用户尺寸"，
+        // 于是又回到"每跑一次长一点"的正反馈（实测如此）。
+        var sizeChangedByUser = _userSizedRecently &&
+                                (measured.Width != _targetBounds.Width || measured.Height != _targetBounds.Height);
+        var stored = sizeChangedByUser
             ? measured
             : _targetBounds with { X = measured.X, Y = measured.Y };
 
@@ -362,6 +369,19 @@ public sealed partial class MainWindow : Window
         if (_settings.Bounds == stored && _settings.FrameCorrection == correction) return;
         _settings = _settings with { Bounds = stored, FrameCorrection = correction };
         SettingsStore.Save(_settings);
+    }
+
+    /// <summary>
+    /// 实测几何（物理像素）：外框来自 <c>GetWindowRect</c>，客户区来自 WinUI 的 <c>ClientSize</c>。
+    /// 两个值并排打出来，才能看清"窗口系统 snap 了多少"。
+    /// </summary>
+    private string MeasureGeometry()
+    {
+        var hwnd = WindowNative.GetWindowHandle(this);
+        if (!NativeMethods.GetWindowRect(hwnd, out var outer)) return "outer=n/a";
+        var client = AppWindow.ClientSize;
+        return $"outer={outer.Left},{outer.Top} {outer.Right - outer.Left}x{outer.Bottom - outer.Top} " +
+               $"client={client.Width}x{client.Height} scale={_dpiScale:0.###}";
     }
 
     /// <summary>层级状态快照（冒烟自检 / 真机日志用）。</summary>

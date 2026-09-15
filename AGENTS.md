@@ -184,6 +184,15 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
   - 冒烟自检**不写**设置（短命进程落盘只会污染真实配置）。
   - 保存的位置若不在任何显示器上（拔了外接屏），回退右下角 —— 用 `DisplayArea.GetFromPoint`
     判定：WASDK 1.8 **没有** `DisplayArea.FindAll()`，构造 `DisplayId` 的投影类型也不稳。
+  - **只有"用户真的改了尺寸"才存实测尺寸**：`WM_EXITSIZEMOVE` 对**纯移动**也会触发，
+    若不加这层判断，一次拖动就会把 snap 出来的尺寸写成用户尺寸，又回到正反馈（实测如此）。
+- **真机验收脚本**（都在 `.tools/`，纯 ASCII）：
+  - `live-check.ps1`：启动 + 读 owner/可见性 + 按 Win+D 再读一遍；
+  - `verify-move.ps1`：`SetWindowPos` 移动窗口 → 发 `WM_EXITSIZEMOVE` → 检查落盘坐标 → 重启检查恢复；
+  - `verify-converge.ps1`：连续跑 3 次，确认尺寸不漂移（实测稳定在 1080x700）；
+  - `verify-topology.ps1`：发 `WM_DISPLAYCHANGE` → 检查 `[layer] 静息 display-change` 是否出现（即事件通道生效）。
+  - ⚠️ 这些脚本**曾经踩坑**：把中文写进单引号字符串会让 Windows PowerShell 5 解析直接崩
+    （按 ANSI 读，引号配对错乱）—— 单引号里只放 ASCII。
 - **外壳已经有的能力（2026-09-15）**：默认摆在**工作区右下角**（留 24px，用 `DisplayArea.WorkArea`
   而不是屏幕尺寸，免得压到任务栏）；顶部信息条显示「学期 · 第 N 周 · 今日 N 节」（对应渲染层
   `.widget-bar` 的三段）；窗口尺寸变化即重排。
