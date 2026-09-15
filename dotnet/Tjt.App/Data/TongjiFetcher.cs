@@ -52,7 +52,18 @@ internal static class TongjiFetcher
 
         if (HttpRequestParser.CookieOf(spec).Length == 0)
         {
-            return Fail("粘贴的请求里没有 Cookie：请用「Copy as cURL」（会带上全部请求头），而不是只复制 URL。");
+            // 实测用户最容易犯的错：只把第一行（URL）复制进去了，于是"没有 Cookie"——
+            // 这句话必须把他引回"整条命令"，否则他会以为是程序不认这条请求。
+            var onlyUrl = !requestText.Contains("-H", StringComparison.Ordinal)
+                && !requestText.Contains("--header", StringComparison.Ordinal)
+                && !requestText.Contains("-b ", StringComparison.Ordinal)
+                && !requestText.Contains("Invoke-", StringComparison.OrdinalIgnoreCase)
+                && !requestText.Contains("$session", StringComparison.Ordinal);
+
+            return Fail(onlyUrl
+                ? "粘贴的内容里只有地址、没有请求头，所以没有 Cookie。看起来只复制了第一行 —— "
+                  + "请在该请求上右键 → Copy → Copy as cURL，把整条命令（含 -H 'cookie: …' 那些行）一起粘贴过来。"
+                : "粘贴的请求里没有 Cookie：请用「Copy as cURL」（会带上全部请求头），而不是只复制 URL。");
         }
 
         if (!Uri.TryCreate(spec.Url, UriKind.Absolute, out var uri))
