@@ -20,7 +20,9 @@ Windows 桌面小组件：把同济大学课表以半透明色块网格固定在
 packages/core/        @tjt/core —— 纯 TS，零平台依赖（模型/周次/冲突/布局/时间/适配器）+ vitest
 packages/core/fixtures/  脱敏后的真实抓包数据（黄金测试基准，禁止放入学号、姓名等个人信息）
 apps/desktop/         Electron 应用（main / preload / renderer）
-docs/                 架构、数据模型、适配器指南
+docs/                 架构、数据模型、适配器指南 · desktop-layer · deskbox-refactor-assessment
+                      + 2026-09-16 结构拆分出来的四份：electron-legacy（冻结线）/ winui-lessons（返工史）
+                        / winui-build（DeskBox 参考事实 + 构建环境清单）/ import（课表导入细节）
 ```
 
 分层硬约束（改代码时必须遵守）：
@@ -33,32 +35,10 @@ docs/                 架构、数据模型、适配器指南
 
 - 提交：Conventional Commits（英文类型 + 中文简述），例：`feat(core): 增加同济专业课表适配器`；推送前必须 `pnpm test && pnpm typecheck`。
 - 测试：core 的每个公开函数都要有单测；同济个人课表适配器由 `test/e2e-timetable.spec.ts` 端到端覆盖（导入 → 布局 → 时间 → 单双周过滤）；**同格撞车**由 `fixtures/tongji-2026-1-collision.json`（构造数据，非抓包）覆盖，TS 与 C# 两侧共用这一份（C# 侧 `CollisionE2ETests.cs`）。
-- 视觉规范：Win11 Fluent / 亚克力玻璃。设计令牌与基础控件在 `apps/desktop/src/renderer/shared/fluent.css`（色彩分级、圆角、阴影、明暗主题、`.f-btn`/`.f-pill`/`.f-switch`/`.f-card`），课表皮肤在 `shared/board.css`，挂件外壳在 `widget/widget.css`，管理窗口在 `manage/`。改渲染先读这几份，不要再引入一次性硬编码色值。
-  - 历史基准（网格参数、色板、条纹特殊块、单双周并排）仍可对照 `/root/trivial/tongji-timetable/select_preview.html`，但视觉语言以 Fluent 令牌为准。
-  - **挂件窗口材质（2026-09-14 四次定稿：材质回归成功，改成可选设置）**：`settings.material` = `solid`（默认，不透明实色底）/ `mica` / `mica-alt` / `acrylic`，在「设置 → 显示与行为 → 窗口材质」里切。映射见 `windows/widget.ts` 的 `resolveMaterial()`：
-    - `solid`：`transparent: false` + 不设 `backgroundMaterial`，DWM 圆角 + 不透明实色底（浅 `#fafafa` / 深 `#202020`，随 `applyWidgetTheme()` 切换），`hasShadow: false`；
-    - `mica` / `mica-alt`：非透明窗口 + `backgroundMaterial: 'mica' | 'tabbed'`，**保住 DWM 圆角**；
-    - `acrylic`：**必须 `transparent: true`** 才糊得出来，代价是 `roundedCorners` 关掉（拿不到 DWM 圆角）。
-    **切换材质必须重建窗口**（`recreateWidgetWindow()`）：`backgroundMaterial` 只在 `new BrowserWindow()` 时生效，运行时 `setBackgroundMaterial()` 即使 `DwmGetWindowAttribute` 读回 accepted 也不出模糊。
-    **材质结论的变迁（重要，别再引用旧结论）**：旧硬结论是"挂件一律不开 `backgroundMaterial`"，理由是 Acrylic 与 Mica 都会在"Win+D 隐藏 → `ShowWindow` 恢复"之后 DWM 合成失效（`IsWindowVisible` 为真、owner 与 z-order 全对，但屏幕上不出现）。**该结论的触发前提已经消失**：新层级层让挂件压根不被隐藏（见"桌面 owner"条目）。
-    2026-09-14 晚真机回归（每次都用 `Shell.Application`/`keybd_event` 触发 Win+D，并以第三方窗口被最小化作为阳性对照）：
-    - `mica`：Win+D 后 `IsWindowVisible=True / IsIconic=False`，截取的挂件矩形里**壁纸与完整挂件内容同屏**（说明挂件画在桌面之上、没有被藏起来）；
-    - `acrylic`：同样 `True/False`，截图是**完整的课表 + 工具条 + 亚克力面板**。
-    所以材质重新可用；默认仍是 `solid`（最稳），材质不稳时用户随时能退回。观感层次仍由渲染层 `--glass-shell`（与"课表预览"同源，取 `--layer-strong` 同值）承担。
-  - **Acrylic 的固有代价（与 Win+D 无关，仍然成立）**：失焦时被 DWM 切成不活跃（变灰发蓝）；必须 `transparent: true`，而透明窗口拿不到 DWM 圆角（要圆角就得用 `mica` 或 CSS 自绘）。
-  - **非透明窗口不能用透明底色**：`transparent: false` 时 `backgroundColor` 的 alpha 会被忽略，给 `#00000000` 得到黑底（材质画在黑上 = 一块死色）。必须给不透明实色。
-  - **材质只在窗口创建时声明有效**：`backgroundMaterial` 写在 `new BrowserWindow({...})` 里才生效。运行时再设（Electron 的 `setBackgroundMaterial`，或 koffi 直写 `DWMWA_SYSTEMBACKDROP_TYPE`）即使 `DwmGetWindowAttribute` 读回 `accepted: 3` 也不出模糊。
-  - **`tabbed`（Mica Alt）现在也能用在挂件上**：它与 mica/acrylic 同走 DWM 材质路径，而材质回归已通过；管理窗口仍按原样用 `mica`。
-  - **不要用 `SetWindowRgn` 给透明窗口裁圆角**：实测拖动缩放约 12 秒后主进程**无日志直接重启**（原生层崩溃）；且 `transparent: true` 本身就拿不到 DWM 圆角。对应 DeskBox（WinUI 3 `MicaController`/`DesktopAcrylicController` + `SystemBackdropConfiguration`）的等价做法就是"非透明窗口 + `backgroundMaterial` + DWM 圆角属性"。
-  - 管理窗口用主进程 `backgroundMaterial: 'mica'` + 自绘标题栏（`titleBarOverlay`，右侧留 `clamp(138px, 11vw, 190px)` 给系统按钮，深浅主题经 `window:titlebar-theme` 同步）。
-  - **底板的"不透明度"只作用在背景层**：底板画在 `.widget-shell::before` 上，`opacity: calc(0.55 + 0.45 * var(--shell-alpha))`。旧写法把 `opacity` 加在整个 `.widget-shell` 上、内容层再乘一次 `0.55 + 0.45 * alpha`，结果是滑杆拉到 0.3 时**文字与网格一起糊掉**（0.3 × 0.685 = 0.2）。下限 0.55 是为了保住对比度：浅色主题的深字压在"壁纸透上来的深底"上会直接读不出来（DeskBox 文档里那句"不要为了更透明而牺牲内容边界"就是这个）。**描边（`inset` box-shadow）不跟着变透**，它是卡片边界。
-  - **`.tt .grid-bg` 必须保留 `display: grid` + `grid-template-columns/rows`**：缺了这两行，77 个 `.cell` 会塌成 1px 高、边框全堆在顶部，看起来就是"列头下方一条莫名其妙的灰带"（排查时用 CDP 探针量 `.cell` 尺寸最快：正常应是 `colw × rowh`）。
-  - 色块染色走三个 CSS 变量（`--tint` / `--edge` / `--ink`），由 `TimetableBoard.vue` 按主题内联设置；`lift()` 必须返回 `#rrggbb`（返回 `rgb()` 会让下游混色算出 NaN，色块直接变透明）。
-  - WSL 内验收视觉：`pnpm -F @tjt/desktop dev:web` 起浏览器预览（支持 `?today=&now=&theme=` 覆盖，仅 mock 模式生效，见 `shared/api.ts` 的 `previewOverrides`），再用 Windows Edge 无头截图（`--screenshot` 写 `\\wsl.localhost\...` 路径可行，本机沙箱禁写 `/mnt/c`）。
+- **Electron 线（冻结）的视觉规范、材质、底板/grid-bg/染色、渲染层预览与打包**：见 [`docs/electron-legacy.md`](docs/electron-legacy.md)（原文逐字搬过去）。
 - 代理：WSL 内装依赖优先用国内镜像直连（快 30 倍，CI 也适用）：
   `pnpm install --registry=https://registry.npmmirror.com`
   只有推送到 GitHub / 拉 GitHub 资源时才用代理：`export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`
-- 打包：`pnpm dist:win` → WSL 内交叉出免安装 `apps/desktop/dist/win-unpacked`（**不需要 wine**）；NSIS 安装包交给 `.github/workflows/build-win.yml`。
 
 ## 易错知识点
 
@@ -77,39 +57,11 @@ docs/                 架构、数据模型、适配器指南
 - **同格多条 times 的合并键含教室**（适配器层：同天 + 同起止节次 + 同教室才合并、周次取并集）；同格不同教室不合并，成为并排的两块。
 - 教学班去重键用 `teachingClassId`（数字），`code` 是教学班代码字符串（如 `00213702`），`courseCode` 是课程代码（如 `002137`），三者不可混用。
 - 校历时间戳是毫秒（如 `beginDay: 1820160000000`），且 `weekBenginDay` 表示"周从周几开始"（同济为 2 = 周一），不是开学日。
-- `koffi` 的平台二进制走 `optionalDependencies`（`@koromix/koffi-win32-x64`），在 WSL 上依赖 `pnpm-workspace.yaml` 的 `supportedArchitectures`，打包时必须 `asarUnpack: ["**/*.node"]`。
-- **WSL 沙箱下打包必须重定向缓存**：electron-builder 默认写 `~/.cache/electron`，本机沙箱只允许写工作区 → 报 `EACCES: permission denied, mkdir '/root/.cache/electron'`。用 `pnpm -F @tjt/desktop dist:win:wsl`（内部传 `--config.electronDownload.cache=$PWD/.cache/electron`）。
-- `electron-builder.yml` 里的 `electronVersion` 必须是**精确版本**：本地没装 electron 运行时（postinstall 被有意跳过），electron-builder 无法推断 `^44.3.0` 这种范围；升级 electron 时同步改这里。
-- pnpm 11 默认拦截依赖 postinstall（`ERR_PNPM_IGNORED_BUILDS`）：新依赖需要构建脚本时，写进 `pnpm-workspace.yaml` 的 `allowBuilds`。
+- **Electron 线（冻结）的依赖与打包坑**（koffi 平台二进制、electron-builder 缓存与精确版本、pnpm `allowBuilds`）、**窗口启动坑**（`ready-to-show`、首次启动反馈、单实例锁、`userData` 路径）：见 [`docs/electron-legacy.md`](docs/electron-legacy.md)。
 - WSL 内装依赖走代理极慢（实测 registry 请求 30s、19 KB/s）：改用国内镜像直连 `pnpm install --registry=https://registry.npmmirror.com`（实测 600 KB/s）。
 - WSL 内无法验证 Win32 窗口层级（置底/穿透）行为，这部分只能在 Windows 真机验收。
-- **透明窗口不要只依赖 `ready-to-show`**：`transparent: true` 的 BrowserWindow 在部分 Windows 配置下永不触发该事件，只在那里 `show()` 会得到"进程在跑但界面不出现"。挂件窗口用三重保险：`ready-to-show` + `did-finish-load` + 3 秒超时兜底（见 `windows/widget.ts` 的 `reveal`）。
-- **首次启动必须给可见反馈**：没有课表时挂件是空内容且被压在 z-order 最底，用户会以为"没打开"。`main/index.ts` 在无课表或带 `--manage` 时会自动打开管理窗口。
-- **单实例锁的副作用**：上一次实例没退出（哪怕界面不可见）时，再双击 exe 会被静默挡掉，表现同样是"打不开"。排查时先 `taskkill /F /IM TJDesktopTimetable.exe`。
 - **不要从 UNC 路径（`\\wsl.localhost\...`）运行产物**：Chromium 需要内存映射加载 `resources.pak`/`icudtl.dat`，9p 文件系统上不可靠；产物要放到 Windows 本地磁盘（`C:\...`）再运行。WSL 侧复制过去极慢（9p 逐文件），让用户用资源管理器拖，或后台 robocopy。
-- **`app.getPath('userData')` 默认取 package.json 的 `name`**（`@tjt/desktop` → `%APPDATA%\@tjt\desktop`）。已在 `main/index.ts` 显式 `app.setName` + `app.setPath('userData', ...)` 固定为 `%APPDATA%\TJDesktopTimetable`。
-- **桌面 owner 用 Explorer 已创建的 `SHELLDLL_DefView`**（2026-09-14 二次修正，推翻当天早些时候的 Progman 结论）：用 `EnumWindows` 遍历顶层窗口 + `FindWindowExW(top, 0, "SHELLDLL_DefView", null)` 取第一个命中的桌面图标视图；写 owner 前存档原值、写后读回校验、失败即还原并回退，句柄缓存用 `IsWindow` 自愈。**绝不用 `SetParent`**（子窗口会被桌面图标压住、拖动坐标错乱），**绝不发 `0x052C` 催生 WorkerW**（登录期与 Explorer 恢复图标布局抢时序，会打乱用户的桌面图标）。
-  - 为什么推翻：参照实现 DeskBox 的宿主取的就是 `SHELLDLL_DefView`（不是 Progman）；2026-09-14 真机实测本实现（owner=DefView）在 Win+D 后**既不隐藏也不最小化**——本次启动日志共 11 行、3 次 Win+D 产生 **0 条** hide/minimize，阳性对照（第三方窗口）被正常最小化，像素比对确认挂件矩形内亮度 27.3→28.4 未变成壁纸的 59.5。
-  - 旧结论"DefView 会恢复了却看不见"的真凶不是 owner 选错，而是当时**另外四套机制同时在改 z-order**（每秒 `HWND_BOTTOM`、`hide` 里的 `SW_RESTORE` + owner 重挂、`nudgeRepaint` 的 1px 抖动、周期抢前台的 last-active-popup 修复）。
-- **层级层的结论/证据/外观说明见 `docs/desktop-layer.md`**（含"怎么复现验收"与"怎么切到深色亚克力观感"）。下面是改代码时必须遵守的要点：
-- **层级层结构（2026-09-14 重写，已拆分）**：`main/win32/` 下 `api.ts`（koffi 绑定唯一入口 + 常量 + 句柄工具）→ `desktop-host.ts`（宿主与 owner 生命周期）→ `resting.ts`（z-order 原语 + `WS_EX_NOACTIVATE` 摘戴）→ `resting-policy.ts`（**纯策略，零依赖，有单测**）→ `layer.ts`（编排）。
-  - **静息落点三选一，不再一律置底**：无前台/前台是桌面壳 → 回桌面层（owner + 置底）；前台是自己或本应用其它窗口 → 只维护内部顺序、不动全局层级；前台是第三方应用 → 插到该应用**之后**（`SetWindowPos(hwnd, foreground, ...)`，`hWndInsertAfter` 是"插到它之后/更低"）。
-  - **不再有每秒重压**：只留 5 秒 owner 巡检，owner 正常时一次 `GetWindowLongPtrW` 读、不产生任何 z-order 变化；Explorer 重启与显示变化交给 `watchDesktopLayerMessages()` 订阅 `TaskbarCreated` / `WM_DISPLAYCHANGE` / `WM_SETTINGCHANGE`（去抖 300ms），收到后作废宿主缓存并重新静息。
-  - **静息态不戴 `WS_EX_NOACTIVATE`**。真机实测：戴着它时 `-webkit-app-region: drag` 的标题栏既不走系统原生 move loop（不可激活窗口被跳过），渲染层也收不到 pointerdown（Chromium 拖拽区把事件吞了），两者叠加 = **挂件完全拖不动**（日志里连一条"开始拖动"都没有）。所以静息就是"普通顶层窗口 + owner 挂桌面图标视图"，点击会短暂激活并把它提到普通层级带顶部，交互结束由落点策略把它放回去 —— 与 DeskBox 默认的"动态层级"一致（它只在实验性的 DesktopPinned 模式才戴 NOACTIVATE）。
-  - 交互入口：`suspendRestingStyle()`（兜底清 NOACTIVATE + `HWND_TOPMOST` → 立刻 `HWND_NOTOPMOST` 脉冲，临时浮到普通带顶部）/ `resumeRestingStyle()`（按前台重新落点）。必须成对调用。
-  - **拖动/缩放的真机结论**（2026-09-14，合成鼠标事件验证）：拖动走的是 **Chromium 原生路径**（拖拽区 → `WM_NCHITTEST → HTCAPTION` → 系统 move loop），窗口位移与鼠标位移一致（实测 +130,+100 的拖拽让窗口 `left/top` 从 739,283 变成 859,375），且**不会**触发渲染层的 `beginDrag`（那条日志是给缩放/自实现分支用的）。缩放柄不是拖拽区，走渲染层 `beginResize` → `suspendRestingStyle` → 自实现循环（日志可见"开始缩放"）。
-  - 改完层级行为后，用 `.tools/layer-probe.ps1`（本机脚本，gitignore）做真机回归：它自己找 owner=DefView 的挂件窗口，按 Win+D、比对 `IsWindowVisible/IsIconic` 与像素，并打印阳性对照；注意 **PowerShell 进程不是 DPI 感知的**，`GetWindowRect`/`SetCursorPos` 用的是虚拟化坐标，而应用日志里的 `rect` 是物理坐标（本机缩放 150%，两者差 1.5 倍），混用会得到"看起来没动"的假结论。
-- 启动后 1s/3s/6s 各打一行 `[win32] 层级自检`（Electron 的 `isVisible()`/`getBounds()` 与 Win32 的 `IsWindowVisible`/`GetWindowRect`/owner/父窗口链并排）；排查"Electron 说显示了、屏幕上看不见"时先看这三行。
-- **`SetWindowPos` 的 `hWndInsertAfter` 是"插到该窗口之后（z-order 更低）"，不是"上方"**：曾误把 owner 传进去想让挂件"贴着桌面之上"，结果把它插到 Progman 下面被桌面盖住。owned 窗口本来就恒在 owner 之上，置底用 `HWND_BOTTOM` 即可。
-- **owner 巡检必须和"当前期望的宿主"比较**：宿主解析结果会随 Explorer 重启而变（DefView 句柄被换掉），比较对象必须每次从 `resolveDesktopHost()` 实时取，不能缓存期望值——否则会每秒误判"丢失"并重挂、反复搅动 z-order。
-- **鼠标交互期只做"临时浮起"，不动 owner**：贴桌面层时挂件是桌面宿主（`SHELLDLL_DefView`）的 owned window，owner 全程保留；`suspendRestingStyle()` 只清一次 NOACTIVATE（兜底）+ 打 `HWND_TOPMOST` → 立刻 `HWND_NOTOPMOST` 的脉冲。旧实现"按下时摘 owner、松开挂回"已随 2026-09-14 重写删除。
-- **不要再引入"修 Shell last active popup"这类抢前台的补救**（已随 2026-09-14 重写整体删除，`repairShellLastActivePopup` 不再存在）：它内部要 `SetForegroundWindow(Progman)` 再切回，等于周期性抢前台——用户观察到的"别的程序有焦点时挂件也会消失"就是它自己造成的干扰。新层级层不需要它：owner 挂在桌面图标视图上、窗口不参与前台争夺，没有那个指针可修。
-- **`detach()` 不隐藏窗口**：切换层级模式（托盘 / 设置面板改 `mode`）会 `attachLayer()` → 先 `detach()` 再重新 `attachToDesktop()`；旧实现里 `detach()` 调了 `SW_HIDE`，结果**切一次模式挂件就消失且没人再显示回来**。真正要隐藏只能走 `setWidgetVisible(false)`。
-- **"贴桌面 + Win+D 后仍可见"要用 Owner，不是 SetParent**：`SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT(-8), <桌面图标视图>)` —— owned 窗口恒在 owner 之上、不随 Win+D 隐藏或最小化，同时仍是顶层窗口（拖动/鼠标/坐标都正常）。`SetParent` 成 WorkerW 子窗口会被桌面图标压在下面，且拖动坐标错乱。owner 的**写入/校验/还原**细节见上方"桌面 owner"条目。
-- **不要给挂件静息态戴 `WS_EX_NOACTIVATE`**：不可激活的窗口会被系统跳过原生 move loop，而 `-webkit-app-region: drag` 又依赖这条 move loop —— 戴上就等于"挂件拖不动"。想要"点击不抢前台"就只能走"悬停/命中测试时临时摘样式"那条路（需要 `WM_NCHITTEST` 子类化），代价与复杂度都不低；本项目选择不戴。`resting.ts` 里仍保留 `setNoActivate()` 原语，`suspendRestingStyle()` 会兜底清一次，防止将来有人又加回去。
-- **Electron 里拖动窗口用 `-webkit-app-region: drag`**（Chromium 内建 `WM_NCHITTEST → HTCAPTION`，真实鼠标输入、跟手、不丢事件），交互控件加 `no-drag`。从主进程 `SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION)` 在 Electron 上实测**不生效**（渲染层 DOM 事件也会被 drag 区域吞掉，两者恰好构成自然降级：drag 生效时走原生，失效时走自实现循环）。
-- 自实现拖动/缩放分支（WorkerW 子窗口用）必须双兜底：渲染层 `setPointerCapture` + 主进程 `GetAsyncKeyState(VK_LBUTTON)`。
-- **拖动/缩放期间必须 `layer.pause()`**：owner 巡检会在拖动中途重挂 owner、和拖动抢 z-order（旧实现是每秒 `SetWindowPos(HWND_BOTTOM)`，已删除）。
+- **Electron 线（冻结）的层级层实现与 owner 结论/证据**（`SHELLDLL_DefView`、静息落点三态、5 秒巡检、`suspendRestingStyle()`、拖动/缩放真机结论、`layer.pause()`）：见 [`docs/electron-legacy.md`](docs/electron-legacy.md)。**现行实现在 C# 侧**（见下节「贴桌面常驻」）。
 - Windows 侧排查可用 WSL interop 直接调 `cmd.exe` / `powershell.exe`，但**参数里的引号与反斜杠会被 interop 再处理一次**：把逻辑写进 `.ps1`/`.bat` 再执行，不要在 `cmd /c` 里堆嵌套引号（`tasklist /FI "IMAGENAME eq x"` 这种就会解析失败）。`.ps1` 用 Windows PowerShell 5 执行时按 ANSI 读取，**脚本内容必须是纯 ASCII**（含中文注释会因引号配对错乱而解析失败）。
 - **改用户 `settings.json` 之前必须先停掉应用**：运行中的实例会在 `moved`/`resized` 等时机 `saveSettings()` 回写，而 `Stop-Process` 是强杀、退出路径不保证执行 —— 先改文件再杀进程，改动会被旧实例的内存值覆盖（实测："恢复挂件位置"这一步就这么白做了一次，`941×719` 被写回成 `819×535`）。正确顺序：**stop → 改 → start**（脚本见 `.tools/stop.ps1` / `.tools/start.ps1`）。
 - **合成鼠标输入的三个坑**（本机验收反复踩到，用 `.tools/` 下的脚本时注意）：
@@ -122,7 +74,7 @@ docs/                 架构、数据模型、适配器指南
 
 - 仓库 Public：fixtures 与文档中不得出现学号、姓名、cookie、token 等任何个人凭据。
 - **不做** 1 系统自动登录（SSO 带短信增强，塞进桌面客户端不划算）：改为用户手动粘贴 Cookie，主进程 `main/tongji.ts` 发起请求并探测接口路径。Cookie 存 `credentials.json`，**任何日志都不得打印 Cookie 内容**。
-- 窗口默认「桌面层 + 静息」：Owner 设为桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见），静息落点按前台窗口三选一（见"层级层结构"）；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
+- 窗口默认「桌面层 + 静息」：Owner 设为桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见），静息落点按前台窗口三选一（Electron 侧实现细节见 [`docs/electron-legacy.md`](docs/electron-legacy.md) 的「层级层结构」；C# 侧见下节「贴桌面常驻」）；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
 - 拖动用 `-webkit-app-region: drag`（见上）；静息态**不戴** `WS_EX_NOACTIVATE`（戴了拖不动，见"易错知识点"），交互期只做"临时浮起 + 结束后重新落点"。
 
 ## C# / WinUI 线（2026-09-15 起）
@@ -183,23 +135,7 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   `--no-backdrop`、换过日志通道，三次实验都停在同一处）。
   所以 CI 的 `winui-shell` job 只做**编译门禁**（真实 Windows SDK + XAML 编译器），
   运行时验证一律走本机 `.tools/build-winui.ps1 -RunSmoke`。
-- **窗口 chrome 与拖动：DeskBox 是怎么做的（只记事实，不抄代码）**：`.refs/DeskBox` 是只读参考副本，
-  **GPL-3.0-only**，按 `docs/deskbox-refactor-assessment.md` 的结论不能抄代码/注释/文档/美术资源，
-  但可以提取"用了哪些 API、什么机制"这类事实。它的做法（`Views/WidgetWindowBase.Bounds.cs` 等）：
-  - 窗口：`OverlappedPresenter.SetBorderAndTitleBar(false, false)` + `IsResizable/IsMaximizable/IsMinimizable = false`，
-    再把 `GWL_STYLE` 里的 `WS_CAPTION | WS_BORDER | WS_DLGFRAME | WS_THICKFRAME` 全部清掉，
-    最后 `SetWindowPos(..., SWP_FRAMECHANGED)` 让样式生效；`AppWindow.IsShownInSwitchers = false`。
-    **即"完全没有系统边框/标题栏/窗口按钮"**，右上角不会再有最小化/最大化/关闭抄我们的按钮。
-  - 拖动：**不用原生 move loop**，而是自实现 —— 根元素 `PointerPressed` 起，
-    `CapturePointer` + `GetCursorPos()` 算位移，每帧把窗口 `SetWindowPos` 到
-    `初始位置 + 位移`（有 4px 的起拖阈值，避免误触）。交互开始还会把窗口**临时提到最前**
-    （`ElevateForInteraction`），结束后再落点 —— 与我们 `SuspendForInteraction` 的思路一致。
-  - 缩放：因为它把 `WS_THICKFRAME` 也清了，所以缩放同样自实现（自己有 resize 边框的命中处理 +
-    `ResizeGuideOverlay` 引导层）。**我们现在也走自实现**（圆角和缩放二选一时选了圆角，
-    见下面"缩放（2026-09-15 二次定稿）"）；只是没做引导层与吸附，简单些。
-  - 托盘：用 **`H.NotifyIcon.WinUI`**（社区库）承载，菜单直接是 WinUI 的 `MenuFlyout`
-    （不是原生 `TrackPopupMenu`）。我们没引那个包，走的是 `Shell_NotifyIcon` + 原生菜单。
-  - 它额外做的：`WS_EX_TOOLWINDOW`、`IsShownInSwitchers=false`（我们已做前者）。
+- **DeskBox 参考事实**（它的窗口 chrome / 拖动 / 缩放 / 托盘用了哪些 API 与机制；只记事实、不抄代码）与**本机构建环境清单**（VS / Windows SDK / WASDK / CI 编译门禁）：见 [`docs/winui-build.md`](docs/winui-build.md)。
 - **拖动是自实现的，且合成输入验不了（2026-09-15 实测结论）**：三条路都试过并记录在案：
   1. **原生 move loop 不生效** —— `ReleaseCapture()` + `SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)`
      窗口纹丝不动（与 Electron 侧当年同一条结论）；
@@ -213,9 +149,7 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   否则结论会是假的 FAIL（试过三轮，全是环境问题不是代码问题）。可验的是：按下事件到达
   （日志 `[drag] 按下`）、左键状态可读（`lbutton=True`）、以及渲染层 `[drag] poll#` 心跳。
 - **缩放（2026-09-15 二次定稿：原生循环 → 自实现）**：
-  - **第一版走"自答 `WM_NCHITTEST` + 系统原生缩放循环"**，命中测试全对，但**真机手动验收判定"边缘缩放失效"** ——
-    因为原生循环要求窗口带 `WS_THICKFRAME`，而那个样式位正是那圈 10px 非客户区框的来源。
-    **两者不可兼得**：`IsResizable=true` → `frame=10,10`（白边/黑带），`false` → `frame=0,0`（无框但拖不动）。
+  - **为什么不能用系统原生缩放循环**（第一版失败史）：见 [`docs/winui-lessons.md`](docs/winui-lessons.md)。**结论：缩放必须自实现。**
   - **现在与 DeskBox 同构：缩放自实现**（`Win32/WindowEdgeResize.cs`，16ms 轮询光标）：
     <list type="bullet">
     <item><description>光标进边缘抓取带 → `SetCursor` 显示对应缩放光标（`IDC_SIZEWE/NS/NWSE/NESW`）；</description></item>
@@ -274,9 +208,7 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     真机实测把窗口强行设到 `40x40` 物理像素时 Windows 仍会接受（没有夹到 320x240 DIP），
     因为窗口系统自己有更小的下限。别把它当成系统的硬约束。
 - **挂件四边那 10px 非客户区框（白边 → 黑带）——根因是 `presenter.IsResizable = true`（2026-09-15 结案）**：
-  - **症状两连**：先是一圈 `#F3F3F3` **白边**；把框区改成"当玻璃"后又变成一条 `#2B2B2B` **黑带**。
-    两种都不是渲染层画的 —— 用一次性探针（给 `BoardRenderer` 的内容根铺洋红）量出：
-    那圈在**客户区之外**，XAML 碰不到它。
+  - **白边/黑带的症状与「铺洋红」探针定位手法**：见 [`docs/winui-lessons.md`](docs/winui-lessons.md)。
   - **根因**：`OverlappedPresenter.IsResizable = true` 会让 WinUI 把 **`WS_THICKFRAME` 塞回
     `GWL_STYLE`**（我们手动清过也没用，presenter 之后又加回去），而这个样式位正是那 10px
     非客户区框的来源。真机实测同一版代码只改这一个值：
@@ -398,51 +330,21 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     `TimetableJson.cs`（课表 ↔ JSON）、`TongjiResponseProbe.cs`（响应像不像课表 = `looksLikeTimetable` 的移植）；
     文件 IO / 网络 / 编排留在 `Tjt.App/Data`——`TimetableStore`、`CredentialsStore`、`TongjiFetcher`、`ImportService`；
     UI 在 `Rendering/ImportPage.cs`（`SettingsWindow` 只把这一页塞进 `NavigationView`）。
-  - **`ImportService` 不认识窗口**：构造时拿三个回调（`apply` = 落盘 + 重画 / `reload` = 按载入顺序重读 /
-    `describe` = 当前课表摘要），由 `App` 接到挂件窗口；设置窗口也**不认识 `MainWindow`**，一切经
-    `SettingsWindow.SettingsHost`。`apply` 里对"窗口还没建"做了兜底（直接落盘）—— 否则 `--import`
-    会因为那一刻 `_windows` 还是空的而静默失败。
+  - **实现细节**（`ImportService` 三回调与「窗口还没建」兜底、落盘两端同形、`Term.Label` 的 `[JsonIgnore]`、STJ 缺字段补空集合）：见 [`docs/import.md`](docs/import.md)。
   - **载入顺序（`AppHost.Load`，唯一入口，启动与"重新载入"共用）**：`--fixture` 显式指定 → 用户导入的
     `timetable.json` → `fixtures/tongji-2026-1-personal.json` → 内置样例 `DemoData`。
     `LoadedTimetable.Origin` 记来源，设置页文案与日志读它。**"重新载入"就是再走一遍这个顺序**，
     所以"导入过之后按刷新会不会退回样例"这类问题只有一处答案。
-  - **落盘格式两端同形**：`TimetableJson` 用 camelCase、逐字段对齐 TS 的 `Timetable` 接口，因此
-    `%APPDATA%\TJDesktopTimetable\timetable.json` 在 Electron 线与 WinUI 线之间能互相读
-    （`credentials.json` 同理：`{ tongjiRequest, savedAt }`）。`Term.Label` 加了 `[JsonIgnore]`
-    （TS 没这个字段，写进去会让人工编辑的文件与 TS 形状不一致）。
-  - **`TimetableJson.Deserialize` 会把缺失的集合补成空集合**：STJ 对位置记录缺字段给 `null` 且**不报错**，
-    不补的话渲染层一遍历 `Slots`/`Sessions` 就崩（实测 `ArgumentNullException`）。缺 `term`/`courses` 返回 `null`，
-    上层当"没有导入过"处理（`TimetableStore.Load` 里连"课程数为 0"也一并当没有）。
+  - **请求发送细节**（`StringContent` 的 Content-Type 必须换掉；`await` 与 UI 线程的关系）：见 [`docs/import.md`](docs/import.md)。
   - **抓取的安全口径**：Cookie 只走内存与 `credentials.json`，**日志只记长度**；显示给用户的是探测行
     （请求 URL / 来源 / HTTP 状态 / 响应大小 / 数据识别）与适配器诊断，**请求头一律不进日志、不上界面**。
-  - **`StringContent` 的默认 Content-Type 必须换掉**：粘贴来的 `content-type` 是内容头，
-    `request.Headers.TryAddWithoutValidation` 加不进去（返回 false），要
-    `content.Headers.Remove("Content-Type")` 后再加 —— 否则 POST 会按 `text/plain` 发出去。
-    （本地合成服务实测：`contentType=application/json`、`method=POST`、`cookiePresent=True`。）
-  - **异步回到 UI 线程**：`ImportService.FetchAsync` 里 `await` **不加** `ConfigureAwait(false)`
-    （await 之后要经 `_apply` 回挂件窗口重画，XAML 只能 UI 线程碰）；`TongjiFetcher` 内部加，
-    因为它只发请求不碰 UI。CLI 的 `--fetch-check` 会在 UI 线程上 `GetAwaiter().GetResult()` 阻塞等待，
-    安全性正来自"网络层全是 `ConfigureAwait(false)`"。
   - **"清空课表"删的就是 `timetable.json`**，之后按载入顺序回退到 fixtures / 内置样例 —— 确认对话框里
     如实这么写（不要写成"课表会变空"，那不是它的行为）。
   - **诊断用 CLI（照 `--size` 的先例加的，不点界面也能验整条链路）**：
     `--import <json>`（走界面同一条导入管线并落盘）、`--fetch-check <请求文件>`（抓一次、写日志、退出码表成败、
     **不落盘**）、`--settings-page <n>`（启动直接开设置窗口第 N 页；配 `--smoke` 时会把该页建出来并 `Measure`，
     用来钉住"导入页能构建且尺寸算得出来"）。三个开关合起来由 `.tools/verify-import.ps1` 驱动。
-  - **设置窗口句柄与文件选择器**：非打包应用的 `FileOpenPicker` 必须先
-    `InitializeWithWindow.Initialize(picker, hwnd)`，否则弹不出来；`ContentDialog` 必须先赋 `XamlRoot`。
-  - **"打开时停在第几页"必须走构造参数**（`SettingsWindow(..., initialPage)`）：只调 `SelectPage(n)`
-    在"窗口还没加载"时可能不回调 `SelectionChanged`，于是托盘「导入课表…」**第一次点开会落在「常规」页**
-    （截图实测到的 bug）。自检里 `shown=` 那一段就是钉这个的。
-  - **卡片的主操作放标题行右侧**（`SettingsView.Block(..., action)`）：导入页的「获取我的课表」原本在输入框
-    下方，落在首屏之外、打开页面根本看不到（截图实测）。凡是"这一页就是来干这件事"的按钮，都放标题行。
-  - **设置窗口尺寸要按 DPI 折算**（`ResizeForDpi`）：`AppWindow.ResizeClient(980, 720)` 收的是**物理像素**，
-    150% 缩放下窗口在屏幕上只有 653×480 DIP —— 左导航吃掉 208 DIP 后卡片只剩约 380 DIP 宽，
-    说明文字一行只放得下十个字。现在按 `GetDpiForWindow()/96` 折算成 DIP 意图，并夹到工作区内
-    （实测 150% → 客户区 1470×1080 px = 980×720 DIP）。
-  - **它认两种同济课表接口**（诊断码 `tongji.personal` 与 `tongji.report`）：课表页那条报表接口把
-    `calendarId` 放在 **URL 上**，所以抓取时由 `HttpRequestParser.QueryValue(spec, "calendarId")` 取出来
-    当 `ImportInput.TermId` —— 不这么做学期会退化成"未知"（详见「易错知识点」里"两条接口两种包法"）。
+  - **设置窗口与接口细节**（`FileOpenPicker`/`XamlRoot`、`initialPage` 与「第一次点开落错页」、主操作放标题行、DPI 折算、两种接口的 `TermId` 来源）：见 [`docs/import.md`](docs/import.md)。
   - **验收**（`.tools/verify-import.ps1`，纯 ASCII，实测全绿）：A 无导入 → 黄金数据；B `--import` → 管线 + 落盘
     （并检查文件是 camelCase 且 14 门）；C 再启动 → 读回 `timetable.json`（导入优先于 fixtures）；
     D 四个设置页都能构建并量出尺寸；E 用**本地 `HttpListener` 合成服务**跑完整抓取链路（该方法不需要用户的
