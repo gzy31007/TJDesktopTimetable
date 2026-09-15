@@ -282,6 +282,21 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     就能一刀切开"这层像素是内容画的还是窗口装饰画的"；再配合"只改一个变量"的变体矩阵
     （`--border-color` / `--corner` 这类临时 CLI），两次测量就能锁定根因，
     比读文档猜快得多。**测完把探针和诊断开关删掉**。
+- **浅色模式"完全不是浅色"——材质主题没接主题（2026-09-15 结案）**：
+  - **症状（真机采样）**：`--dark` 与 `--light` 两种模式的**底色像素一模一样**（顶部都是 `#261E1C`），
+    更怪的是浅色模式的色块比深色的**更暗**。
+  - **根因**：`SystemBackdropConfiguration.Theme` 我们从来没设过 → 材质跟随**系统**主题。
+    系统是深色时，哪怕用户在设置/CLI 里选浅色，mica 仍是深底；而色块是**半透明**的
+    （浅色 13%、深色 30%），浅色低透明度叠在深底上 → 透不过来、反而更暗。
+  - **修法（对齐 DeskBox）**：`BackdropHelper.Apply(window, mode, dark)` 显式设
+    `Theme = dark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light`
+    （DeskBox 在 `WidgetWindowBase.Backdrop` 里就是这么做的），
+    并加 `UpdateTheme(dark)` 供主题切换时更新 —— **复用控制器不重建**
+    （DeskBox 注释：重建系统材质控制器会泄漏原生合成内存与 DWM 句柄，GC 都收不回）。
+    `ApplySettings` 里主题一变就同时更新三件：装饰主题、材质主题、重排。
+  - **实测**：修后 `--light` 顶部底色 `#F9F1EF`（修前 `#261E1C`），色块变成粉彩；
+    `--dark` 不变。**验证方式**：同尺寸、同位置各截一张，比对 `dy=30/120/400/700` 的像素 ——
+    两种模式必须明显不同（这条比肉眼可靠）。
 - **贴桌面常驻（2026-09-15 完成）**：默认就是贴桌面层（`settings.DesktopLayer` 默认 true，
   CLI 用 `--desktop-layer` / `--no-desktop-layer` 覆盖）。移植自 Electron 那套已验收的编排，
   文件与职责一一对应：`Win32/Layer.cs`（编排）、`Win32/Resting.cs`（z-order 原语）、

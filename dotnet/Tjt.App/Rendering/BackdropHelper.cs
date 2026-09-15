@@ -40,6 +40,16 @@ internal sealed class BackdropHelper : IDisposable
     public string Mode { get; private set; } = "none";
 
     /// <summary>
+    /// 材质当前跟随的主题。
+    ///
+    /// <para><b>必须显式设置，不能靠系统默认</b>：<see cref="SystemBackdropConfiguration.Theme"/> 不设时
+    /// 材质跟随**系统**主题 —— 用户在设置里选"浅色"而系统是深色时，材质仍是深色，
+    /// 而色块是半透明的（浅色 13% 透明度），叠在深底上就"完全不是浅色"
+    /// （真机实测：浅色模式顶部像素 `#261E1C`，与深色模式一模一样，但色块反而更暗）。</para>
+    /// </summary>
+    public bool IsDark { get; private set; } = true;
+
+    /// <summary>
     /// 尝试给窗口挂上材质；返回是否成功。
     ///
     /// <paramref name="mode"/> 决定材质种类：<c>Mica</c> / <c>MicaAlt</c> 用 <see cref="MicaController"/>，
@@ -49,12 +59,17 @@ internal sealed class BackdropHelper : IDisposable
     /// 控制器路径优先（能显式接管活跃策略），失败退回内置 backdrop，再失败就是无材质 ——
     /// 任何一步都不该让挂件起不来。
     /// </summary>
-    public static BackdropHelper Apply(Window window, MaterialMode mode = MaterialMode.Mica)
+    /// <param name="dark">材质跟随深色还是浅色（由窗口主题决定，见 <see cref="IsDark"/>）。</param>
+    public static BackdropHelper Apply(Window window, MaterialMode mode = MaterialMode.Mica, bool dark = true)
     {
         ArgumentNullException.ThrowIfNull(window);
 
-        var configuration = new SystemBackdropConfiguration { IsInputActive = true };
-        var helper = new BackdropHelper(window, configuration);
+        var configuration = new SystemBackdropConfiguration
+        {
+            IsInputActive = true,
+            Theme = dark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light,
+        };
+        var helper = new BackdropHelper(window, configuration) { IsDark = dark };
 
         if (mode == MaterialMode.Solid)
         {
@@ -108,6 +123,18 @@ internal sealed class BackdropHelper : IDisposable
         }
 
         return helper;
+    }
+
+    /// <summary>
+    /// 主题切换时更新材质主题（材质控制器复用，不重建 —— 重建会泄漏原生合成内存，DeskBox 的注释也这么说）。
+    /// </summary>
+    /// <param name="dark">是否深色。</param>
+    public void UpdateTheme(bool dark)
+    {
+        if (IsDark == dark) return;
+        IsDark = dark;
+        _configuration.Theme = dark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
+        AppLog.Line($"[backdrop] 材质主题 → {(dark ? "深色" : "浅色")}");
     }
 
     /// <summary>建 MicaController 并绑到窗口（默认物料的活跃策略由 <c>IsInputActive</c> 接管）。</summary>

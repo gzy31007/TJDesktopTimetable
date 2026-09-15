@@ -280,7 +280,8 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            _backdrop = BackdropHelper.Apply(this, _settings.Material);
+            // 材质主题**必须跟窗口主题走**（不设就跟随系统，浅色模式下会得到深底）
+            _backdrop = BackdropHelper.Apply(this, _settings.Material, IsDark());
             AppLog.Line($"[backdrop] mode={_backdrop.Mode}");
         }
 
@@ -644,8 +645,11 @@ public sealed partial class MainWindow : Window
 
         if (previous.Theme != next.Theme)
         {
-            // 装饰主题也要跟着走：否则深色挂件在浅色设置下又会亮起一圈白边
-            ApplyWindowDecorationTheme(WindowNative.GetWindowHandle(this), IsDark());
+            // 三件都要跟着走：装饰主题（否则会有白边）、材质主题（否则浅色模式下底色仍是深色）、
+            // 以及重排（色块染色与文字色都换了）
+            var dark = IsDark();
+            ApplyWindowDecorationTheme(WindowNative.GetWindowHandle(this), dark);
+            _backdrop?.UpdateTheme(dark);
             Render("主题变化");
         }
     }
