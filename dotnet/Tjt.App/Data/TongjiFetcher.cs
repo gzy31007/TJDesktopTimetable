@@ -12,7 +12,8 @@ internal sealed record TongjiFetchOutcome(
     bool Ok,
     string Message,
     string? TimetableText,
-    IReadOnlyList<FetchProbe> Probes);
+    IReadOnlyList<FetchProbe> Probes,
+    string? TermId = null);
 
 /// <summary>
 /// 用「用户从浏览器复制出来的请求」抓取个人课表（TS 侧 <c>apps/desktop/src/main/tongji.ts</c> 的移植）。
@@ -112,8 +113,11 @@ internal static class TongjiFetcher
                 probes);
         }
 
-        AppLog.Line($"[tongji] 抓取成功：{verdict.Note}，{text.Length} 字节");
-        return new TongjiFetchOutcome(true, $"获取成功：{verdict.Note}，已交给解析器。", text, probes);
+        // 学期 id 在 URL 上（报表接口的响应体里没有 calendarId），带上它才能定位开学日期
+        var termId = HttpRequestParser.QueryValue(spec, "calendarId");
+        if (!string.IsNullOrEmpty(termId)) probes.Add(new FetchProbe("学期", termId));
+        AppLog.Line($"[tongji] 抓取成功：{verdict.Note}，{text.Length} 字节，calendarId={termId ?? "无"}");
+        return new TongjiFetchOutcome(true, $"获取成功：{verdict.Note}，已交给解析器。", text, probes, termId);
     }
 
     /// <summary>

@@ -125,6 +125,8 @@ internal sealed class ImportService
             {
                 Text = fetched.TimetableText,
                 AdapterId = TongjiStudentAdapter.AdapterId,
+                // 报表格式的响应里没有学期，只能从请求 URL 带过来（见 TongjiFetcher）
+                TermId = fetched.TermId,
             });
             return Apply(result, fetched.Probes);
         }

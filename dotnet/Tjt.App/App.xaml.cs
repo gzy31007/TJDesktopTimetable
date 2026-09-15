@@ -201,6 +201,8 @@ public partial class App : Application
             {
                 Text = fetched.TimetableText,
                 AdapterId = TongjiStudentAdapter.AdapterId,
+                // 与界面那条抓取路一样：学期 id 来自请求 URL（不然报表格式只能退化成"未知学期"）
+                TermId = fetched.TermId,
             });
             foreach (var diagnostic in result.Diagnostics)
             {
