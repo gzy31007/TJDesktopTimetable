@@ -45,6 +45,7 @@ public sealed partial class MainWindow : Window
     private WindowBounds _targetBounds = new(0, 0, DefaultWidth, DefaultHeight);
     private bool _userSizedRecently;
     private BackdropHelper? _backdrop;
+    private WindowDrag? _drag;
     private Func<WidgetSettings, bool, WidgetSettings>? _openSettings;
     private FrameworkElement? _root;
     private double _dpiScale = 1.0;
@@ -55,9 +56,34 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(null);
+        ConfigureWindowChrome();
         SizeChanged += OnSizeChanged;
         _nowTimer.Interval = NowRefreshInterval;
         _nowTimer.Tick += (_, _) => Render(reason: "时间线刷新");
+    }
+
+    /// <summary>
+    /// 去掉系统标题栏与边框。
+    ///
+    /// <para>原因：<c>ExtendsContentIntoTitleBar</c> 只是让内容延伸到标题栏，**右上角的
+    /// 最小化/最大化/关闭按钮仍然画在我们内容之上**，把顶部条右侧的"刷新 / ⋯"压住了。
+    /// WinUI 只能"禁用"关闭按钮（会变成灰色禁用态，反而更丑），没法只隐藏它；
+    /// 而挂件本来就不需要这三个按钮（退出在 ⋯ 菜单与托盘里）。</para>
+    ///
+    /// <para>代价：失去系统标题栏的拖动区。所以顶部条自己充当拖动区（<c>SetTitleBar</c> 于
+    /// <c>ConfigureWindowChrome</c> 之后重新指定），并且保持 <c>IsResizable</c> 以便拖边缘缩放。</para>
+    /// </summary>
+    private void ConfigureWindowChrome()
+    {
+        if (AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.IsResizable = true;
+            presenter.IsMaximizable = false;
+            presenter.IsMinimizable = false;
+            // 关掉标题栏与边框：三个窗口按钮随之消失，窗口剩下纯内容
+            presenter.SetBorderAndTitleBar(false, false);
+            AppLog.Line("[window] 已隐藏系统标题栏与窗口按钮（挂件不需要最小化/最大化/关闭）");
+        }
     }
 
     /// <summary>渲染结果自检信息（冒烟测试与日志用）。</summary>
@@ -137,6 +163,7 @@ public sealed partial class MainWindow : Window
         SaveBounds("启动");
 
         _nowTimer.Start();
+
         AppLog.Line($"[layout] canvas={Layout!.CanvasWidth:0}x{Layout.CanvasHeight:0}dip rowH={Layout.RowHeight:0.#} scroll={Layout.NeedsScroll} blocks={Layout.Blocks} header=\"{Layout.HeaderText}\"");
     }
 
@@ -410,7 +437,29 @@ public sealed partial class MainWindow : Window
         },
         Hide = HideWidget,
         Exit = () => Application.Current.Exit(),
+        AttachDragArea = AttachDragArea,
     };
+
+    /// <summary>
+    /// 把顶部条注册成拖动区。
+    ///
+    /// 拖动**自实现**（<see cref="WindowDrag"/>）：真机实测原生 move loop 在 WinUI 下不生效
+    /// （`.tools/test-drag.ps1` 的合成拖动不动窗口），DeskBox 同样自己实现。
+    /// 拖动期间暂停 owner 巡检，结束后存位置并重新落点。
+    /// </summary>
+    private void AttachDragArea(FrameworkElement grabArea)
+    {
+        var hwnd = WindowNative.GetWindowHandle(this);
+        _drag = WindowDrag.Attach(
+            grabArea,
+            hwnd,
+            onStart: () => _layer?.SuspendForInteraction("drag-start"),
+            onEnd: () =>
+            {
+                SaveBounds("拖动结束");
+                _layer?.ResumeAfterInteraction("drag-end");
+            });
+    }
 
     /// <summary>
     /// 应用新设置：落盘 → 立即生效（能立即生效的那些）→ 重排。

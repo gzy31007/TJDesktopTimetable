@@ -17,8 +17,11 @@ internal static class IconGlyph
     /// <summary>设置（<c>&#xE713;</c>）。</summary>
     public const string Settings = "\uE713";
 
-    /// <summary>显示器（<c>&#xE7F4;</c>）—— 头部应用图标用。</summary>
+    /// <summary>显示器（<c>&#xE7F4;</c>）。</summary>
     public const string Monitor = "\uE7F4";
+
+    /// <summary>日历（<c>&#xE787;</c>）—— 头部应用图标用，与托盘图标同源。</summary>
+    public const string Calendar = "\uE787";
 
     /// <summary>固定（<c>&#xE718;</c>）。</summary>
     public const string Pin = "\uE718";

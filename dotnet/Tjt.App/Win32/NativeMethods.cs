@@ -32,6 +32,9 @@ internal static partial class NativeMethods
         /// <summary>不激活窗口（<c>SWP_NOACTIVATE</c>）。</summary>
         public const uint SwpNoActivate = 0x0010;
 
+        /// <summary>不改变 z-order（<c>SWP_NOZORDER</c>）。</summary>
+        public const uint SwpNoZOrder = 0x0004;
+
         /// <summary>窗口不属于任务栏 / Alt+Tab（<c>WS_EX_TOOLWINDOW</c>）。</summary>
         public const long WsExToolWindow = 0x00000080L;
 
@@ -118,6 +121,47 @@ internal static partial class NativeMethods
     /// <summary>取窗口 DPI（<c>GetDpiForWindow</c>），用于把 DIP 换算成物理像素。</summary>
     [LibraryImport("user32.dll")]
     internal static partial uint GetDpiForWindow(nint hwnd);
+
+    /// <summary>把鼠标捕获设到窗口（<c>SetCapture</c>）：自实现拖动靠它保证移出窗口也收得到位置。</summary>
+    [LibraryImport("user32.dll")]
+    internal static partial nint SetCapture(nint hwnd);
+
+    /// <summary>当前捕获鼠标的窗口（<c>GetCapture</c>）。</summary>
+    [LibraryImport("user32.dll")]
+    internal static partial nint GetCapture();
+
+    /// <summary>释放鼠标捕获（<c>ReleaseCapture</c>）。</summary>
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool ReleaseCapture();
+
+    /// <summary>同步发消息（<c>SendMessageW</c>；原生拖动就靠它发 <c>WM_NCLBUTTONDOWN</c>）。</summary>
+    [LibraryImport("user32.dll", EntryPoint = "SendMessageW")]
+    internal static partial nint SendMessage(nint hwnd, uint message, nint wParam, nint lParam);
+
+    /// <summary>异步发消息（<c>PostMessageW</c>）。</summary>
+    [LibraryImport("user32.dll", EntryPoint = "PostMessageW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
+
+    /// <summary>按键是否按下（<c>GetAsyncKeyState</c>）；最高位为 1 表示当前按下。</summary>
+    [LibraryImport("user32.dll")]
+    internal static partial short GetAsyncKeyState(int virtualKey);
+
+    /// <summary>左键虚拟键码（<c>VK_LBUTTON</c>）。</summary>
+    public const int VkLButton = 0x01;
+
+    /// <summary>鼠标移动消息（<c>WM_MOUSEMOVE</c>，自实现拖动分支用）。</summary>
+    public const uint WmMouseMove = 0x0200;
+
+    /// <summary>左键按下（<c>WM_LBUTTONDOWN</c>）。</summary>
+    public const uint WmLButtonDown = 0x0201;
+
+    /// <summary>左键抬起（<c>WM_LBUTTONUP</c>）。</summary>
+    public const uint WmLButtonUp = 0x0202;
+
+    /// <summary>捕获变化（<c>WM_CAPTURECHANGED</c>）。</summary>
+    public const uint WmCaptureChanged = 0x0215;
 
     /// <summary>当前前台窗口（<c>GetForegroundWindow</c>）；拿不到返回 0。</summary>
     [LibraryImport("user32.dll")]

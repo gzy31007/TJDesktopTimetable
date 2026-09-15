@@ -126,6 +126,12 @@ internal static class BoardRenderer
         Grid.SetColumn(left, 0);
         row.Children.Add(left);
 
+        // 顶部条空白处 = 窗口拖动区（系统标题栏已被移除）。按钮是 row 的子元素、
+        // 会先吃掉自己的点击，所以不会误触发拖动。
+        // 具体怎么拖（自实现位移）由外壳的 WindowDrag 负责，渲染层只负责"这块能抓"。
+        row.Background = new SolidColorBrush(Colors.Transparent); // 空白处也要能命中指针
+        actions.AttachDragArea?.Invoke(row);
+
         // ── 右：动作按钮（刷新 + ⋯ 菜单）
         var right = new StackPanel
         {
@@ -150,35 +156,23 @@ internal static class BoardRenderer
     }
 
     /// <summary>
-    /// 应用图标（头部用）：直接用托盘那份 <c>Assets/app.ico</c>，两处观感一致。
+    /// 应用图标（头部用）：与托盘同一个字形（Segoe Fluent Icons 的 Win11 日历 <c>E787</c>）。
     ///
-    /// 用 <see cref="BitmapIcon"/>（<c>ShowAsMonochrome=false</c>）而不是字形：
-    /// 日历图标是多色的（蓝色头带 + 白色卡片 + 圆点），单色字形表达不出来。
+    /// 头部用 <see cref="FontIcon"/> 而不是位图：小尺寸下矢量字形比缩放位图清晰，
+    /// 而且能直接跟随主题前景色。托盘那边必须是位图（`Shell_NotifyIcon` 只吃 HICON），
+    /// 所以图标文件由同一字形渲染而来，两处观感一致。
     /// </summary>
     private static FrameworkElement BuildAppGlyph(string accent)
     {
-        var host = new Grid { Width = 18, Height = 18, VerticalAlignment = VerticalAlignment.Center };
-        // 必须写全名：本文件同时 using 了 Microsoft.UI.Xaml.Shapes（Path 是图形）
-        var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
-        if (File.Exists(iconPath))
+        return new FontIcon
         {
-            host.Children.Add(new BitmapIcon
-            {
-                UriSource = new Uri(iconPath),
-                ShowAsMonochrome = false,
-                Width = 18,
-                Height = 18,
-            });
-            return host;
-        }
-
-        // 兜底：图标缺失时退回强调色圆角块（绝不因为少个资源就渲染不出东西）
-        host.Children.Add(new Border
-        {
-            CornerRadius = new CornerRadius(5),
-            Background = new SolidColorBrush(Parse(accent)),
-        });
-        return host;
+            Glyph = IconGlyph.Calendar,
+            FontSize = 15,
+            Width = 18,
+            Height = 18,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Parse(accent)),
+        };
     }
 
     /// <summary>无边框图标按钮（Segoe Fluent Icons 字形），悬停用 Fluent 的 subtle 底。</summary>
@@ -197,6 +191,9 @@ internal static class BoardRenderer
             VerticalAlignment = VerticalAlignment.Center,
         };
         ToolTipService.SetToolTip(button, tooltip);
+        // 挂件里不该出现键盘焦点框（Tab 也不该停在这里）
+        button.IsTabStop = false;
+        button.UseSystemFocusVisuals = false;
         if (action is not null) button.Click += (_, _) => action();
         return button;
     }

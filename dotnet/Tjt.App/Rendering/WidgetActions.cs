@@ -28,4 +28,9 @@ public sealed record WidgetActions
 
     /// <summary>退出应用。</summary>
     public Action? Exit { get; init; }
+
+    /// <summary>
+    /// 把顶部条注册成窗口拖动区（系统标题栏已被移除，拖动由 <c>WindowDrag</c> 自实现）。
+    /// </summary>
+    public Action<Microsoft.UI.Xaml.FrameworkElement>? AttachDragArea { get; init; }
 }

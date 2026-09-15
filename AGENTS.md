@@ -161,6 +161,35 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
   `--no-backdrop`、换过日志通道，三次实验都停在同一处）。
   所以 CI 的 `winui-shell` job 只做**编译门禁**（真实 Windows SDK + XAML 编译器），
   运行时验证一律走本机 `.tools/build-winui.ps1 -RunSmoke`。
+- **窗口 chrome 与拖动：DeskBox 是怎么做的（只记事实，不抄代码）**：`.refs/DeskBox` 是只读参考副本，
+  **GPL-3.0-only**，按 `docs/deskbox-refactor-assessment.md` 的结论不能抄代码/注释/文档/美术资源，
+  但可以提取"用了哪些 API、什么机制"这类事实。它的做法（`Views/WidgetWindowBase.Bounds.cs` 等）：
+  - 窗口：`OverlappedPresenter.SetBorderAndTitleBar(false, false)` + `IsResizable/IsMaximizable/IsMinimizable = false`，
+    再把 `GWL_STYLE` 里的 `WS_CAPTION | WS_BORDER | WS_DLGFRAME | WS_THICKFRAME` 全部清掉，
+    最后 `SetWindowPos(..., SWP_FRAMECHANGED)` 让样式生效；`AppWindow.IsShownInSwitchers = false`。
+    **即"完全没有系统边框/标题栏/窗口按钮"**，右上角不会再有最小化/最大化/关闭抄我们的按钮。
+  - 拖动：**不用原生 move loop**，而是自实现 —— 根元素 `PointerPressed` 起，
+    `CapturePointer` + `GetCursorPos()` 算位移，每帧把窗口 `SetWindowPos` 到
+    `初始位置 + 位移`（有 4px 的起拖阈值，避免误触）。交互开始还会把窗口**临时提到最前**
+    （`ElevateForInteraction`），结束后再落点 —— 与我们 `SuspendForInteraction` 的思路一致。
+  - 缩放：因为它把 `WS_THICKFRAME` 也清了，所以缩放同样自实现（自己有 resize 边框的命中处理 +
+    `ResizeGuideOverlay` 引导层）。**我们暂时保留 `WS_THICKFRAME` 让系统给缩放**，代价是仍有
+    一圈不可见的抓取边。
+  - 托盘：用 **`H.NotifyIcon.WinUI`**（社区库）承载，菜单直接是 WinUI 的 `MenuFlyout`
+    （不是原生 `TrackPopupMenu`）。我们没引那个包，走的是 `Shell_NotifyIcon` + 原生菜单。
+  - 它额外做的：`WS_EX_TOOLWINDOW`、`IsShownInSwitchers=false`（我们已做前者）。
+- **拖动是自实现的，且合成输入验不了（2026-09-15 实测结论）**：三条路都试过并记录在案：
+  1. **原生 move loop 不生效** —— `ReleaseCapture()` + `SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)`
+     窗口纹丝不动（与 Electron 侧当年同一条结论）；
+  2. **XAML `CapturePointer` 也不行** —— 按下时 `capture=True`，紧接着就收到 `PointerCaptureLost`
+     （Windows 向失去捕获的窗口发消息 → 元素被重建 → 捕获作废），`PointerMoved` 一条都没有；
+  3. 最终走 **窗口级 `SetCapture` + `DispatcherTimer`(16ms) 轮询光标**：算 `初始位置 + 光标位移`，
+     `SetWindowPos` 搬窗口；左键松开（`GetAsyncKeyState`）即收尾 → 存位置 + 重新落点。
+     DeskBox 也是自实现（它连 `WS_THICKFRAME` 都清了），只是它挂在 XAML 指针事件上。
+- **这台机器挡掉了 WSL 发起的合成指针输入**：`SetCursorPos` 与绝对坐标 `mouse_event` 都**不动光标**
+  （实测光标始终停在原点），所以"拖动"这一条**只能手动验收** —— 别再用合成鼠标去验拖动，
+  否则结论会是假的 FAIL（试过三轮，全是环境问题不是代码问题）。可验的是：按下事件到达
+  （日志 `[drag] 按下`）、左键状态可读（`lbutton=True`）、以及渲染层 `[drag] poll#` 心跳。
 - **贴桌面常驻（2026-09-15 完成）**：默认就是贴桌面层（`settings.DesktopLayer` 默认 true，
   CLI 用 `--desktop-layer` / `--no-desktop-layer` 覆盖）。移植自 Electron 那套已验收的编排，
   文件与职责一一对应：`Win32/Layer.cs`（编排）、`Win32/Resting.cs`（z-order 原语）、
