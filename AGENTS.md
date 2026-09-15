@@ -346,15 +346,18 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     （按 ANSI 读，引号配对错乱）—— 单引号里只放 ASCII。
 - **入口与设置界面（2026-09-15）**：WinUI 侧现在有两个入口，都是照 DeskBox / 资源管理器的语言做的。
   - **挂件顶部条**（`Rendering/BoardRenderer.cs`）：左边应用图标 + 学期 + 「第 N 周 · 今日 N 节」，
-    右边 **刷新** 与 **⋯ 溢出菜单**（设置 / 重新载入课表 / 恢复默认位置 / 贴桌面层勾选 / 隐藏 / 退出）。
+    右边 **刷新** 与 **⋯ 溢出菜单**（设置 / 导入课表… / 重新载入课表 / 恢复默认位置 / 贴桌面层勾选 / 隐藏 / 退出）。
     图标用 Segoe Fluent Icons 字形（`Rendering/IconGlyph.cs`），跟主题色走、任意 DPI 都清晰。
     动作经 `WidgetActions`（渲染层只发意图，逻辑留在 `MainWindow.BuildActions()`）。
   - **托盘图标**（`Win32/TrayIcon.cs`）：`Shell_NotifyIcon` + 消息专用窗口（`HWND_MESSAGE`，离屏、
     不参与层级）+ 原生右键菜单（`TrackPopupMenu(TPM_RETURNCMD)` 同步取回选中项，不需要消息分发）。
-    左键单击 = 显示挂件；菜单 = 显示 / 设置 / 重新载入 / 恢复位置 / 贴桌面层勾选 / 退出。
+    左键单击 = 显示挂件；菜单 = 显示 / 设置 / 导入课表… / 重新载入 / 恢复位置 / 贴桌面层勾选 / 退出。
     WASDK 1.8 没有托盘 API，所以直接 P/Invoke；图标是 `Assets/app.ico`（运行时 `LoadImage` 加载）。
   - **设置窗口**（`SettingsWindow.xaml(.cs)` + `Rendering/SettingsView.cs`）：左侧 `NavigationView`
-    导航（常规 / 外观 / 关于）+ 卡片行（左图标、标题、说明，右控件），照 DeskBox 那套。
+    导航（常规 / 导入 / 外观 / 关于）+ 卡片行（左图标、标题、说明，右控件），照 DeskBox 那套。
+    页下标是常量 `SettingsWindow.PageGeneral/PageImport/PageAppearance/PageAbout`（别写魔法数字）。
+    外部要"打开就停在第 N 页"必须走构造参数 `initialPage`；窗口已经开着才用 `SelectPage(n)`
+    （两者的区别见下面"课表导入"里的实测坑）。
     改动**即时生效并落盘**（没有保存按钮）；**材质也是运行时即时切换**
     （换控制器不重建窗口，见上面"材质切换"条目）—— 界面文案里已经没有"重启后生效"这种说法了，
     若见到就是旧文档/旧产物。
@@ -374,6 +377,60 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     不会把格子压成一条缝。实测：`--size 820x640 → rowH=52 无滚动`、`--size 760x420 → rowH=37 + 纵向滚动`。
   - `--size WxH` 会真的改窗口尺寸（专门为验证自适应加的）；`--fixture/--log/--no-backdrop/--desktop-layer`
     见 `AppStartupOptions`。
+- **课表导入（2026-09-16 完成：真实课表导入搬到了 WinUI 线）**：入口三处（设置窗口「导入」页、托盘「导入课表…」、
+  挂件 `⋯` 菜单「导入课表…」），三处都落到同一页。功能与 Electron 侧导入面板对齐：粘贴浏览器请求抓取、
+  粘贴/选择本地 JSON、选适配器、显示探测行与适配器诊断、清空/重新载入/打开数据目录。
+  - **分层**：纯逻辑进 `TjtCore`（有 Linux 单测）——`HttpRequest.cs`（粘贴请求解析 = `http-request.ts` 的移植）、
+    `TimetableJson.cs`（课表 ↔ JSON）、`TongjiResponseProbe.cs`（响应像不像课表 = `looksLikeTimetable` 的移植）；
+    文件 IO / 网络 / 编排留在 `Tjt.App/Data`——`TimetableStore`、`CredentialsStore`、`TongjiFetcher`、`ImportService`；
+    UI 在 `Rendering/ImportPage.cs`（`SettingsWindow` 只把这一页塞进 `NavigationView`）。
+  - **`ImportService` 不认识窗口**：构造时拿三个回调（`apply` = 落盘 + 重画 / `reload` = 按载入顺序重读 /
+    `describe` = 当前课表摘要），由 `App` 接到挂件窗口；设置窗口也**不认识 `MainWindow`**，一切经
+    `SettingsWindow.SettingsHost`。`apply` 里对"窗口还没建"做了兜底（直接落盘）—— 否则 `--import`
+    会因为那一刻 `_windows` 还是空的而静默失败。
+  - **载入顺序（`AppHost.Load`，唯一入口，启动与"重新载入"共用）**：`--fixture` 显式指定 → 用户导入的
+    `timetable.json` → `fixtures/tongji-2026-1-personal.json` → 内置样例 `DemoData`。
+    `LoadedTimetable.Origin` 记来源，设置页文案与日志读它。**"重新载入"就是再走一遍这个顺序**，
+    所以"导入过之后按刷新会不会退回样例"这类问题只有一处答案。
+  - **落盘格式两端同形**：`TimetableJson` 用 camelCase、逐字段对齐 TS 的 `Timetable` 接口，因此
+    `%APPDATA%\TJDesktopTimetable\timetable.json` 在 Electron 线与 WinUI 线之间能互相读
+    （`credentials.json` 同理：`{ tongjiRequest, savedAt }`）。`Term.Label` 加了 `[JsonIgnore]`
+    （TS 没这个字段，写进去会让人工编辑的文件与 TS 形状不一致）。
+  - **`TimetableJson.Deserialize` 会把缺失的集合补成空集合**：STJ 对位置记录缺字段给 `null` 且**不报错**，
+    不补的话渲染层一遍历 `Slots`/`Sessions` 就崩（实测 `ArgumentNullException`）。缺 `term`/`courses` 返回 `null`，
+    上层当"没有导入过"处理（`TimetableStore.Load` 里连"课程数为 0"也一并当没有）。
+  - **抓取的安全口径**：Cookie 只走内存与 `credentials.json`，**日志只记长度**；显示给用户的是探测行
+    （请求 URL / 来源 / HTTP 状态 / 响应大小 / 数据识别）与适配器诊断，**请求头一律不进日志、不上界面**。
+  - **`StringContent` 的默认 Content-Type 必须换掉**：粘贴来的 `content-type` 是内容头，
+    `request.Headers.TryAddWithoutValidation` 加不进去（返回 false），要
+    `content.Headers.Remove("Content-Type")` 后再加 —— 否则 POST 会按 `text/plain` 发出去。
+    （本地合成服务实测：`contentType=application/json`、`method=POST`、`cookiePresent=True`。）
+  - **异步回到 UI 线程**：`ImportService.FetchAsync` 里 `await` **不加** `ConfigureAwait(false)`
+    （await 之后要经 `_apply` 回挂件窗口重画，XAML 只能 UI 线程碰）；`TongjiFetcher` 内部加，
+    因为它只发请求不碰 UI。CLI 的 `--fetch-check` 会在 UI 线程上 `GetAwaiter().GetResult()` 阻塞等待，
+    安全性正来自"网络层全是 `ConfigureAwait(false)`"。
+  - **"清空课表"删的就是 `timetable.json`**，之后按载入顺序回退到 fixtures / 内置样例 —— 确认对话框里
+    如实这么写（不要写成"课表会变空"，那不是它的行为）。
+  - **诊断用 CLI（照 `--size` 的先例加的，不点界面也能验整条链路）**：
+    `--import <json>`（走界面同一条导入管线并落盘）、`--fetch-check <请求文件>`（抓一次、写日志、退出码表成败、
+    **不落盘**）、`--settings-page <n>`（启动直接开设置窗口第 N 页；配 `--smoke` 时会把该页建出来并 `Measure`，
+    用来钉住"导入页能构建且尺寸算得出来"）。三个开关合起来由 `.tools/verify-import.ps1` 驱动。
+  - **设置窗口句柄与文件选择器**：非打包应用的 `FileOpenPicker` 必须先
+    `InitializeWithWindow.Initialize(picker, hwnd)`，否则弹不出来；`ContentDialog` 必须先赋 `XamlRoot`。
+  - **"打开时停在第几页"必须走构造参数**（`SettingsWindow(..., initialPage)`）：只调 `SelectPage(n)`
+    在"窗口还没加载"时可能不回调 `SelectionChanged`，于是托盘「导入课表…」**第一次点开会落在「常规」页**
+    （截图实测到的 bug）。自检里 `shown=` 那一段就是钉这个的。
+  - **卡片的主操作放标题行右侧**（`SettingsView.Block(..., action)`）：导入页的「获取我的课表」原本在输入框
+    下方，落在首屏之外、打开页面根本看不到（截图实测）。凡是"这一页就是来干这件事"的按钮，都放标题行。
+  - **设置窗口尺寸要按 DPI 折算**（`ResizeForDpi`）：`AppWindow.ResizeClient(980, 720)` 收的是**物理像素**，
+    150% 缩放下窗口在屏幕上只有 653×480 DIP —— 左导航吃掉 208 DIP 后卡片只剩约 380 DIP 宽，
+    说明文字一行只放得下十个字。现在按 `GetDpiForWindow()/96` 折算成 DIP 意图，并夹到工作区内
+    （实测 150% → 客户区 1470×1080 px = 980×720 DIP）。
+  - **验收**（`.tools/verify-import.ps1`，纯 ASCII，实测全绿）：A 无导入 → 黄金数据；B `--import` → 管线 + 落盘
+    （并检查文件是 camelCase 且 14 门）；C 再启动 → 读回 `timetable.json`（导入优先于 fixtures）；
+    D 四个设置页都能构建并量出尺寸；E 用**本地 `HttpListener` 合成服务**跑完整抓取链路（该方法不需要用户的
+    Cookie：请求里写 `cookie: JSESSIONID=VERIFY` 就够走通"解析 → 发请求 → 探测 → 适配器"），
+    外加服务端报错的负例，并核对服务端**实际收到**的 method / content-type / cookie。
 - **本机的两个冒烟组合（都实测通过）**：
   - `-RunSmoke`：带材质 → `[backdrop] mode=mica-controller`；
   - `-RunSmoke -NoBackdrop`：跳过材质 → `[backdrop] skipped`；

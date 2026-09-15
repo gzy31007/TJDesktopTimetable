@@ -63,22 +63,27 @@ pnpm dist:win      # WSL 内交叉打包 Windows 免安装版 → apps/desktop/d
 
 本阶段不做自动登录抓取（1 系统 SSO + 短信验证码链路不适合放进桌面客户端）。手动获取一次：
 
-两种方式，任选其一：
+两种方式，任选其一（**两条客户端都有同一条导入链**：Electron 的管理窗口 / WinUI 的设置窗口 →「导入课表」页）：
 
 **A. 从 1 系统直接获取（推荐）**
 
 1. 浏览器登录 [1 系统](https://1.tongji.edu.cn/)，打开"我的课表"页面。
-2. F12 → **Network** → 刷新页面 → 点一条发往 `1.tongji.edu.cn` 的请求 → **Headers → Request Headers** 里的 `Cookie:` 值整串复制。
-3. 打开小组件"设置"窗口，粘贴 Cookie → 点 **获取我的课表**。
-4. 自动抓取课表（并尝试顺带抓校历）→ 立即应用到桌面。
+2. F12 → **Network** → 刷新页面 → 找到返回 200、体积较大的那条（一般是
+   `/api/electionservice/student/xxxx/getDataBk`）→ 右键 → **Copy → Copy as cURL**。
+3. 打开"导入课表"页，把这条请求整段粘贴进去 → 点 **获取我的课表**。
+4. 程序照原样请求一次（请求里自带 Cookie 与 `x-token`）→ 解析 → 立即应用到桌面挂件。
 
-> Cookie 只保存在本机 `%APPDATA%\TJDesktopTimetable\credentials.json`，不会上传、不进日志；用完可在浏览器退出登录使其失效。
-> 接口路径不写死：程序会先试候选路径，再从 1 系统前端 bundle 里发现 `timetable` 相关路径；失败时把每个候选的 HTTP 状态码列出来，便于定位。
+> 粘贴内容只保存在本机 `%APPDATA%\TJDesktopTimetable\credentials.json`，不会上传、不进日志（日志里只记长度）；
+> 用完可在浏览器退出登录使其失效。粘贴请求而不是猜接口路径，是因为接口里的 `{id}` 是选课批次相关的内部 id，无法稳定构造。
+> 自检用的命令行开关：`--fetch-check <请求文件>`（抓一次、把探测结果写日志、不落盘）。
 
 **B. 本地 JSON 导入**
 
 1. 同上抓包，把个人课表接口响应另存为 JSON（可选再存一份校历响应）。
-2. 设置窗口 → 选择 JSON 文件 → **导入并应用**。
+2. "导入课表"页 → 选择 JSON 文件（或直接粘贴 JSON）→ **导入并应用**。
+
+> 导入结果落盘在 `%APPDATA%\TJDesktopTimetable\timetable.json`，**两端同形**（camelCase，逐字段对齐 TS 的
+> `Timetable`）：在 Electron 线导入的课表，WinUI 线打开就能用，反之亦然。
 
 ## 扩展其他学校
 
@@ -91,6 +96,8 @@ pnpm dist:win      # WSL 内交叉打包 Windows 免安装版 → apps/desktop/d
 - [x] M3 桌面挂件窗口：置底、拖动缩放、托盘、开机自启
 - [x] M4 Windows 交叉打包出 `win-unpacked`、CI（typecheck + test）
 - [ ] M5 Windows 真机验收与细节打磨
+- [x] M5+ WinUI 线（`dotnet/`）：WinUI 外壳 + `MicaController` 材质、无边框自实现拖动/缩放、贴桌面层、
+      托盘与设置窗口，**以及真实课表导入**（抓取 / 本地 JSON / 适配器探测 / 诊断）
 - [ ] 后续：一键从 1 系统拉取、ICS/图片导出、多校适配器
 
 ## 许可

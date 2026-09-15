@@ -56,6 +56,31 @@
 
 同济适配器已从"专业课表（`timetable/major`，需勾选）"切换为"个人课表（导入即用）"；数据获取支持本地 JSON 与 Cookie 抓取两条路。
 
+## 导入管线（WinUI 线，2026-09-16）
+
+C# 侧把同一条管线复刻了一遍，分层与 TS 侧一一对应：
+
+```
+SettingsWindow「导入」页 / 托盘「导入课表…」/ 挂件 ⋯ 菜单   （Rendering/ImportPage.cs）
+        │  Intent（粘贴文本 / 文件 / 适配器 id / 请求全文）
+        ▼
+ImportService（Tjt.App/Data）      编排：导入 → 落成 Timetable → 交回外壳落盘 + 重画
+        │                        抓取：TongjiFetcher（HttpClient，30s 超时；Cookie 只进内存与 credentials.json）
+        ▼
+ImportPipeline（Tjt.Core）        registry.best() → adapter.Parse() → MaterializeTimetable()
+        │                        纯函数部分的移植：HttpRequest / TimetableJson / TongjiResponseProbe
+        ▼
+AppHost.Load()                   载入顺序：--fixture → 用户导入的 timetable.json → fixtures/… → 内置样例
+```
+
+- **`ImportService` 不认识窗口**（三个回调：`apply` / `reload` / `describe`），设置窗口也不认识 `MainWindow`；
+  两端都只依赖接口，窗口层改动不会牵动导入逻辑。
+- **落盘文件两端同形**：`timetable.json`（camelCase，对齐 TS 的 `Timetable`）与
+  `credentials.json`（`{ tongjiRequest, savedAt }`）在 Electron 线与 WinUI 线之间可以互相读 ——
+  实测 WinUI 侧直接读到了 Electron 侧 2026-09-14 导入的那份课表。
+- 验收脚本：`.tools/verify-import.ps1`（载入顺序 / 导入落盘 / 读回 / 四个设置页构建 /
+  本地合成服务上的完整抓取链路与失败负例）。
+
 ## 窗口层设计
 
 桌面挂件（`main/windows/widget.ts`）：
@@ -73,8 +98,9 @@
 
 | 文件 | 内容 |
 |---|---|
-| `timetable.json` | 最终课表（`Timetable`，含 source 元信息），可直接手工替换 / 备份 |
-| `settings.json` | 外观与窗口状态：位置尺寸、模式、周次过滤、显示周末、透明度、开机自启、适配器偏好 |
+| `timetable.json` | 最终课表（`Timetable`，含 source 元信息），可直接手工替换 / 备份；**两端同形，可互读** |
+| `settings.json` | 外观与窗口状态：位置尺寸、模式、周次过滤、显示周末、透明度、开机自启、适配器偏好（**两侧字段不同形**：WinUI 线用 PascalCase 与自己的枚举） |
+| `credentials.json` | 上次粘贴的抓取请求全文（含 Cookie）；**任何日志都不得打印其内容**，只记长度 |
 
 ## 构建与打包
 
