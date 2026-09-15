@@ -32,15 +32,16 @@ internal static class BoardRenderer
     /// </summary>
     /// <param name="visual">呈现模型。</param>
     /// <param name="dark">是否深色主题。</param>
-    public static FrameworkElement Render(BoardVisual visual, bool dark)
+    public static FrameworkElement Render(BoardVisual visual, bool dark, WidgetActions? actions = null)
     {
         ArgumentNullException.ThrowIfNull(visual);
+        actions ??= new WidgetActions();
 
         var root = new Grid();
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        var header = BuildHeaderBar(visual.Header, dark);
+        var header = BuildHeaderBar(visual.Header, dark, actions);
         Grid.SetRow(header, 0);
         root.Children.Add(header);
 
@@ -66,31 +67,28 @@ internal static class BoardRenderer
         return root;
     }
 
-    /// <summary>顶部信息条：左侧学期名，右侧"周次 · 今日 N 节"（对应 <c>.widget-bar</c>）。</summary>
-    private static FrameworkElement BuildHeaderBar(BoardHeader header, bool dark)
+    /// <summary>
+    /// 顶部信息条 —— 布局照资源管理器卡片头：**左边图标 + 标题 + 元信息，右边一组动作按钮**。
+    ///
+    /// 动作按钮是这个窗口唯一的交互入口（没有系统标题栏）：
+    /// 刷新课表、以及一个 <c>⋯</c> 溢出菜单（设置 / 恢复默认位置 / 贴桌面层 / 隐藏 / 退出）。
+    /// </summary>
+    private static FrameworkElement BuildHeaderBar(BoardHeader header, bool dark, WidgetActions actions)
     {
-        var accent = new SolidColorBrush(Parse(TintPalette.Accent(dark)));
+        var accent = TintPalette.Accent(dark);
         var text = TintPalette.Text(dark);
         var soft = TintPalette.TextSoft(dark);
 
-        var row = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            VerticalAlignment = VerticalAlignment.Center,
-            Padding = new Thickness(12, 0, 12, 0),
-        };
+        var host = new Grid { Height = BoardVisualBuilder.HeaderHeight };
 
-        // 品牌点（渲染层 .brand 的等价物）：一小块强调色，让标题条不显得空
-        row.Children.Add(new Ellipse
-        {
-            Width = 8,
-            Height = 8,
-            Fill = accent,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
+        var row = new Grid { Padding = new Thickness(10, 0, 8, 0) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        row.Children.Add(new TextBlock
+        // ── 左：应用图标（强调色圆角块 + 白色显示器字形，与托盘/任务栏图标同源）
+        var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        left.Children.Add(BuildAppGlyph(accent));
+        left.Children.Add(new TextBlock
         {
             Text = header.Title,
             FontSize = HeaderFontSize,
@@ -99,25 +97,23 @@ internal static class BoardRenderer
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
         });
-
-        row.Children.Add(new TextBlock
+        left.Children.Add(new TextBlock
         {
             Text = header.WeekText,
             FontSize = HeaderFontSize - 1,
             Foreground = new SolidColorBrush(Parse(soft)),
             VerticalAlignment = VerticalAlignment.Center,
         });
-
         if (header.TodayText is { Length: > 0 } today)
         {
-            row.Children.Add(new TextBlock
+            left.Children.Add(new TextBlock
             {
                 Text = "·",
                 FontSize = HeaderFontSize - 1,
                 Foreground = new SolidColorBrush(Parse(soft)),
                 VerticalAlignment = VerticalAlignment.Center,
             });
-            row.Children.Add(new TextBlock
+            left.Children.Add(new TextBlock
             {
                 Text = today,
                 FontSize = HeaderFontSize - 1,
@@ -126,7 +122,22 @@ internal static class BoardRenderer
             });
         }
 
-        var host = new Grid { Height = BoardVisualBuilder.HeaderHeight };
+        Grid.SetColumn(left, 0);
+        row.Children.Add(left);
+
+        // ── 右：动作按钮（刷新 + ⋯ 菜单）
+        var right = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 2,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        right.Children.Add(BuildIconButton(IconGlyph.Refresh, dark, "重新载入课表", actions.Refresh));
+        right.Children.Add(BuildOverflowButton(dark, actions));
+
+        Grid.SetColumn(right, 1);
+        row.Children.Add(right);
+
         host.Children.Add(row);
         host.Children.Add(new Rectangle
         {
@@ -135,6 +146,95 @@ internal static class BoardRenderer
             Fill = new SolidColorBrush(Parse(TintPalette.GridLine(dark))),
         });
         return host;
+    }
+
+    /// <summary>应用图标（头部用的 16×16 尺寸）：强调色圆角底 + 白色显示器字形。</summary>
+    private static FrameworkElement BuildAppGlyph(string accent)
+    {
+        var host = new Grid { Width = 18, Height = 18, VerticalAlignment = VerticalAlignment.Center };
+        host.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(5),
+            Background = new SolidColorBrush(Parse(accent)),
+        });
+        host.Children.Add(new FontIcon
+        {
+            Glyph = IconGlyph.Monitor,
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Colors.White),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        return host;
+    }
+
+    /// <summary>无边框图标按钮（Segoe Fluent Icons 字形），悬停用 Fluent 的 subtle 底。</summary>
+    private static Button BuildIconButton(string glyph, bool dark, string tooltip, Action? action)
+    {
+        var button = new Button
+        {
+            Content = new FontIcon { Glyph = glyph, FontSize = 13 },
+            Width = 30,
+            Height = 26,
+            Padding = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Foreground = new SolidColorBrush(Parse(TintPalette.TextSoft(dark))),
+            CornerRadius = new CornerRadius(6),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        ToolTipService.SetToolTip(button, tooltip);
+        if (action is not null) button.Click += (_, _) => action();
+        return button;
+    }
+
+    /// <summary>
+    /// <c>⋯</c> 溢出菜单：设置 / 恢复默认位置 / 贴桌面层开关 / 隐藏挂件 / 退出。
+    ///
+    /// 菜单里的"贴桌面层"用 <see cref="ToggleMenuFlyoutItem"/> 反映当前值 ——
+    /// 它是唯一能用勾选状态表达"当前是否生效"的项，其余都是动作。
+    /// </summary>
+    private static Button BuildOverflowButton(bool dark, WidgetActions actions)
+    {
+        var flyout = new MenuFlyout();
+
+        var settings = new MenuFlyoutItem { Text = "设置", Icon = new FontIcon { Glyph = IconGlyph.Settings } };
+        settings.Click += (_, _) => actions.OpenSettings?.Invoke();
+        flyout.Items.Add(settings);
+
+        var refresh = new MenuFlyoutItem { Text = "重新载入课表", Icon = new FontIcon { Glyph = IconGlyph.Refresh } };
+        refresh.Click += (_, _) => actions.Refresh?.Invoke();
+        flyout.Items.Add(refresh);
+
+        var reset = new MenuFlyoutItem { Text = "恢复默认位置", Icon = new FontIcon { Glyph = IconGlyph.Recenter } };
+        reset.Click += (_, _) => actions.ResetPosition?.Invoke();
+        flyout.Items.Add(reset);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        if (actions.DesktopLayer is { } enabled && actions.ToggleDesktopLayer is not null)
+        {
+            var toggle = new ToggleMenuFlyoutItem
+            {
+                Text = "贴桌面层",
+                IsChecked = enabled,
+                Icon = new FontIcon { Glyph = IconGlyph.Pin },
+            };
+            toggle.Click += (_, _) => actions.ToggleDesktopLayer();
+            flyout.Items.Add(toggle);
+        }
+
+        var hide = new MenuFlyoutItem { Text = "隐藏挂件", Icon = new FontIcon { Glyph = IconGlyph.Hide } };
+        hide.Click += (_, _) => actions.Hide?.Invoke();
+        flyout.Items.Add(hide);
+
+        var quit = new MenuFlyoutItem { Text = "退出", Icon = new FontIcon { Glyph = IconGlyph.Close } };
+        quit.Click += (_, _) => actions.Exit?.Invoke();
+        flyout.Items.Add(quit);
+
+        var button = BuildIconButton(IconGlyph.More, dark, "更多", null);
+        button.Flyout = flyout;
+        return button;
     }
 
     /// <summary>网格画布（尺寸已由呈现模型算好，单位 DIP）。</summary>

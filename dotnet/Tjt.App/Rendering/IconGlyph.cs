@@ -1,0 +1,34 @@
+namespace Tjt.App.Rendering;
+
+/// <summary>
+/// Segoe Fluent Icons 字形常量（Windows 10/11 自带字体，不需要额外资源）。
+///
+/// <para>用字形而不是位图：一处色值即可跟随深浅主题，任意 DPI 都清晰；
+/// 图标本身的语义写在调用点（<c>BuildIconButton(IconGlyph.Refresh, ...)</c>）。</para>
+/// </summary>
+internal static class IconGlyph
+{
+    /// <summary>刷新（<c>&#xE72C;</c>）。</summary>
+    public const string Refresh = "\uE72C";
+
+    /// <summary>更多（<c>&#xE712;</c>）—— 对应截图里那个 <c>⋯</c>。</summary>
+    public const string More = "\uE712";
+
+    /// <summary>设置（<c>&#xE713;</c>）。</summary>
+    public const string Settings = "\uE713";
+
+    /// <summary>显示器（<c>&#xE7F4;</c>）—— 头部应用图标用。</summary>
+    public const string Monitor = "\uE7F4";
+
+    /// <summary>固定（<c>&#xE718;</c>）。</summary>
+    public const string Pin = "\uE718";
+
+    /// <summary>回到原位（<c>&#xE73F;</c>）。</summary>
+    public const string Recenter = "\uE73F";
+
+    /// <summary>隐藏（<c>&#xE738;</c>，Hide）。</summary>
+    public const string Hide = "\uE738";
+
+    /// <summary>关闭（<c>&#xE8BB;</c>）。</summary>
+    public const string Close = "\uE8BB";
+}

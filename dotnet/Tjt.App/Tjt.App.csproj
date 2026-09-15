@@ -63,6 +63,11 @@
     找不到时退回内置样例（见 DemoData.cs）。`Link` + CopyToOutputDirectory 的用法与
     TjtCore.Tests 一致，避免依赖运行时的工作目录。
   -->
+  <!-- 托盘图标：运行时用 LoadImage 从输出目录加载（不嵌资源，改图标不用改代码） -->
+  <ItemGroup>
+    <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="..\..\packages\core\fixtures\tongji-2026-1-personal.json"
              Link="fixtures\tongji-2026-1-personal.json"

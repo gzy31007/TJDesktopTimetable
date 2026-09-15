@@ -45,6 +45,7 @@ public sealed partial class MainWindow : Window
     private WindowBounds _targetBounds = new(0, 0, DefaultWidth, DefaultHeight);
     private bool _userSizedRecently;
     private BackdropHelper? _backdrop;
+    private Func<WidgetSettings, bool, WidgetSettings>? _openSettings;
     private FrameworkElement? _root;
     private double _dpiScale = 1.0;
 
@@ -96,7 +97,9 @@ public sealed partial class MainWindow : Window
 
         _options = startup;
         _loaded = loaded;
-        _settings = SettingsStore.Load();
+        // 冒烟自检**不读设置**：它应当验证"默认状态下的渲染与层级"，
+        // 读到上次运行留下的窗口尺寸/位置会让自检结果随历史漂移（实测被污染过一次）。
+        _settings = startup.Smoke ? new WidgetSettings() : SettingsStore.Load();
 
         // 1) 材质：窗口创建后尽早设置
         AppLog.Line("[stage] window-created");
@@ -106,7 +109,7 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            _backdrop = BackdropHelper.Apply(this, micaAlt: false);
+            _backdrop = BackdropHelper.Apply(this, _settings.Material);
             AppLog.Line($"[backdrop] mode={_backdrop.Mode}");
         }
 
@@ -116,7 +119,7 @@ public sealed partial class MainWindow : Window
             var dpi = NativeMethods.GetDpiForWindow(WindowNative.GetWindowHandle(this));
             var scale = dpi > 0 ? dpi / NativeMethods.DefaultDpi : 1.0;
             AppWindow.ResizeClient(new SizeInt32((int)Math.Ceiling(w * scale), (int)Math.Ceiling(h * scale)));
-            AppLog.Line($"[window] --size {w}x{h}dip");
+            AppLog.Line($"[window] --size {w}x{h}dip → 实际 client={AppWindow.ClientSize.Width}x{AppWindow.ClientSize.Height}px");
         }
 
         // 3) 首屏按当前客户区算一次
@@ -186,12 +189,12 @@ public sealed partial class MainWindow : Window
         var visual = BoardVisualBuilder.Build(
             board,
             widthDip,
-            _options.Dark ?? BackdropHelper.SystemUsesDarkTheme(),
+            IsDark(),
             Tjt.Core.Time.LocalMinutesOfDay(),
             minCellWidth: 72,
             availableHeight: heightDip);
 
-        var root = BoardRenderer.Render(visual, _options.Dark ?? BackdropHelper.SystemUsesDarkTheme());
+        var root = BoardRenderer.Render(visual, IsDark(), BuildActions());
         Host.Children.Clear();
         Host.Children.Add(root);
         _root = root;
@@ -275,7 +278,7 @@ public sealed partial class MainWindow : Window
             return false;
         }
 
-        AppLog.Line($"[window] 已恢复上次位置 bounds={bounds} correction={correction} → client={clientWidth}x{clientHeight}dip");
+        AppLog.Line($"[window] 已恢复上次位置 bounds={bounds} correction={correction} → 请求 client={clientWidth}x{clientHeight}dip，实际={AppWindow.ClientSize.Width}x{AppWindow.ClientSize.Height}px");
         AppLog.Line($"[window] 恢复后实测 {MeasureGeometry()}");
         return true;
     }
@@ -348,23 +351,18 @@ public sealed partial class MainWindow : Window
 
         // 位置永远按实测存（拖动就是位置变化的唯一来源）。
         //
-        // 尺寸只在"用户真的改了尺寸"时才按实测存：`WM_EXITSIZEMOVE` 对**纯移动**也会触发，
-        // 若不加这层判断，一次拖动就会把 Windows snap 出来的尺寸写成"用户尺寸"，
-        // 于是又回到"每跑一次长一点"的正反馈（实测如此）。
-        var sizeChangedByUser = _userSizedRecently &&
-                                (measured.Width != _targetBounds.Width || measured.Height != _targetBounds.Height);
-        var stored = sizeChangedByUser
-            ? measured
-            : _targetBounds with { X = measured.X, Y = measured.Y };
+        // 尺寸**一律存"期望值"**，绝不存实测值：Windows 会把窗口 snap 到不小于某个最小尺寸，
+        // 若把 snap 后的尺寸当成期望值，用户每拖一次窗口就变大一点（实测 552x497 就是这么来的
+        // —— 经典棘轮）。用户拖过之后，用"实测 - 边框校正"反推出他真正想要的尺寸。
+        var size = _userSizedRecently
+            ? new WindowBounds(0, 0,
+                Math.Max(320, measured.Width - correction.Width),
+                Math.Max(240, measured.Height - correction.Height))
+            : _targetBounds;
 
-        if (!stored.IsUsable)
-        {
-            AppLog.Line($"[settings] 尺寸不可用（{stored}），跳过保存（reason={reason}）");
-            return;
-        }
-
-        _targetBounds = stored;
+        var stored = size with { X = measured.X, Y = measured.Y };        _targetBounds = stored;
         _userSizedRecently = false;
+        AppLog.Line($"[settings] 保存 bounds={stored} correction={correction} measured={measured}（reason={reason}）");
 
         if (_settings.Bounds == stored && _settings.FrameCorrection == correction) return;
         _settings = _settings with { Bounds = stored, FrameCorrection = correction };
@@ -383,6 +381,115 @@ public sealed partial class MainWindow : Window
         return $"outer={outer.Left},{outer.Top} {outer.Right - outer.Left}x{outer.Bottom - outer.Top} " +
                $"client={client.Width}x{client.Height} scale={_dpiScale:0.###}";
     }
+
+    /// <summary>
+    /// 当前是否深色：CLI <c>--dark/--light</c> 优先，其次设置里的主题，最后跟随系统。
+    /// </summary>
+    private bool IsDark() => _options.Dark ?? _settings.Theme switch
+    {
+        ThemeMode.Dark => true,
+        ThemeMode.Light => false,
+        _ => BackdropHelper.SystemUsesDarkTheme(),
+    };
+
+    /// <summary>顶部条与 <c>⋯</c> 菜单要执行的动作（渲染层只发意图，逻辑留在这里）。</summary>
+    internal WidgetActions BuildActions() => new()
+    {
+        OpenSettings = () => _openSettings?.Invoke(_settings, IsDark()),
+        Refresh = ReloadTimetable,
+        ResetPosition = () =>
+        {
+            PlaceBottomRight();
+            SaveBounds("恢复默认位置");
+        },
+        DesktopLayer = _layer?.Enabled ?? _settings.DesktopLayer,
+        ToggleDesktopLayer = () =>
+        {
+            var next = _settings with { DesktopLayer = !_settings.DesktopLayer };
+            ApplySettings(next);
+        },
+        Hide = HideWidget,
+        Exit = () => Application.Current.Exit(),
+    };
+
+    /// <summary>
+    /// 应用新设置：落盘 → 立即生效（能立即生效的那些）→ 重排。
+    ///
+    /// <para>"贴桌面层"立即重建层级；**材质**做不到（窗口创建时确定），由设置界面标注"重启后生效"。</para>
+    /// </summary>
+    internal void ApplySettings(WidgetSettings next)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+        var previous = _settings;
+        _settings = next;
+        SettingsStore.Save(_settings);
+
+        if (previous.DesktopLayer != next.DesktopLayer)
+        {
+            _layer?.Detach();
+            _layer = DesktopLayer.Attach(this, next.DesktopLayer);
+            AppLog.Line($"[layer] 切换贴桌面层 → {next.DesktopLayer}");
+        }
+
+        if (previous.Theme != next.Theme) Render("主题变化");
+    }
+
+    /// <summary>重新读一遍课表数据并重画（改过 fixture 之后不用重启）。</summary>
+    internal void ReloadTimetable()
+    {
+        try
+        {
+            var path = _loaded?.Source;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                AppLog.Line($"[reload] 源文件不可用（{path}），跳过重新载入");
+                return;
+            }
+
+            _loaded = AppHost.Load(path);
+            Render("重新载入课表");
+            AppLog.Line($"[reload] 已重新载入 {path}");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"[reload] 失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 隐藏挂件（本次运行内有效）：停掉定时器、暂停层级巡检、隐藏窗口。
+    ///
+    /// <para><b>不写设置</b>：隐藏是"先别看"，不是"以后都别启动" —— 后者是设置里的
+    /// "启动时显示挂件"，两者语义不同，混在一起会让用户下次启动时找不到挂件。</para>
+    /// </summary>
+    internal void HideWidget()
+    {
+        _nowTimer.Stop();
+        _layer?.Pause();
+        AppWindow.Hide();
+        AppLog.Line("[window] 已隐藏（托盘左键 / 菜单可再显示）");
+    }
+
+    /// <summary>从隐藏状态恢复显示。</summary>
+    internal void ShowWidgetAgain()
+    {
+        Resting.EnsureVisible(WindowNative.GetWindowHandle(this));
+        _nowTimer.Start();
+        _layer?.Resume("托盘显示");
+        Activate();
+        AppLog.Line("[window] 从托盘恢复显示");
+    }
+
+    internal void SetSettingsOpener(Func<WidgetSettings, bool, WidgetSettings> opener) => _openSettings = opener;
+
+    /// <summary>当前设置（托盘菜单与设置窗口读它）。</summary>
+    internal WidgetSettings CurrentSettings => _settings;
+
+    /// <summary>当前是否深色（设置窗口的初始主题）。</summary>
+    internal bool CurrentIsDark => IsDark();
+
+    /// <summary>当前是否贴桌面层（托盘菜单的勾选状态）。</summary>
+    internal bool LayerEnabled => _layer?.Enabled ?? _settings.DesktopLayer;
 
     /// <summary>层级状态快照（冒烟自检 / 真机日志用）。</summary>
     internal LayerState? LayerSnapshot() => _layer?.Snapshot();

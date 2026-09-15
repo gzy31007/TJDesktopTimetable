@@ -19,7 +19,20 @@ public partial class App : Application
     /// <summary>自检硬超时（毫秒）：比 CI 侧的 WaitForExit 短，好让日志先落盘。</summary>
     private const int SmokeTimeout = 45_000;
 
+    /// <summary>托盘菜单命令 id（与 <c>ShowTrayMenu</c> 里的项一一对应）。</summary>
+    private enum TrayCommand : uint
+    {
+        Show = 1,
+        Settings = 2,
+        Refresh = 3,
+        ResetPosition = 4,
+        ToggleDesktopLayer = 5,
+        Exit = 6,
+    }
+
     private readonly List<MainWindow> _windows = [];
+    private readonly List<SettingsWindow> _settingsWindows = [];
+    private TrayIcon? _tray;
 
     /// <summary>
     /// 构造应用。
@@ -62,6 +75,7 @@ public partial class App : Application
 
             var window = new MainWindow();
             _windows.Add(window);
+            window.SetSettingsOpener(ShowSettings);
             window.Initialize(options, loaded);
 
             if (options.Smoke)
@@ -71,6 +85,7 @@ public partial class App : Application
             }
 
             window.ShowWidget();
+            _tray = BuildTray(window);
         }
         catch (Exception ex)
         {
@@ -87,6 +102,81 @@ public partial class App : Application
                 // 用 Environment.Exit 保证一定结束（退出码直接决定 CI 成败）。
                                 Environment.Exit(SmokePassed ? 0 : 1);
             }
+        }
+    }
+
+    /// <summary>
+    /// 打开设置窗口（已开着就激活它）。
+    ///
+    /// 参数里带当前设置是为了**回显**，返回新设置是为了把"用户改了什么"带回调用方
+    /// （挂件负责落盘与生效）—— 设置窗口因此不需要认识存储层。
+    /// </summary>
+    private WidgetSettings ShowSettings(WidgetSettings current, bool dark)
+    {
+        var existing = _settingsWindows.FirstOrDefault();
+        if (existing is not null)
+        {
+            existing.Activate();
+            return current;
+        }
+
+        var window = new SettingsWindow(current, dark, next => _windows.FirstOrDefault()?.ApplySettings(next), () =>
+        {
+            _windows.FirstOrDefault()?.BuildActions().ResetPosition?.Invoke();
+        });
+        _settingsWindows.Add(window);
+        window.Closed += (_, _) => _settingsWindows.Remove(window);
+        window.Activate();
+        AppLog.Line("[settings] 已打开设置窗口");
+        return current;
+    }
+
+    /// <summary>建托盘图标：左键显示挂件，右键菜单给出常用动作。</summary>
+    private TrayIcon BuildTray(MainWindow widget)
+    {
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+        var tray = TrayIcon.Create("同济课表挂件", iconPath, command => OnTrayCommand(widget, command), widget.ShowWidgetAgain);
+        tray.SetMenu(1, BuildTrayMenu(widget));
+        AppLog.Line($"[tray] 已创建（图标 {iconPath}）");
+        return tray;
+    }
+
+    /// <summary>托盘菜单（每次弹出前重建，好让"贴桌面层"的勾选状态是最新的）。</summary>
+    private List<TrayMenuItem> BuildTrayMenu(MainWindow widget) =>
+    [
+        new TrayMenuItem((uint)TrayCommand.Show, "显示挂件"),
+        new TrayMenuItem((uint)TrayCommand.Settings, "设置…"),
+        new TrayMenuItem(null, string.Empty),
+        new TrayMenuItem((uint)TrayCommand.Refresh, "重新载入课表"),
+        new TrayMenuItem((uint)TrayCommand.ResetPosition, "恢复默认位置"),
+        new TrayMenuItem((uint)TrayCommand.ToggleDesktopLayer, "贴桌面层", widget.LayerEnabled),
+        new TrayMenuItem(null, string.Empty),
+        new TrayMenuItem((uint)TrayCommand.Exit, "退出"),
+    ];
+
+    private void OnTrayCommand(MainWindow widget, uint command)
+    {
+        switch ((TrayCommand)command)
+        {
+            case TrayCommand.Show:
+                widget.ShowWidgetAgain();
+                break;
+            case TrayCommand.Settings:
+                ShowSettings(widget.CurrentSettings, widget.CurrentIsDark);
+                break;
+            case TrayCommand.Refresh:
+                widget.ReloadTimetable();
+                break;
+            case TrayCommand.ResetPosition:
+                widget.BuildActions().ResetPosition?.Invoke();
+                break;
+            case TrayCommand.ToggleDesktopLayer:
+                widget.BuildActions().ToggleDesktopLayer?.Invoke();
+                _tray?.SetMenu(1, BuildTrayMenu(widget));
+                break;
+            case TrayCommand.Exit:
+                Exit();
+                break;
         }
     }
 
@@ -189,6 +279,9 @@ public partial class App : Application
         }
 
         _windows.Clear();
+        _settingsWindows.Clear();
+        _tray?.Dispose();
+        _tray = null;
     }
 
     /// <summary>

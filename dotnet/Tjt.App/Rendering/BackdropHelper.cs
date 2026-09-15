@@ -1,5 +1,6 @@
 using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
+using Tjt.App.Data;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using WinRT;
@@ -25,7 +26,8 @@ internal sealed class BackdropHelper : IDisposable
 {
     private readonly Window _window;
     private readonly SystemBackdropConfiguration _configuration;
-    private MicaController? _controller;
+    private MicaController? _mica;
+    private DesktopAcrylicController? _acrylic;
     private bool _builtInFallback;
 
     private BackdropHelper(Window window, SystemBackdropConfiguration configuration)
@@ -40,56 +42,82 @@ internal sealed class BackdropHelper : IDisposable
     /// <summary>
     /// 尝试给窗口挂上材质；返回是否成功。
     ///
-    /// <paramref name="micaAlt"/> 为 <c>true</c> 时用 <see cref="MicaKind.BaseAlt"/>（Mica Alt）。
+    /// <paramref name="mode"/> 决定材质种类：<c>Mica</c> / <c>MicaAlt</c> 用 <see cref="MicaController"/>，
+    /// <c>Acrylic</c> 用 <see cref="DesktopAcrylicController"/>（需要窗口 <c>transparent: true</c>，
+    /// 否则糊不出来），<c>Solid</c> 什么都不挂。
+    ///
+    /// 控制器路径优先（能显式接管活跃策略），失败退回内置 backdrop，再失败就是无材质 ——
+    /// 任何一步都不该让挂件起不来。
     /// </summary>
-    public static BackdropHelper Apply(Window window, bool micaAlt = false)
+    public static BackdropHelper Apply(Window window, MaterialMode mode = MaterialMode.Mica)
     {
         ArgumentNullException.ThrowIfNull(window);
 
         var configuration = new SystemBackdropConfiguration { IsInputActive = true };
         var helper = new BackdropHelper(window, configuration);
 
+        if (mode == MaterialMode.Solid)
+        {
+            helper.Mode = "solid";
+            return helper;
+        }
+
         try
         {
-            if (MicaController.IsSupported())
+            switch (mode)
             {
-                var controller = new MicaController { Kind = micaAlt ? MicaKind.BaseAlt : MicaKind.Base };
-                // WinUI 的 Window 实现了 ICompositionSupportsSystemBackdrop（就是材质的目标）
-                // Window 的实现类型不是"投影后的接口"，要用 WinRT 的 As<> 做投影转换（官方样例写法）。
-                // 直接传 window 会得到 CS1503：无法把 Window 转成 ICompositionSupportsSystemBackdrop。
-                controller.AddSystemBackdropTarget(window.As<ICompositionSupportsSystemBackdrop>());
-                controller.SetSystemBackdropConfiguration(configuration);
-                helper._controller = controller;
-                helper.Mode = micaAlt ? "mica-controller(alt)" : "mica-controller";
-            }
-            else
-            {
-                window.SystemBackdrop = new MicaBackdrop { Kind = micaAlt ? MicaKind.BaseAlt : MicaKind.Base };
-                helper._builtInFallback = true;
-                helper.Mode = "mica-builtin-fallback";
+                case MaterialMode.Acrylic when DesktopAcrylicController.IsSupported():
+                    var acrylic = new DesktopAcrylicController { Kind = DesktopAcrylicKind.Base };
+                    acrylic.AddSystemBackdropTarget(window.As<ICompositionSupportsSystemBackdrop>());
+                    acrylic.SetSystemBackdropConfiguration(configuration);
+                    helper._acrylic = acrylic;
+                    helper.Mode = "acrylic-controller";
+                    break;
+
+                case MaterialMode.MicaAlt when MicaController.IsSupported():
+                    helper._mica = BindMica(window, configuration, MicaKind.BaseAlt);
+                    helper.Mode = "mica-controller(alt)";
+                    break;
+
+                case MaterialMode.Acrylic:
+                case MaterialMode.MicaAlt:
+                case MaterialMode.Mica when MicaController.IsSupported():
+                    helper._mica = BindMica(window, configuration, MicaKind.Base);
+                    helper.Mode = "mica-controller";
+                    break;
+
+                default:
+                    // 控制器不可用：退回内置 backdrop（简单，但活跃状态交回系统）
+                    window.SystemBackdrop = mode == MaterialMode.Acrylic
+                        ? new DesktopAcrylicBackdrop()
+                        : new MicaBackdrop { Kind = mode == MaterialMode.MicaAlt ? MicaKind.BaseAlt : MicaKind.Base };
+                    helper._builtInFallback = true;
+                    helper.Mode = mode == MaterialMode.Acrylic ? "acrylic-builtin-fallback" : "mica-builtin-fallback";
+                    break;
             }
 
-            // 跟随窗口激活状态：失焦时 DWM 会切到"不活跃"物料（灰一点），这是正常行为。
             window.Activated += helper.OnWindowActivated;
         }
         catch (Exception ex)
         {
-            // 材质失败不该让挂件起不来：退回内置 Mica，再不行就是纯色底。
-            helper._controller?.Dispose();
-            helper._controller = null;
-            try
-            {
-                window.SystemBackdrop = new MicaBackdrop();
-                helper._builtInFallback = true;
-                helper.Mode = $"mica-builtin-fallback({ex.GetType().Name})";
-            }
-            catch (Exception inner)
-            {
-                helper.Mode = $"none({inner.GetType().Name})";
-            }
+            helper._mica?.Dispose();
+            helper._mica = null;
+            helper._acrylic?.Dispose();
+            helper._acrylic = null;
+            helper.Mode = $"none({ex.GetType().Name})";
         }
 
         return helper;
+    }
+
+    /// <summary>建 MicaController 并绑到窗口（默认物料的活跃策略由 <c>IsInputActive</c> 接管）。</summary>
+    private static MicaController BindMica(Window window, SystemBackdropConfiguration configuration, MicaKind kind)
+    {
+        var controller = new MicaController { Kind = kind };
+        // Window 的实现类型不是投影后的接口，必须用 WinRT 的 As<> 转换
+        controller.AddSystemBackdropTarget(window.As<ICompositionSupportsSystemBackdrop>());
+        controller.SetSystemBackdropConfiguration(configuration);
+        return controller;
     }
 
     /// <summary>
@@ -121,8 +149,10 @@ internal sealed class BackdropHelper : IDisposable
     public void Dispose()
     {
         _window.Activated -= OnWindowActivated;
-        _controller?.Dispose();
-        _controller = null;
+        _mica?.Dispose();
+        _mica = null;
+        _acrylic?.Dispose();
+        _acrylic = null;
         if (_builtInFallback)
         {
             _window.SystemBackdrop = null;

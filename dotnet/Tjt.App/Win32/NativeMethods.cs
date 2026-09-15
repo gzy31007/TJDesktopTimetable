@@ -203,4 +203,160 @@ internal static partial class NativeMethods
 
     /// <summary>把物理像素换算成 DIP 时的基准 DPI（<c>USER_DEFAULT_SCREEN_DPI</c>）。</summary>
     public const double DefaultDpi = 96d;
+
+    /* ------------------------------------------------------ 托盘图标与原生菜单（TrayIcon 用） */
+
+    /// <summary>调用默认窗口过程（消息专用窗口未处理的消息交给它）。</summary>
+    [DllImport("user32.dll", EntryPoint = "DefWindowProcW")]
+    internal static extern nint DefWindowProc(nint hwnd, uint message, nint wParam, nint lParam);
+
+    /// <summary>注册窗口类。</summary>
+    [DllImport("user32.dll", EntryPoint = "RegisterClassW", CharSet = CharSet.Unicode)]
+    internal static extern ushort RegisterClass(ref WndClass wndClass);
+
+    /// <summary>创建窗口（托盘用消息专用窗口：parent = HWND_MESSAGE）。</summary>
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode)]
+    internal static extern nint CreateWindowEx(
+        uint exStyle, string className, string windowName, uint style,
+        int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
+
+    /// <summary>销毁窗口。</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool DestroyWindow(nint hwnd);
+
+    /// <summary>取模块句柄（<c>GetModuleHandleW</c>）。</summary>
+    [DllImport("kernel32.dll", EntryPoint = "GetModuleHandleW", CharSet = CharSet.Unicode)]
+    internal static extern nint GetModuleHandle(string? moduleName);
+
+    /// <summary>加载图标资源（<c>LoadImageW</c>）。</summary>
+    [DllImport("user32.dll", EntryPoint = "LoadImageW", CharSet = CharSet.Unicode)]
+    internal static extern nint LoadImage(nint instance, string name, uint type, int cx, int cy, uint load);
+
+    /// <summary>加载系统预定义图标（<c>LoadIconW</c>）。</summary>
+    [DllImport("user32.dll", EntryPoint = "LoadIconW")]
+    internal static extern nint LoadIcon(nint instance, nint name);
+
+    /// <summary>销毁图标句柄。</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool DestroyIcon(nint icon);
+
+    /// <summary>增删改托盘图标。</summary>
+    [DllImport("shell32.dll", EntryPoint = "Shell_NotifyIconW", CharSet = CharSet.Unicode)]
+    internal static extern bool ShellNotifyIcon(uint message, ref NotifyIconData data);
+
+    /// <summary>创建弹出菜单。</summary>
+    [DllImport("user32.dll")]
+    internal static extern nint CreatePopupMenu();
+
+    /// <summary>追加菜单项。</summary>
+    [DllImport("user32.dll", EntryPoint = "AppendMenuW", CharSet = CharSet.Unicode)]
+    internal static extern bool AppendMenu(nint menu, uint flags, uint id, string? text);
+
+    /// <summary>弹出菜单（<c>TPM_RETURNCMD</c> 时返回选中的命令 id）。</summary>
+    [DllImport("user32.dll")]
+    internal static extern uint TrackPopupMenu(nint menu, uint flags, int x, int y, int reserved, nint hwnd, nint rect);
+
+    /// <summary>销毁菜单。</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool DestroyMenu(nint menu);
+
+    /// <summary>取光标位置（物理像素）。</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool GetCursorPos(out Point point);
+
+    /// <summary>屏幕坐标点。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Point
+    {
+        /// <summary>X。</summary>
+        public int X;
+
+        /// <summary>Y。</summary>
+        public int Y;
+    }
+
+    /// <summary>窗口类描述（只填 TrayIcon 用到的字段）。</summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct WndClass
+    {
+        /// <summary>样式。</summary>
+        public uint style;
+
+        /// <summary>窗口过程指针。</summary>
+        public nint lpfnWndProc;
+
+        /// <summary>类额外字节。</summary>
+        public int cbClsExtra;
+
+        /// <summary>窗口额外字节。</summary>
+        public int cbWndExtra;
+
+        /// <summary>模块实例。</summary>
+        public nint hInstance;
+
+        /// <summary>类图标。</summary>
+        public nint hIcon;
+
+        /// <summary>光标。</summary>
+        public nint hCursor;
+
+        /// <summary>背景刷。</summary>
+        public nint hbrBackground;
+
+        /// <summary>菜单名。</summary>
+        public string? lpszMenuName;
+
+        /// <summary>类名。</summary>
+        public string lpszClassName;
+    }
+
+    /// <summary>托盘图标数据（<c>NOTIFYICONDATAW</c>，按 x64 布局）。</summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct NotifyIconData
+    {
+        /// <summary>结构大小。</summary>
+        public uint cbSize;
+
+        /// <summary>接收回调消息的窗口。</summary>
+        public nint hWnd;
+
+        /// <summary>图标 id。</summary>
+        public uint uID;
+
+        /// <summary>有效字段掩码。</summary>
+        public uint uFlags;
+
+        /// <summary>回调消息。</summary>
+        public uint uCallbackMessage;
+
+        /// <summary>图标句柄。</summary>
+        public nint hIcon;
+
+        /// <summary>悬停提示。</summary>
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip;
+
+        /// <summary>状态。</summary>
+        public uint dwState;
+
+        /// <summary>状态掩码。</summary>
+        public uint dwStateMask;
+
+        /// <summary>气泡文本。</summary>
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szInfo;
+
+        /// <summary>版本（联合体）。</summary>
+        public uint uVersion;
+
+        /// <summary>气泡标题。</summary>
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle;
+
+        /// <summary>气泡图标标志。</summary>
+        public uint dwInfoFlags;
+
+        /// <summary>GUID（联合体）。</summary>
+        public Guid guidItem;
+
+        /// <summary>气泡自定义图标。</summary>
+        public nint hBalloonIcon;
+    }
 }

@@ -193,6 +193,27 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
   - `verify-topology.ps1`：发 `WM_DISPLAYCHANGE` → 检查 `[layer] 静息 display-change` 是否出现（即事件通道生效）。
   - ⚠️ 这些脚本**曾经踩坑**：把中文写进单引号字符串会让 Windows PowerShell 5 解析直接崩
     （按 ANSI 读，引号配对错乱）—— 单引号里只放 ASCII。
+- **入口与设置界面（2026-09-15）**：WinUI 侧现在有两个入口，都是照 DeskBox / 资源管理器的语言做的。
+  - **挂件顶部条**（`Rendering/BoardRenderer.cs`）：左边应用图标 + 学期 + 「第 N 周 · 今日 N 节」，
+    右边 **刷新** 与 **⋯ 溢出菜单**（设置 / 重新载入课表 / 恢复默认位置 / 贴桌面层勾选 / 隐藏 / 退出）。
+    图标用 Segoe Fluent Icons 字形（`Rendering/IconGlyph.cs`），跟主题色走、任意 DPI 都清晰。
+    动作经 `WidgetActions`（渲染层只发意图，逻辑留在 `MainWindow.BuildActions()`）。
+  - **托盘图标**（`Win32/TrayIcon.cs`）：`Shell_NotifyIcon` + 消息专用窗口（`HWND_MESSAGE`，离屏、
+    不参与层级）+ 原生右键菜单（`TrackPopupMenu(TPM_RETURNCMD)` 同步取回选中项，不需要消息分发）。
+    左键单击 = 显示挂件；菜单 = 显示 / 设置 / 重新载入 / 恢复位置 / 贴桌面层勾选 / 退出。
+    WASDK 1.8 没有托盘 API，所以直接 P/Invoke；图标是 `Assets/app.ico`（运行时 `LoadImage` 加载）。
+  - **设置窗口**（`SettingsWindow.xaml(.cs)` + `Rendering/SettingsView.cs`）：左侧 `NavigationView`
+    导航（常规 / 外观 / 关于）+ 卡片行（左图标、标题、说明，右控件），照 DeskBox 那套。
+    改动**即时生效并落盘**（没有保存按钮）；**材质**例外 —— 它只在窗口创建时确定，
+    界面上明确写"重启后生效"。
+- **尺寸口径的第二版（重要，别再改回去）**：保存的**永远是"期望尺寸"**，实测尺寸只用来算
+  `FrameCorrection`。之前两版都踩了同一个坑——把 Windows snap 后的实测尺寸当期望值存回去，
+  于是"用户每拖一次窗口就变大一点"（实测 552x497 就是这么来的）。用户拖过之后，
+  用"实测 - 校正"**反推**出他想要的尺寸再存。
+  - WinUI 窗口有**最小高度**：客户区高度恒等于请求值 +30 DIP（实测 400→330 / 600→450 / 900→630 /
+    1080→730），宽度则精确等于请求值。这是窗口系统行为，不是 bug。
+- **冒烟自检不读设置**：它验证的是"默认状态下的渲染与层级"，读到上次运行的窗口尺寸会让结果
+  随历史漂移（实测被污染过一次：canvas 578x507）。
 - **外壳已经有的能力（2026-09-15）**：默认摆在**工作区右下角**（留 24px，用 `DisplayArea.WorkArea`
   而不是屏幕尺寸，免得压到任务栏）；顶部信息条显示「学期 · 第 N 周 · 今日 N 节」（对应渲染层
   `.widget-bar` 的三段）；窗口尺寸变化即重排。

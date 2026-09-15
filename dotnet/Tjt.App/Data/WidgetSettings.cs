@@ -2,6 +2,35 @@ using Tjt.Widget;
 
 namespace Tjt.App.Data;
 
+/// <summary>主题模式。</summary>
+internal enum ThemeMode
+{
+    /// <summary>跟随系统（读注册表 <c>AppsUseLightTheme</c>）。</summary>
+    Auto,
+
+    /// <summary>强制深色。</summary>
+    Dark,
+
+    /// <summary>强制浅色。</summary>
+    Light,
+}
+
+/// <summary>窗口材质（与 Electron 侧 <c>settings.material</c> 同一套取值语义）。</summary>
+internal enum MaterialMode
+{
+    /// <summary>不透明实色底（最稳，拿不到材质时的观感）。</summary>
+    Solid,
+
+    /// <summary>Mica：桌面壁纸色调的单层材质，保住 DWM 圆角。</summary>
+    Mica,
+
+    /// <summary>Mica Alt：分层更明显（WinUI 的 <c>MicaKind.BaseAlt</c>）。</summary>
+    MicaAlt,
+
+    /// <summary>Acrylic：更"玻璃"，但需要 <c>transparent: true</c>，代价是拿不到 DWM 圆角。</summary>
+    Acrylic,
+}
+
 /// <summary>
 /// 挂件设置（落盘到 <c>%APPDATA%\TJDesktopTimetable\settings.json</c>）。
 ///
@@ -36,6 +65,9 @@ internal sealed record WidgetSettings
     /// <summary>是否跳过系统材质（排查材质问题用）。</summary>
     public bool NoBackdrop { get; init; }
 
-    /// <summary>强制深浅主题；<c>null</c> = 跟随系统。</summary>
-    public bool? Dark { get; init; }
+    /// <summary>主题模式。</summary>
+    public ThemeMode Theme { get; init; } = ThemeMode.Auto;
+
+    /// <summary>窗口材质。</summary>
+    public MaterialMode Material { get; init; } = MaterialMode.Mica;
 }
