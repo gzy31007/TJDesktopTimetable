@@ -216,13 +216,16 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
   - **真机验收脚本 `.tools/verify-resize.ps1`**：**不用合成鼠标** —— 直接
     `SendMessage(hwnd, WM_NCHITTEST, 0, MAKELPARAM(x,y))` 就能验"这条链子通不通"
     （实测四边四角全中、正中 `HTCLIENT`、窗外 `HTNOWHERE`），再用
-    `SetWindowPos` + `WM_EXITSIZEMOVE` 验持久化与重启恢复。**只有"按住边缘拖拽"这一步是手动的**
-    （本机挡掉 WSL 合成指针输入）。两个写脚本时的坑：
+    `SetWindowPos` + `WM_EXITSIZEMOVE` 验持久化与重启恢复。两个写脚本时的坑：
     1. **脚本进程必须 DPI 感知**（`SetProcessDpiAwarenessContext(-4)`，失败再退
        `shcore!SetProcessDpiAwareness(2)`），否则 `GetWindowRect` 返回**虚拟化**坐标 ——
        实测不感知读到 `1280x745`、感知后读到真实的 `1920x1117`，两者差 1.5 倍，会被误判成 bug；
     2. 脚本的 rect 是**物理像素**、`settings.json` 是 **DIP**，缩放系数要从应用日志
        `[settings] 保存 ... measured=...` 那一行反推，别自己假设 1:1。
+  - **验收状态（2026-09-15，全绿）**：上面两条自动检查 + **用户真机手动拖拽边缘通过**
+    （可见边缘出缩放光标、窗口跟手、松手后位置尺寸落盘）。也就是"按住边缘拖"这一步
+    **不再需要每轮重验** —— 遇到"边缘抓不住"的回归时，先跑 `verify-resize.ps1` 定位是
+    命中测试断了还是原生循环没起来，别一上来就改代码。
 - **贴桌面常驻（2026-09-15 完成）**：默认就是贴桌面层（`settings.DesktopLayer` 默认 true，
   CLI 用 `--desktop-layer` / `--no-desktop-layer` 覆盖）。移植自 Electron 那套已验收的编排，
   文件与职责一一对应：`Win32/Layer.cs`（编排）、`Win32/Resting.cs`（z-order 原语）、
