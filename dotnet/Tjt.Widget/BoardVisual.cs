@@ -86,7 +86,11 @@ public sealed record BoardHeader(string Title, string WeekText, string? TodayTex
 /// 为什么单独立一层：XAML 渲染代码只能在 Windows 上编译运行，是反馈最慢的一段；
 /// 把"算"与"画"拆开后，所有会算错的规则（并排宽度、今日列、字号档位、名称压缩）都在这里，
 /// 由 Linux 上的单测钉住，渲染层只剩"照着坐标摆控件"。
+/// <para>坐标口径：<see cref="Grid"/> 的 <c>Top</c>、<see cref="Blocks"/> 的 <c>Frame.Top</c>、
+/// <see cref="NowLineTop"/> 都**已经含**画布顶部呼吸位；<see cref="Slots"/> 的 <c>Top</c> 例外，
+/// 它是相对网格顶的偏移，渲染层要自己加 <c>Grid.Top</c>。</para>
 /// </summary>
+/// <param name="HeaderTop">星期表头的顶边（= 画布顶部呼吸位）；表头行高见 <c>Geometry.HeaderHeight</c>。</param>
 public sealed record BoardVisual(
     string Title,
     BoardHeader Header,
@@ -94,6 +98,7 @@ public sealed record BoardVisual(
     IReadOnlyList<SlotLabel> Slots,
     IReadOnlyList<BlockVisual> Blocks,
     BoardFrame Grid,
+    double HeaderTop,
     BoardGeometry Geometry,
     bool HasToday,
     double? NowLineTop,
@@ -110,6 +115,16 @@ public static class BoardVisualBuilder
 
     /// <summary>网格下方留白（边框 + 呼吸位，渲染层 canvasHeight 里的 +2）。</summary>
     private const double GridBottomPadding = 6;
+
+    /// <summary>
+    /// 画布顶部呼吸位：**星期表头与顶部信息条之间的留白**（与 <see cref="GridBottomPadding"/> 对称）。
+    ///
+    /// <para>没有它时表头文字紧贴信息条下沿（真机观感反馈："周一到周日那一行与上面的边距过小"）——
+    /// 表头行本身是 28dip，文字行高填满它，顶到 y=0 就只剩 1dip。留白统一在这里给，
+    /// 渲染层用 <see cref="BoardVisual.HeaderTop"/> 摆表头、其余元素（网格 / 色块 / 时间线）
+    /// 的 Y 都按本偏移平移过，所以加它只需改这一处。</para>
+    /// </summary>
+    private const double CanvasTopPadding = 6;
 
     /// <summary>顶部信息条高度（对应渲染层 <c>.widget-bar</c> 的高度）。</summary>
     public const double HeaderHeight = 34;
@@ -167,6 +182,8 @@ public static class BoardVisualBuilder
         foreach (var block in state.Blocks)
         {
             var frame = FrameOf(state, block, geometry.Core);
+            // 顶部呼吸位统一在这里一次性平移（色块 / 网格 / 时间线 / 表头都跟着走）
+            var placed = frame with { Top = frame.Top + CanvasTopPadding };
             var font = FontSizeFor(frame.Width);
             blocks.Add(new BlockVisual(
                 // key 必须唯一：同一门课可能在同格有多块（不同教室），所以把上课周次的标签也带上
@@ -177,7 +194,7 @@ public static class BoardVisualBuilder
                 Room: string.IsNullOrEmpty(block.Room) ? null : block.Room,
                 WeeksLabel: block.WeeksLabel,
                 Tooltip: TooltipOf(block),
-                Frame: frame,
+                Frame: placed,
                 FontSize: font,
                 IsSpecial: block.Special,
                 IsStacked: block.Stacked,
@@ -186,7 +203,8 @@ public static class BoardVisualBuilder
 
         var today = state.Days.FirstOrDefault(day => day.IsToday);
         var canvasWidth = geometry.GutterWidth + (geometry.CellWidth * state.Days.Count);
-        var canvasHeight = geometry.HeaderHeight + gridHeight + GridBottomPadding;
+        var canvasHeight = CanvasTopPadding + geometry.HeaderHeight + gridHeight + GridBottomPadding;
+        var nowLineTop = NowLineTop(state, geometry.Core, nowMinutes);
 
         return new BoardVisual(
             Title: state.Title,
@@ -194,10 +212,15 @@ public static class BoardVisualBuilder
             Days: days,
             Slots: slots,
             Blocks: blocks,
-            Grid: new BoardFrame(geometry.GutterWidth, geometry.HeaderHeight, geometry.CellWidth * state.Days.Count, gridHeight),
+            Grid: new BoardFrame(
+                geometry.GutterWidth,
+                CanvasTopPadding + geometry.HeaderHeight,
+                geometry.CellWidth * state.Days.Count,
+                gridHeight),
+            HeaderTop: CanvasTopPadding,
             Geometry: geometry,
             HasToday: today is not null,
-            NowLineTop: NowLineTop(state, geometry.Core, nowMinutes),
+            NowLineTop: nowLineTop is { } line ? line + CanvasTopPadding : null,
             CanvasWidth: canvasWidth,
             CanvasHeight: canvasHeight,
             // 横向：可用宽度装不下最小列宽时才滚（与渲染层的 minCellWidth=72 语义一致）；
@@ -258,7 +281,10 @@ public static class BoardVisualBuilder
 
         if (availableHeight is { } height && rows > 0)
         {
-            var usable = height - HeaderHeight - GridBottomPadding;
+            // 扣掉"顶部信息条 + 画布顶部呼吸位 + 底部留白"。
+            // ⚠️ 画布的表头（28dip）**故意不扣**：这是既有语义 —— 宁可让画布略高于可用高度、
+            // 由外层滚动兜底，也不要把行高再压小一档（改它会让所有窗口的观感一起变）。
+            var usable = height - HeaderHeight - CanvasTopPadding - GridBottomPadding;
             var fitted = Math.Floor(usable / rows);
             if (fitted > 0 && fitted < rowHeight)
             {

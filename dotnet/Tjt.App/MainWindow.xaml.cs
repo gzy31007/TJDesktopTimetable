@@ -41,6 +41,13 @@ public sealed partial class MainWindow : Window
 
     private LoadedTimetable? _loaded;
     private AppStartupOptions _options = new();
+
+    /// <summary>
+    /// 命令行是否给了 <c>--size WxH</c>。这类实例是**诊断用**的：尺寸照参数走，
+    /// 且**不写用户设置**（见 <see cref="SaveBounds"/> 开头的守卫）——否则跑一次截图脚本
+    /// 就会把用户的窗口尺寸改掉。
+    /// </summary>
+    private bool HasExplicitSize => _options.Width is not null && _options.Height is not null;
     private WidgetSettings _settings = new();
     private DesktopLayer? _layer;
     private WindowBounds _targetBounds = new(0, 0, DefaultWidth, DefaultHeight);
@@ -303,6 +310,10 @@ public sealed partial class MainWindow : Window
         var restored = RestoreSavedBounds();
         if (!restored) PlaceBottomRight();
 
+        // 4.5) `--size WxH` 只覆盖**尺寸**（位置保持上一步的结果：同一个 --size 在任何机器上
+        //      都能得到可预期的窗口，不会被上次保存的坐标带到屏幕外）。诊断实例不写设置。
+        ApplyStartupSize();
+
         // 5) 贴桌面层（owner 挂 SHELLDLL_DefView）+ 5 秒 owner 巡检 + 事件通道
         var desktopLayer = startup.DesktopLayer ?? _settings.DesktopLayer;
         _layer = DesktopLayer.Attach(this, desktopLayer);
@@ -436,6 +447,26 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 应用命令行给的显式窗口尺寸（<c>--size WxH</c>，单位 DIP）。
+    ///
+    /// <para>这是"验证自适应布局"的开关：给了就精确设成它（下限仍按
+    /// <c>ResizePolicy.MinWidth/MinHeight</c> 的 320×240），**只改尺寸不改位置**。
+    /// 显式尺寸的实例不写用户设置 —— 见 <see cref="HasExplicitSize"/>。</para>
+    /// </summary>
+    private void ApplyStartupSize()
+    {
+        if (_options.Width is not { } width || _options.Height is not { } height) return;
+
+        var clientWidth = Math.Max(320, width);
+        var clientHeight = Math.Max(240, height);
+        AppWindow.ResizeClient(new SizeInt32(
+            (int)Math.Ceiling(clientWidth * _dpiScale),
+            (int)Math.Ceiling(clientHeight * _dpiScale)));
+        _targetBounds = _targetBounds with { Width = clientWidth, Height = clientHeight };
+        AppLog.Line($"[window] --size 显式尺寸 {clientWidth}x{clientHeight}dip（位置沿用上一步；本实例不写设置）");
+    }
+
+    /// <summary>
     /// 恢复上次保存的位置与尺寸。
     ///
     /// 校验两件事：尺寸可用、且**至少有一部分落在某个显示器的工作区内**
@@ -518,8 +549,8 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void SaveBounds(string reason)
     {
-        // 冒烟自检不写用户设置：它是"跑一遍就退出"的短命进程，落盘的坐标只会污染真实配置
-        if (_options.Smoke) return;
+        // 冒烟自检 / 显式 --size 的实例不写用户设置：短命诊断进程落盘的坐标只会污染真实配置
+        if (_options.Smoke || HasExplicitSize) return;
 
         var hwnd = WindowNative.GetWindowHandle(this);
         if (!NativeMethods.IsWindow(hwnd)) return;

@@ -11,9 +11,9 @@ namespace Tjt.Core.Tests;
 /// 几何 / 染色 / 文案从 WinUI 外壳里拆出来的目的：算错的代价是"推 CI 才发现"，
 /// 而并排宽度、今日列、字号档位这些是纯数学，本地就该钉死。
 ///
-/// 期望值逐条对齐 Electron 侧渲染层
-/// (`apps/desktop/src/renderer/shared/TimetableBoard.vue` 的 `blockRect` / `blockFontSize` /
-/// `blockName` / `tintStyle`) 与基准版 `select_preview.html`。
+/// 期望值沿袭已删除的 Electron 渲染层（`TimetableBoard.vue` 的 `blockRect` / `blockFontSize` /
+/// `blockName` / `tintStyle`，2026-09-16 随该线删除）与基准版 `select_preview.html`。
+/// **这些期望值现在就是挂件视觉的真源**：改 `Tjt.Widget` 的几何/文案/染色时，改的就是这里。
 /// </summary>
 public class BoardVisualTests
 {
@@ -69,11 +69,30 @@ public class BoardVisualTests
         Assert.Equal(7, visual.Geometry.Cols);
         Assert.Equal(11, visual.Geometry.Rows);
 
-        // 网格区域：左边距 = gutter，宽 = 列宽 × 天数
+        // 网格区域：左边距 = gutter，宽 = 列宽 × 天数；顶边 = 画布顶部呼吸位 + 表头行高
         Assert.Equal(74d, visual.Grid.Left);
-        Assert.Equal(28d, visual.Grid.Top);
+        Assert.Equal(6d, visual.HeaderTop);
+        Assert.Equal(6d + 28d, visual.Grid.Top);
         Assert.Equal(132d * 7, visual.Grid.Width);
         Assert.Equal(52d * 11, visual.Grid.Height);
+    }
+
+    [Fact]
+    public void 表头与顶部之间留呼吸位且色块随之平移()
+    {
+        var visual = Visual(1000);
+
+        // 表头文字顶边 = 呼吸位；它下面才是表头行（28dip）与网格线
+        Assert.Equal(6d, visual.HeaderTop);
+        Assert.Equal(visual.HeaderTop + visual.Geometry.HeaderHeight, visual.Grid.Top);
+
+        // 色块 / 时间线都在同一条平移线上：网格顶 + 行偏移，不会有人漏掉呼吸位
+        Assert.All(visual.Blocks, block => Assert.True(block.Frame.Top >= visual.Grid.Top));
+        if (visual.NowLineTop is { } now)
+        {
+            Assert.True(now >= visual.Grid.Top);
+            Assert.True(now <= visual.Grid.Top + visual.Grid.Height);
+        }
     }
 
     [Fact]
@@ -151,7 +170,7 @@ public class BoardVisualTests
         {
             Assert.Equal(40d, r.Width);
             Assert.Equal(102d, r.Height); // 2 行 × 52 - 2
-            Assert.Equal(29d, r.Top);     // 表头 28 + 1
+            Assert.Equal(35d, r.Top);     // 顶部呼吸位 6 + 表头 28 + 1
         });
         // 每块 42px 宽再收 2px，三块依次右移 42
         Assert.Equal(new[] { 77d, 119d, 161d }, rects.Select(r => r.Left).ToArray());
@@ -277,7 +296,7 @@ public class BoardVisualTests
     public void 当前时间线按首末节次线性插值_范围外不画()
     {
         var visual = Visual(1000, nowMinutes: 8 * 60); // 第 1 节起点
-        Assert.Equal(28d, visual.NowLineTop!.Value, 6); // 网格顶部
+        Assert.Equal(34d, visual.NowLineTop!.Value, 6); // 网格顶部（顶部呼吸位 6 + 表头 28）
 
         visual = Visual(1000, nowMinutes: (8 * 60) + 45); // 第 1 节终点，仍在网格内
         Assert.NotNull(visual.NowLineTop);
@@ -346,9 +365,10 @@ public class BoardVisualTests
     public void 给了可用高度就把行高压到刚好铺满()
     {
         var board = Layout.BuildBoard([Maths, Physics, English], TestTerm, new BoardOptions { Today = "2026-09-14" });
-        // 11 行 + 顶部条 34 + 底部留白 6 = 可用高度 590 → 每行 (590-34-6)/11 = 50
+        // 可用高度 590 → 每行 (590 - 顶部信息条 34 - 画布顶部呼吸位 6 - 底部留白 6) / 11 = 49
+        // （表头 28dip 不入这个算式 —— 既有语义是"尽力铺满、略溢出交给外层滚动"）
         var geometry = BoardVisualBuilder.FitGeometry(1000, board.Rows.Count, board.Days.Count, availableHeight: 590);
-        Assert.Equal(50d, geometry.RowHeight);
+        Assert.Equal(49d, geometry.RowHeight);
 
         // 行高只受高度约束影响，列宽不受影响
         Assert.Equal(132d, geometry.CellWidth);
@@ -358,7 +378,7 @@ public class BoardVisualTests
     public void 行高被压到下限后不再变窄()
     {
         var board = Layout.BuildBoard([Maths], TestTerm, new BoardOptions { Today = "2026-09-14" });
-        // 可用高度 200：算出 (200-34-6)/11 = 14 < 下限 34 → 取 34，超出的部分交给外层滚动
+        // 可用高度 200：算出 (200 - 34 - 6 - 6) / 11 = 14 < 下限 34 → 取 34，超出的部分交给外层滚动
         var geometry = BoardVisualBuilder.FitGeometry(1000, board.Rows.Count, board.Days.Count, availableHeight: 200);
         Assert.Equal(BoardVisualBuilder.MinRowHeight, geometry.RowHeight);
 
@@ -394,7 +414,8 @@ public class BoardVisualTests
         // 宽 1000 → 列宽 132，画布宽 74 + 132*7 = 998 ≤ 1000 → 不需要横向滚动
         var wide = BoardVisualBuilder.Build(board, 1000, dark: false, availableHeight: 760);
         Assert.Equal(74d + (132d * 7), wide.CanvasWidth);
-        Assert.Equal(28d + (52d * 11) + 6, wide.CanvasHeight);
+        // 高 = 顶部呼吸位 + 表头 + 网格 + 底部留白
+        Assert.Equal(6d + 28d + (52d * 11) + 6d, wide.CanvasHeight);
         Assert.False(wide.NeedsHorizontalScroll);
         Assert.False(wide.NeedsVerticalScroll);
 

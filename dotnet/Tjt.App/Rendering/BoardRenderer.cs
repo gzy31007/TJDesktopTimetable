@@ -325,7 +325,7 @@ internal static class BoardRenderer
                 Opacity = day.IsWeekend && !day.IsToday ? 0.72 : 1.0,
             };
             Canvas.SetLeft(text, day.Left);
-            Canvas.SetTop(text, 0);
+            Canvas.SetTop(text, visual.HeaderTop);
             canvas.Children.Add(text);
 
             if (!day.IsToday) continue;
@@ -338,12 +338,18 @@ internal static class BoardRenderer
                 Fill = new SolidColorBrush(Parse(accent)),
             };
             Canvas.SetLeft(underline, day.Left + (day.Width * 0.22));
-            Canvas.SetTop(underline, visual.Geometry.HeaderHeight - 5);
+            Canvas.SetTop(underline, visual.HeaderTop + visual.Geometry.HeaderHeight - 5);
             canvas.Children.Add(underline);
         }
     }
 
-    /// <summary>左侧节次标签（"3 · 10:00"）；"正在上"的那一节用强调色加粗。</summary>
+    /// <summary>
+    /// 左侧节次标签（"3 · 10:00"）；"正在上"的那一节用强调色加粗。
+    ///
+    /// <para>文字**居中**而不是右对齐：行高被压小时字号跟着变小（<c>RowHeight × 0.24</c>），
+    /// 右对齐会让"文字与窗口左边缘的那片空白"随字号变小而变大（真机反馈："第一列时间与窗口的
+    /// 边距过大"）；居中后左右空白对称，字号怎么变都稳定。右侧留 8dip 给"正在上"的竖条标记。</para>
+    /// </summary>
     private static void DrawSlotLabels(Canvas canvas, BoardVisual visual, bool dark)
     {
         foreach (var slot in visual.Slots)
@@ -353,12 +359,12 @@ internal static class BoardRenderer
             {
                 Text = slot.Text,
                 FontSize = Math.Max(9, visual.Geometry.RowHeight * 0.24),
-                Width = visual.Geometry.GutterWidth - 9,
-                TextAlignment = TextAlignment.Right,
+                Width = visual.Geometry.GutterWidth - 8,
+                TextAlignment = TextAlignment.Center,
                 Foreground = new SolidColorBrush(Parse(slot.IsCurrent ? accent : TintPalette.TextSoft(dark))),
                 FontWeight = slot.IsCurrent ? FontWeights.SemiBold : FontWeights.Normal,
             };
-            Canvas.SetLeft(text, 0);
+            Canvas.SetLeft(text, 4);
             Canvas.SetTop(text, visual.Grid.Top + slot.Top);
             canvas.Children.Add(text);
 
