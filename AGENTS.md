@@ -277,8 +277,9 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     它在 `WidgetWindowBase.Backdrop` 里就是运行时按材质签名重绑控制器）。
     `MainWindow.ApplySettings` 里材质一变就调它，并打
     `[backdrop] 材质切换 A → B applied=True/False`。
-  - **`Dispose()` 必须解绑 `Activated`**：`SetMaterial` 每次 `Bind` 都会挂一次
-    `OnWindowActivated`，不解绑会随切换次数累积。
+  - **不再订阅 `Window.Activated`（2026-09-15）**：早先 `Bind` 每次都会挂一次 `OnWindowActivated`
+    （`Dispose` 里解绑，否则会随切换次数累积），而它正是"未激活就变灰"的元凶 —— 见下面
+    「没选中窗口时背景发灰」条。现在 `IsInputActive` 恒 true，订阅与解绑一并删除。
   - **Acrylic 的固有代价仍在**：它要求窗口 `transparent: true`，我们按 mica/solid 创建（非透明），
     所以运行时切到 Acrylic 拿到的是 `acrylic-controller` 但糊感可能不如专用透明窗口。
     `SetMaterial` 会按实际结果返回 true/false 并记日志，**不假装成功**。
@@ -286,6 +287,25 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     `solid` 中心 `#000000`（实色底）、`mica` `#281D1B`、`mica-alt` `#190400`（比 mica 更深、
     分层更明显 —— 这是 BaseAlt 的预期观感）、`acrylic` `#3A1912`（透出更多壁纸）。
     日志里 `[backdrop] mode=` 分别对应 `solid` / `mica-controller` / `mica-controller(alt)` / `acrylic-controller`。
+- **"没选中窗口时背景发灰"（2026-09-15 结案，对齐 DeskBox）** —— 用户报："DeskBox 无论鼠标是否选中都是透亮的，
+  我们的挂件一变灰"。两个原因**都要修**：
+  - ① **`Window.Activated` 把 `IsInputActive` 置回了 false**：`BackdropHelper` 原先按
+    `WindowActivationState` 改这个值，而挂件贴桌面层、几乎从不被激活 → 材质长期停在"非激活"档。
+    **DeskBox 的取法**（`WidgetWindowBase.Backdrop`）：只在绑定时**无条件** `IsInputActive = true`，
+    从不按激活状态改它（它也没用 `IsActive` —— WASDK 1.8 的 `SystemBackdropConfiguration`
+    **就没有 `IsActive`**，写了会 `CS0117`）。现在恒 true，且不再订阅 `Activated`。
+  - ② **光有 IsInputActive 不够，浓淡在 `MicaController` 的三个属性上**：默认（`TintColor` 未设 = 透明、
+    `TintOpacity = 0.8`）在暗壁纸上就是一团灰。变体矩阵实测（同窗口、同区域、深色壁纸）：
+    - 默认 → `#221F1F`
+    - 只把 `TintOpacity` 改成 0.0 / 0.6（`TintColor` 仍默认透明）→ `#AA999A` / `#A39C9D`
+      —— **没有颜色的 tint 层等于不存在**，光调不透明度越调越亮、方向反了；
+    - **`TintColor = #202020` + `TintOpacity = 0.6f` + `LuminosityOpacity = 0.5f`** → `#3A3333` / `#3F2926`，
+      与 DeskBox 面板的 `#3B2321~#4C2B29` 同一档 ✅（`ApplyMicaTint`，只作用于深色档）。
+    - 属性类型是 **float**（写 `0.0` 会 `CS0664`）。
+  - 对比方法（可复用）：拿用户的桌面截图直接采样像素 —— DeskBox 面板空白处 vs 挂件 gutter 空白处，
+    同图同区域最公平；只截自己窗口容易把"位置不同导致壁纸色不同"误判成材质问题（先把窗口
+    `SetWindowPos` 挪到面板同一区域再比，`.tools/shot-top.ps1 -X -Y`）。
+  - 浅色档**没动**（默认值本身不暗，实测 `#F9F1EF`）；Acrylic 也没做同款对齐。
 - **浅色模式"完全不是浅色"——材质主题没接主题（2026-09-15 结案）**：
   - **症状（真机采样）**：`--dark` 与 `--light` 两种模式的**底色像素一模一样**（顶部都是 `#261E1C`），
     更怪的是浅色模式的色块比深色的**更暗**。

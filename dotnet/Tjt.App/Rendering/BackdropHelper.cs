@@ -15,8 +15,15 @@ namespace Tjt.App.Rendering;
 /// 而本项目的挂件正是"挂桌面、几乎不被激活"的窗口。
 ///
 /// WinUI 的 <see cref="MicaController"/> + <see cref="SystemBackdropConfiguration"/> 能把这层策略
-/// 显式接管：<see cref="SystemBackdropConfiguration.IsInputActive"/> 由我们自己设置，
-/// 于是窗口哪怕不被激活也能拿到材质（这正是 DeskBox 的做法）。
+/// 显式接管：<see cref="SystemBackdropConfiguration.IsInputActive"/> 由我们自己设置、**恒为 true**，
+/// 于是窗口哪怕不被激活也能拿到材质（这正是 DeskBox 的做法：它只在绑定时无条件置 true，
+/// 从不按 <c>WindowActivatedEventArgs</c> 去改这个值）。
+///
+/// <para><b>2026-09-15 修的一处观感缺陷</b>：早先这里挂了 <c>Window.Activated</c>，回调里按
+/// <c>WindowActivationState</c> 把 <see cref="SystemBackdropConfiguration.IsInputActive"/> 置回 <c>false</c>
+/// —— 挂件贴桌面层、几乎从不被激活，于是材质**长期处于"非激活"档**，被 DWM 降级成近黑平灰
+/// （用户实测："鼠标没选中窗口时背景发灰，DeskBox 无论选中与否都是透亮的"）。现在没有任何代码
+/// 会把它改回 false。</para>
 ///
 /// 因此首选控制器路径；只有控制器不可用（系统不支持 / API 异常）时才退回
 /// <see cref="Window.SystemBackdrop"/> 的内置 <see cref="MicaBackdrop"/>，
@@ -66,6 +73,11 @@ internal sealed class BackdropHelper : IDisposable
 
         var configuration = new SystemBackdropConfiguration
         {
+            // 恒为 true：挂件从不指望"被激活"，见类注释。
+            // ⚠️ WASDK 1.8 的 SystemBackdropConfiguration **只有 IsInputActive**（没有 IsActive；
+            // 真机试过加 IsActive 会直接编译错 CS0117），所以"始终用激活外观"只能靠这一个开关
+            // —— 而它并不足以让 Mica 变亮，真正的浓淡在 MicaController 的 TintOpacity/LuminosityOpacity
+            // 上（见 ApplyMicaTint）。
             IsInputActive = true,
             Theme = dark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light,
         };
@@ -138,14 +150,14 @@ internal sealed class BackdropHelper : IDisposable
                     break;
 
                 case MaterialMode.MicaAlt when MicaController.IsSupported():
-                    _mica = BindMica(_window, _configuration, MicaKind.BaseAlt);
+                    _mica = BindMica(_window, _configuration, MicaKind.BaseAlt, IsDark);
                     Mode = "mica-controller(alt)";
                     break;
 
                 case MaterialMode.Acrylic:
                 case MaterialMode.MicaAlt:
                 case MaterialMode.Mica when MicaController.IsSupported():
-                    _mica = BindMica(_window, _configuration, MicaKind.Base);
+                    _mica = BindMica(_window, _configuration, MicaKind.Base, IsDark);
                     Mode = "mica-controller";
                     break;
 
@@ -158,8 +170,6 @@ internal sealed class BackdropHelper : IDisposable
                     Mode = mode == MaterialMode.Acrylic ? "acrylic-builtin-fallback" : "mica-builtin-fallback";
                     break;
             }
-
-            _window.Activated += OnWindowActivated;
         }
         catch (Exception ex)
         {
@@ -184,13 +194,39 @@ internal sealed class BackdropHelper : IDisposable
     }
 
     /// <summary>建 MicaController 并绑到窗口（默认物料的活跃策略由 <c>IsInputActive</c> 接管）。</summary>
-    private static MicaController BindMica(Window window, SystemBackdropConfiguration configuration, MicaKind kind)
+    private static MicaController BindMica(Window window, SystemBackdropConfiguration configuration, MicaKind kind, bool dark)
     {
         var controller = new MicaController { Kind = kind };
+        ApplyMicaTint(controller, dark);
         // Window 的实现类型不是投影后的接口，必须用 WinRT 的 As<> 转换
         controller.AddSystemBackdropTarget(window.As<ICompositionSupportsSystemBackdrop>());
         controller.SetSystemBackdropConfiguration(configuration);
         return controller;
+    }
+
+    /// <summary>
+    /// Mica 的浓淡（深色主题）—— 对齐 DeskBox 的"无论是否选中都透亮"。
+    ///
+    /// <para>WinUI 的默认 <c>TintOpacity = 0.8</c> 会把阴影层压得很实：真机实测（2560×1600 深色壁纸，
+    /// 窗口摆在 DeskBox 面板同一区域）背景是 <c>#221F1F</c>（纯暗灰，看不出壁纸色），而 DeskBox 的面板是
+    /// <c>#3B2321~#4C2B29</c>（暗，但壁纸的暖色透得出来）。变体矩阵实测：</para>
+    /// <list type="bullet">
+    /// <item><description><c>TintOpacity = 0.8</c>（WinUI 默认，且 TintColor 未设）→ <c>#221F1F</c>，太闷；</description></item>
+    /// <item><description>只把 <c>TintOpacity</c> 调到 0.0 / 0.6（TintColor 仍是默认的透明）→ <c>#AA999A</c> / <c>#A39C9D</c>，
+    /// 透过头 —— 说明**没有颜色的 tint 层等于不存在**，光调不透明度不管用；</description></item>
+    /// <item><description><b><c>TintColor = #202020</c> + <c>TintOpacity = 0.6</c></b> → 与 DeskBox 的 <c>#3B~#4C</c> 同一档。</description></item>
+    /// </list>
+    /// <para>亮度层留在 0.5（WinUI 默认）：Mica 的"壁纸色调"就是这一层，不动它才不至于变成另一种材质。</para>
+    ///
+    /// <para>浅色档**保持 WinUI 默认**：浅色下默认值本身不暗（实测底色 `#F9F1EF`），没有一并调
+    /// （避免顺手改掉没验证过的观感）。</para>
+    /// </summary>
+    private static void ApplyMicaTint(MicaController controller, bool dark)
+    {
+        if (!dark) return;
+        controller.TintColor = Windows.UI.Color.FromArgb(0xFF, 0x20, 0x20, 0x20);
+        controller.TintOpacity = 0.6f;
+        controller.LuminosityOpacity = 0.5f;
     }
 
     /// <summary>
@@ -213,16 +249,9 @@ internal sealed class BackdropHelper : IDisposable
         }
     }
 
-    private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
-    {
-        _configuration.IsInputActive = args.WindowActivationState != WindowActivationState.Deactivated;
-    }
-
     /// <inheritdoc />
     public void Dispose()
     {
-        // 必须解绑：SetMaterial 每次 Bind 都会挂一次，不解绑会随切换次数累积
-        _window.Activated -= OnWindowActivated;
         _mica?.Dispose();
         _mica = null;
         _acrylic?.Dispose();
