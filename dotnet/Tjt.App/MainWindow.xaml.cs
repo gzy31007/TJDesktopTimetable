@@ -83,7 +83,11 @@ public sealed partial class MainWindow : Window
     {
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
-            presenter.IsResizable = true;
+            // 必须是 false：presenter 的 IsResizable 会往 GWL_STYLE 里塞回 WS_THICKFRAME，
+            // 而**有它就有那圈 10px 非客户区框**（真机实测：true → client 比外框小 20px，
+            // false → frame=0,0）。缩放不靠这个样式位 —— 由我们自答 WM_NCHITTEST 触发
+            // 原生缩放循环（见 WindowResize），所以拖边缘照样能缩。
+            presenter.IsResizable = false;
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
             // 关掉标题栏与边框：三个窗口按钮随之消失，窗口剩下纯内容
@@ -119,19 +123,24 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// 让 DWM 用它自己的**深色装饰**画这扇窗口。
     ///
-    /// <para><b>背景（真机采样得出结论）</b>：清掉 <c>WS_THICKFRAME</c> 之后窗口仍保留一圈
-    /// <b>非客户区边框</b>（本机 150% 缩放下约 10px，客户区从 (1272,700) 才开始），
-    /// 而 DWM 默认用**浅色装饰集**画它 —— 挂件是深色圆角卡片，这圈浅色就成了一整条白边
-    /// （实测 <c>#F3F3F3</c>，四个方向都有）。</para>
+    /// <para><b>背景（真机逐像素定位）</b>：挂件四边曾经各有一圈约 10px 的边 —— 先是一条
+    /// `#F3F3F3` 白边，改成"框区当玻璃"后又变成一条 `#2B2B2B` 黑带。用"给内容根铺洋红"的
+    /// 一次性探针量出：那圈**在客户区之外**，XAML 根本碰不到。</para>
     ///
-    /// <para><b>为什么改主题而不是改颜色</b>：对照实验排除了其它三条路 ——
-    /// <c>DWMWA_BORDER_COLOR = NONE</c> 只关掉最外 1~2px 的描边（那圈白边照旧）、
-    /// <c>DwmExtendFrameIntoClientArea(0,0,0,0)</c> 与 <c>DWMWA_NCRENDERING_POLICY = DISABLED</c>
-    /// 都毫无影响；只有把 DWM 的装饰切到深色，非客户区才跟着变深（实测白边消失、
-    /// 挂件本体像素不变）。所以修的是"系统拿浅色画装饰"这个根因，而不是盖一层颜色上去。</para>
+    /// <para><b>根因是 <c>presenter.IsResizable = true</c></b>：WinUI 的
+    /// <c>OverlappedPresenter</c> 会因此往 `GWL_STYLE` 里塞回 `WS_THICKFRAME`，
+    /// 而这个样式位就是那 10px 非客户区框的来源（哪怕我们手动清过样式，presenter 之后又加回去）。
+    /// 真机实测：`IsResizable=true` → `client` 比外框小 20px；`IsResizable=false` → **frame=0,0**。
+    /// 这也正是 DeskBox 的取法（它 `IsResizable/IsMaximizable/IsMinimizable` 全 false，
+    /// 实测它的窗口 `GetClientRect` 与外框完全相等）。</para>
     ///
-    /// <para>挂件随主题走：深色主题 → 深色装饰；浅色主题下这圈本来就是浅色、与内容协调。
-    /// 该属性只影响窗口装饰与系统绘制部分，<b>不影响</b> XAML 内容（渲染层仍按自己的主题画）。</para>
+    /// <para>缩放不受影响：不靠这个样式位，由我们自答 <c>WM_NCHITTEST</c> 触发原生缩放循环
+    /// （见 <see cref="WindowResize"/>），所以 <c>IsResizable = false</c> 之后拖边缘照样能缩。</para>
+    ///
+    /// <para><b>另两件配套（对齐 DeskBox）</b>：<c>DwmExtendFrameIntoClientArea(-1,-1,-1,-1)</c>
+    /// 把框区当玻璃（见 <see cref="ApplyFullWindowFrame"/>）；<c>DWMWA_BORDER_COLOR = NONE</c>
+    /// 关掉系统那 1~2px 描边（见 <see cref="ApplyTransparentBorder"/>）。
+    /// 装饰主题（本方法）只在浅色主题下还有意义 —— 那时系统画的部分要与浅色内容协调。</para>
     /// </summary>
     /// <param name="hwnd">窗口句柄。</param>
     /// <param name="dark">是否让 DWM 走深色装饰。</param>
@@ -149,20 +158,36 @@ public sealed partial class MainWindow : Window
             : $"[window] DWM 装饰主题设置失败 hr=0x{hr:X8}");
 
         ApplyFullWindowFrame(hwnd);
+        ApplyTransparentBorder(hwnd);
+    }
+
+    /// <summary>
+    /// 把 DWM 描边设为透明（<c>DWMWA_BORDER_COLOR = 0xFFFFFFFE</c>），与 DeskBox 的
+    /// <c>ApplyDwmBorderStyle</c> 一致 —— 它自己用 XAML 画边框，系统那 1~2px 描边只会坏事。
+    ///
+    /// <para>配合 <c>IsResizable = false</c>（没有非客户区框）与
+    /// <c>DwmExtendFrameIntoClientArea(-1)</c>（框区当玻璃），窗口四边就是"内容直接压在壁纸上"，
+    /// 既没有白边也没有黑带。真机实测那 2px 就是描边：把它设成洋红，只有这 2px 变洋红。</para>
+    /// </summary>
+    /// <param name="hwnd">窗口句柄。</param>
+    private void ApplyTransparentBorder(nint hwnd)
+    {
+        var color = NativeMethods.Constants.DwmColorNone;
+        var hr = NativeMethods.DwmSetWindowAttribute(
+            hwnd, NativeMethods.Constants.DwmwaBorderColor, ref color, sizeof(uint));
+        AppLog.Line(hr == 0
+            ? "[window] DWMWA_BORDER_COLOR = NONE（透明描边，边框由内容自己画）"
+            : $"[window] DWMWA_BORDER_COLOR 失败 hr=0x{hr:X8}");
     }
 
     /// <summary>
     /// 把系统框整体扩进客户区（<c>DwmExtendFrameIntoClientArea(-1,-1,-1,-1)</c>）。
     ///
-    /// <para><b>这是消掉那圈白边的正解</b>（参照 DeskBox 的
-    /// <c>Win32Helper.ApplyFullWindowFrame</c>，它每次主题变化都跟着
-    /// <c>SetWindowTheme</c> 重发一次）：客户区从此覆盖整个窗口矩形，
-    /// <c>GetClientRect</c> == 外框，**非客户区没有地方可画**，DWM 那圈
-    /// 用主题色画的边框自然不存在。真机实测：外框 1112x802 时客户区从
-    /// 1092x782@(+10,+10) 变成 1112x802@(+0,+0)。</para>
+    /// <para>与 DeskBox 的 <c>Win32Helper.ApplyFullWindowFrame</c> 同参同序（它每次主题变化都
+    /// 跟着 <c>SetWindowTheme</c> 重发一次）：框区从此当玻璃合成，由挂件内容与壁纸叠出来。</para>
     ///
     /// <para>注意别和 <c>(0,0,0,0)</c> 搞混 —— 那是"不扩展"，等于什么都没做
-    /// （上一轮就是这么误判"这个 API 没用"的）。</para>
+    /// （曾经因此误判"这个 API 没用"）。</para>
     /// </summary>
     /// <param name="hwnd">窗口句柄。</param>
     private void ApplyFullWindowFrame(nint hwnd)
@@ -170,7 +195,7 @@ public sealed partial class MainWindow : Window
         var margins = new NativeMethods.Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
         var hr = NativeMethods.DwmExtendFrameIntoClientArea(hwnd, ref margins);
         AppLog.Line(hr == 0
-            ? "[window] 已把系统框扩进客户区（DwmExtendFrameIntoClientArea -1）：非客户区不再有白边可画"
+            ? "[window] 已把系统框扩进客户区（DwmExtendFrameIntoClientArea -1）"
             : $"[window] DwmExtendFrameIntoClientArea 失败 hr=0x{hr:X8}");
     }
 

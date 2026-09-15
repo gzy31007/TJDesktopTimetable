@@ -226,28 +226,29 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     （可见边缘出缩放光标、窗口跟手、松手后位置尺寸落盘）。也就是"按住边缘拖"这一步
     **不再需要每轮重验** —— 遇到"边缘抓不住"的回归时，先跑 `verify-resize.ps1` 定位是
     命中测试断了还是原生循环没起来，别一上来就改代码。
-- **客户区外那圈白边 = 非客户区框；根因是没做 `DwmExtendFrameIntoClientArea(-1)`（2026-09-15 结案）**：
-  - **症状**：挂件四周（含顶部）有一圈 1~2px 亮边，深色卡片压在暗壁纸上很明显。
-  - **真相**：清掉 `WS_THICKFRAME` 之后窗口仍保留一圈**非客户区边框**（本机 150% 缩放实测
-    10px：外框 1112x802@(1262,690)、客户区 1092x782@(1272,700)），DWM 会**用主题色画它** ——
-    浅色主题下就是一条 `#F3F3F3` 的白边。放大截图里那块白是 DWM 的圆角框形状，
-    挂件本体（`#281D1B`）是它内部的圆角矩形。
-  - **正解**：`ApplyFullWindowFrame(hwnd)` 调
-    **`DwmExtendFrameIntoClientArea(hwnd, (-1,-1,-1,-1))`** —— "sheet of glass"，把系统框整体
-    扩进客户区，那圈非客户区变成玻璃、由挂件内容与壁纸合成，白边消失（真机实测：边缘 3px
-    环带内白色像素 **0.0%**）。
-  - **⚠️ 别把 `-1` 和 `(0,0,0,0)` 搞混**：`(0,0,0,0)` 是"**不扩展**"，等于什么都没做 ——
-    上一轮就是这么误判"这个 API 没用"的（真凶是自己发错了参数）。
-  - **DeskBox 为什么没有这层边**：它**每个窗口**都调这个（`Win32Helper.ApplyFullWindowFrame`，
-    全文唯一的 `DwmExtendFrameIntoClientArea` 调用点，传的就是 `-1`），并且在
-    `WidgetWindowBase.Backdrop` 里跟 `SetWindowTheme` 一起、在主题真正变化时重发。
-    它是在 Win10 上跑的产品，`-1` 这条路径比 Win11 的 DWM 属性更兼容 —— 这正是它稳的原因。
-  - **它另外还做了两件**（我们已对齐）：`SetWindowTheme(hwnd, isDark)` →
-    `DWMWA_USE_IMMERSIVE_DARK_MODE`（让 DWM 用深色装饰，和我们的
-    `ApplyWindowDecorationTheme` 等价）；`DWMWA_BORDER_COLOR = 0xFFFFFFFE`（透明描边，
-    因为它自己用 XAML 画边框）。这三件都在主题变化时重发。
-  - **别用半透明色块去"盖"这圈边**：透视壁纸效果是刻意为之（真实投影），
-    而且盖不住非客户区。
+- **挂件四边那 10px 非客户区框（白边 → 黑带）——根因是 `presenter.IsResizable = true`（2026-09-15 结案）**：
+  - **症状两连**：先是一圈 `#F3F3F3` **白边**；把框区改成"当玻璃"后又变成一条 `#2B2B2B` **黑带**。
+    两种都不是渲染层画的 —— 用一次性探针（给 `BoardRenderer` 的内容根铺洋红）量出：
+    那圈在**客户区之外**，XAML 碰不到它。
+  - **根因**：`OverlappedPresenter.IsResizable = true` 会让 WinUI 把 **`WS_THICKFRAME` 塞回
+    `GWL_STYLE`**（我们手动清过也没用，presenter 之后又加回去），而这个样式位正是那 10px
+    非客户区框的来源。真机实测同一版代码只改这一个值：
+    - `true` → `outer=1282x814 / client=1262x794`（frame=10,10，四边一圈框）；
+    - `false` → **`outer` 与 `client` 完全相等（frame=0,0）**，内容直接压到窗口边缘。
+  - **正解 = 三件一起**（DeskBox 的取法，实测它的窗口就是 `frame=0,0`、style `0x14080000`）：
+    1. `presenter.IsResizable = false`（它 `IsResizable/IsMaximizable/IsMinimizable` 全 false）；
+    2. `DwmExtendFrameIntoClientArea(hwnd, (-1,-1,-1,-1))` —— "sheet of glass"；
+    3. `DWMWA_BORDER_COLOR = 0xFFFFFFFE` —— 透明描边（它自己用 XAML 画边框）。
+    三者都在主题变化时重发（DeskBox 是在 `WidgetWindowBase.Backdrop` 里按主题签名重发）。
+  - **缩放不受影响**：不靠 `WS_THICKFRAME`，靠我们自答 `WM_NCHITTEST` 触发原生缩放循环
+    （见上面"缩放"条目）。实测 `IsResizable=false` 之后四边四角命中码照旧全中，
+    而且尺寸落盘**不再需要边框校正**（`correction=0,0`，`delta 0x0`）—— 因为客户区就是外框。
+  - **⚠️ 别把 `DwmExtendFrameIntoClientArea` 的 `-1` 和 `(0,0,0,0)` 搞混**：`(0,0,0,0)` 是
+    "**不扩展**"，等于什么都没做（曾经因此误判"这个 API 没用"）。`-1` 才是扩展。
+  - **诊断手法（值得复用）**：给内容根铺一层洋红（`root.Background = Magenta`）跑一次，
+    就能一刀切开"这层像素是内容画的还是窗口装饰画的"；再配合"只改一个变量"的变体矩阵
+    （`--border-color` / `--corner` 这类临时 CLI），两次测量就能锁定根因，
+    比读文档猜快得多。**测完把探针和诊断开关删掉**。
 - **贴桌面常驻（2026-09-15 完成）**：默认就是贴桌面层（`settings.DesktopLayer` 默认 true，
   CLI 用 `--desktop-layer` / `--no-desktop-layer` 覆盖）。移植自 Electron 那套已验收的编排，
   文件与职责一一对应：`Win32/Layer.cs`（编排）、`Win32/Resting.cs`（z-order 原语）、
