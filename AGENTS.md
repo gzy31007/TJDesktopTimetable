@@ -174,6 +174,13 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
   - `-RunSmoke -NoBackdrop`：跳过材质 → `[backdrop] skipped`；
   两者都产出 `[smoke] ok blocks=19 canvas=977x600`，`-DesktopLayer` 额外验证
   `[desktop-layer] attach=ok owner=0x...` 与 `send-to-bottom=ok`。
+- **手动启动（双击即可）**：`.tools/make-launchers.ps1` 会在 `C:\tjt-tools\` 生成三个 `.cmd`：
+  `TjtApp.cmd`（普通窗口）、`TjtApp-desktop.cmd`（贴桌面层）、`TjtApp-nobackdrop.cmd`（跳过材质）。
+  它们做两件必须的事：设 `DOTNET_ROOT=C:\tjt-tools\dotnet`、在**真实 Windows 路径**上启动 exe。
+  **不要直接双击 `Tjt.App.exe`**：找不到私有目录里的运行时，会弹 "You must install or update .NET"；
+  **也不要从 `\\wsl.localhost\...` 运行**（UNC 路径不可靠，见全局 AGENTS.md）。
+  日志写在 `C:\tjt-tools\app-launch.log`。改完代码先跑 `build-winui.ps1` 再启动，
+  否则跑的还是上一次 `C:\tjt-tools\work` 里的旧产物。
 - **应用自己写日志文件**（`--log <path>`，见 `AppLog.cs`）：本地 `Start-Process` 重定向 stdout 能拿到输出，
   但 GUI 子系统进程在别的宿主下可能拿不到 —— 文件通道是唯一可靠的，且**进程被强杀也保留最后阶段**。
   自检另有 45 秒看门狗（超时即打印最后阶段并非零退出），避免 CI/脚本悬着。
