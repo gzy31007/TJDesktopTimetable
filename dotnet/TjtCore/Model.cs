@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Tjt.Core;
 
 /// <summary>
@@ -56,6 +58,8 @@ public sealed record Term(
     IReadOnlyList<Slot> Slots,
     string? StartDate = null)
 {
+    /// <summary>人类可读的学期标签（TS 侧没有这个字段，落盘时忽略它，保持两端文件同形）。</summary>
+    [JsonIgnore]
     public string Label => string.IsNullOrEmpty(Name) ? $"{Year}-{Year + 1}学年第{TermNo}学期" : Name;
 
     public string SlotBegin(int index) => Slots.FirstOrDefault(s => s.Index == index)?.Begin ?? string.Empty;
