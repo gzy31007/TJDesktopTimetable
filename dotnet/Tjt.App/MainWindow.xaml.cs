@@ -596,6 +596,7 @@ public sealed partial class MainWindow : Window
             var next = _settings with { DesktopLayer = !_settings.DesktopLayer };
             ApplySettings(next);
         },
+        ReportResizeGrip = grip => _edgeResize?.NotePressedGrip(grip),
         Hide = HideWidget,
         Exit = () => Application.Current.Exit(),
         AttachDragArea = AttachDragArea,

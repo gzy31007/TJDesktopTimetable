@@ -51,6 +51,12 @@ internal sealed class WindowEdgeResize
 
     private bool _resizing;
     private ResizeGrip _grip = ResizeGrip.None;
+
+    /// <summary>
+    /// 渲染层边缘热区在 <c>PointerPressed</c> 时报告的方向（按下元素自己知道是不是角）。
+    /// 起拖时优先用它 —— 比"轮询从坐标反推"更准（角上不会退化成单轴）也更及时（不用等下一拍）。
+    /// </summary>
+    private ResizeGrip _pressedGrip = ResizeGrip.None;
     private NativeMethods.Point _originCursor;
     private WindowBounds _originWindow = new(0, 0, 0, 0);
     private int _ticks;
@@ -83,6 +89,12 @@ internal sealed class WindowEdgeResize
         return new WindowEdgeResize(hwnd, resolve, onStart, onEnd);
     }
 
+    /// <summary>
+    /// 渲染层报告"用户按下的热区方向"。由边缘热区的 <c>PointerPressed</c> 调用。
+    /// </summary>
+    /// <param name="grip">按下的是哪条边/哪个角。</param>
+    public void NotePressedGrip(ResizeGrip grip) => _pressedGrip = grip;
+
     /// <summary>左键当前是否按着（收尾判据）。</summary>
     private static bool IsLeftButtonDown() =>
         (NativeMethods.GetAsyncKeyState(NativeMethods.VkLButton) & 0x8000) != 0;
@@ -109,7 +121,15 @@ internal sealed class WindowEdgeResize
                 }
             }
 
-            if (grip != ResizeGrip.None && IsLeftButtonDown()) Begin(cursor, grip);
+            // 用户可能"快速移到边上立刻按下"——那时轮询还没把 _grip 更新到新的区域，
+            // 但渲染层已经报来了真实方向，用它补齐（并顺手把 _grip 纠正过来）。
+            var pressed = _pressedGrip;
+            var effective = pressed != ResizeGrip.None ? pressed : grip;
+            if (effective != ResizeGrip.None && IsLeftButtonDown())
+            {
+                _grip = effective;
+                Begin(cursor, effective);
+            }
             return;
         }
 
@@ -154,6 +174,7 @@ internal sealed class WindowEdgeResize
             rect.Bottom - rect.Top);
         _originCursor = cursor;
         _resizing = true;
+        _pressedGrip = ResizeGrip.None;
         _ticks = 0;
         AppLog.Line($"[resize] 开始缩放 grip={grip} origin=({_originWindow.X},{_originWindow.Y} {_originWindow.Width}x{_originWindow.Height}) cursor=({cursor.X},{cursor.Y})");
         _onStart();

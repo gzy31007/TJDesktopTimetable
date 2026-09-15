@@ -102,33 +102,63 @@ public class ResizePolicyTests
     }
 
     [Fact]
-    public void 边缘光标条覆盖四条边且与抓取带同宽()
+    public void 热区给出八块_四边中点加四角()
     {
         var zones = CursorZones.ForWindow(1000, 700);
 
-        Assert.Equal(4, zones.Count);
-        // 宽度口径与抓取带一致：能拖到的范围 = 显示缩放光标的范围
-        Assert.All(zones, z => Assert.True(z.Width == ResizePolicy.BorderWidth || z.Height == ResizePolicy.BorderWidth));
-        // 左/右条竖着铺满，上/下条横着铺满
-        Assert.Contains(zones, z => z.Grip == ResizeGrip.Left && z.X == 0 && z.Height == 700);
+        Assert.Equal(8, zones.Count);
+        foreach (var grip in new[]
+        {
+            ResizeGrip.Left, ResizeGrip.Right, ResizeGrip.Top, ResizeGrip.Bottom,
+            ResizeGrip.TopLeft, ResizeGrip.TopRight, ResizeGrip.BottomLeft, ResizeGrip.BottomRight,
+        })
+        {
+            Assert.Contains(zones, z => z.Grip == grip);
+        }
+
+        // 左右带 8 宽、铺满高度（不含上下带）；上下带铺满宽度
+        Assert.Contains(zones, z => z.Grip == ResizeGrip.Left && z.X == 0 && z.Width == CursorZones.Band);
         Assert.Contains(zones, z => z.Grip == ResizeGrip.Right && z.X + z.Width == 1000);
-        Assert.Contains(zones, z => z.Grip == ResizeGrip.Top && z.Y == 0 && z.Width == 1000);
         Assert.Contains(zones, z => z.Grip == ResizeGrip.Bottom && z.Y + z.Height == 700);
     }
 
     [Fact]
-    public void 极小窗口不产生负尺寸的光标条()
+    public void 顶部热区只留四像素_给标题栏拖动区让位()
     {
-        var zones = CursorZones.ForWindow(3, 2, band: 6);
-        Assert.Equal(4, zones.Count);
-        Assert.All(zones, z =>
+        // DeskBox 的做法：上边带只有 4px，其余让给标题栏拖动
+        var top = CursorZones.ForWindow(1000, 700).Where(z => z.Y == 0).ToList();
+        Assert.NotEmpty(top);
+        Assert.All(top, z => Assert.Equal(CursorZones.TopBand, z.Height));
+        Assert.True(CursorZones.TopBand < CursorZones.Band);
+    }
+
+    [Fact]
+    public void 四角是独立热区_不与边重叠()
+    {
+        var zones = CursorZones.ForWindow(1000, 700);
+
+        // 关键回归：角与边**不重叠** —— 否则角会被边盖住，退化成单轴缩放
+        // （真机验收"没有边角的缩放"就是这个原因）。
+        foreach (var a in zones)
         {
-            Assert.True(z.Width > 0 && z.Height > 0);
-            Assert.True(z.Width <= 3 && z.Height <= 2);
-        });
+            foreach (var b in zones)
+            {
+                if (ReferenceEquals(a, b)) continue;
+                var overlapX = Math.Min(a.X + a.Width, b.X + b.Width) - Math.Max(a.X, b.X);
+                var overlapY = Math.Min(a.Y + a.Height, b.Y + b.Height) - Math.Max(a.Y, b.Y);
+                Assert.False(overlapX > 0.001 && overlapY > 0.001, $"{a.Grip} 与 {b.Grip} 重叠");
+            }
+        }
+    }
+
+    [Fact]
+    public void 极小窗口不产生负尺寸热区()
+    {
+        var zones = CursorZones.ForWindow(12, 12);
+        Assert.All(zones, z => Assert.True(z.Width > 0 && z.Height > 0));
 
         Assert.Empty(CursorZones.ForWindow(0, 700));
-        Assert.Empty(CursorZones.ForWindow(1000, 700, band: 0));
+        Assert.Empty(CursorZones.ForWindow(1000, 0));
     }
 
     [Fact]

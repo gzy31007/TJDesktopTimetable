@@ -1,57 +1,73 @@
 namespace Tjt.Widget;
 
 /// <summary>
-/// 边缘光标条 —— **纯计算，零依赖**（与 <see cref="ResizePolicy"/> 同层，可在 Linux 上单测）。
+/// 边缘缩放热区 —— **纯计算，零依赖**（与 <see cref="ResizePolicy"/> 同层，可在 Linux 上单测）。
 ///
-/// <para><b>为什么光标要放到 XAML 层而不是 Win32</b>：真机验收连续两轮"能缩放但看不到缩放光标"。
-/// 原因链是这样的：窗口过程每次鼠标移动都会在 <c>WM_SETCURSOR</c> 里用**类光标**重置光标，
-/// 而渲染层的子窗口又会把这条消息截走（实测 <c>WM_SETCURSOR</c> 到我们窗口过程的次数是 0）——
-/// 于是从 Win32 侧设的光标总在别人的重设之后，赢不了。</para>
+/// <para><b>为什么要有独立的四角</b>：只有"左右条 + 上下条"时，四角被其中一条盖住，
+/// 只能单方向缩放 —— 真机验收就是"没有边角的缩放"。角必须是自己的一块区域，
+/// 才能同时改宽和高。</para>
 ///
-/// <para>改用 WinUI 的 <c>UIElement.ProtectedCursor</c>：光标由渲染层自己挂在元素上，
-/// 鼠标进入哪个元素就显示哪个光标，绕开了"谁最后 SetCursor"的竞争。</para>
+/// <para><b>尺寸口径对齐 DeskBox</b>（`.refs/DeskBox/Views/ContentWidgetWindow.xaml` 的 3×3 网格）：
+/// 左右带 8px、上下带 8px、四角 8×8，但**顶部只留 4px** —— 那 4px 是给标题栏拖动区让位的，
+/// 免得"贴着最上沿按下去"变成缩放而不是拖窗口（我们上一版正因为顶带 6px 而抢了拖动）。</para>
 ///
-/// <para>这一层只负责算"该在哪些矩形上挂哪种光标"；把矩形摆到 XAML 上由外壳做
+/// <para>这一层只算热区与朝向；把热区摆到 XAML 上、挂光标、报方向由外壳做
 /// （与 <see cref="BoardVisual"/> 的分工一致）。</para>
 /// </summary>
 public static class CursorZones
 {
-    /// <summary>一条边缘光标条：矩形（DIP，相对窗口左上角）+ 该条的光标朝向。</summary>
+    /// <summary>左右与下方热区宽度（DIP），对齐 DeskBox 的 8。</summary>
+    public const double Band = 8;
+
+    /// <summary>上方热区高度（DIP）：只留 4，其余让给顶部条的拖动区。</summary>
+    public const double TopBand = 4;
+
+    /// <summary>一条热区：矩形（DIP，相对窗口左上角）+ 它对应的缩放方向。</summary>
     /// <param name="X">左。</param>
     /// <param name="Y">上。</param>
     /// <param name="Width">宽。</param>
     /// <param name="Height">高。</param>
-    /// <param name="Grip">这条用的是哪种缩放光标。</param>
+    /// <param name="Grip">按在这块区域上代表缩放哪个方向（四角即斜向）。</param>
     public sealed record Zone(double X, double Y, double Width, double Height, ResizeGrip Grip);
 
     /// <summary>
-    /// 按窗口尺寸算出四条边缘光标条（左/右/上/下）。
+    /// 按窗口尺寸算出八块热区（四边中点 + 四角）。
     ///
-    /// <para>宽度/高度就是 <see cref="ResizePolicy.BorderWidth"/>（DIP）—— 与抓取带同一口径，
-    /// 保证"能拖到的范围"与"显示缩放光标的范围"完全一致。</para>
-    ///
-    /// <para>四个角不单独出条：左条覆盖窗口全高、上条覆盖窗口全宽，它们的**交叠处**
-    /// 由 XAML 的 z 序决定谁在上（先加左/右、后加上/下 → 角上是水平拉伸）。
-    /// 这不追求与 <see cref="ResizePolicy.HitTest"/> 的角落判定逐像素一致：
-    /// 视觉上角部本来就是斜向，差几个像素察觉不到，而拖拽判定仍以策略层为准。</para>
+    /// <para>布局与 DeskBox 的 3×3 网格等价：左右带铺满高、上下带铺满宽、四角 8×8 独立，
+    /// 但它们**不重叠**（角从带里让出去），所以"按在角上"只会命中角那一条，
+    /// 方向不会退化成单轴。</para>
     /// </summary>
     /// <param name="width">窗口宽（DIP）。</param>
     /// <param name="height">窗口高（DIP）。</param>
-    /// <param name="band">光标条宽度（DIP）。</param>
-    public static IReadOnlyList<Zone> ForWindow(double width, double height, double band = ResizePolicy.BorderWidth)
+    public static IReadOnlyList<Zone> ForWindow(double width, double height)
     {
-        if (width <= 0 || height <= 0 || band <= 0) return [];
+        if (width <= 0 || height <= 0) return [];
 
-        // 条不能比窗口还长（极小窗口时夹住，避免负宽高的元素）
-        var w = Math.Min(band, width);
-        var h = Math.Min(band, height);
+        // 带不能超过窗口本身（极小窗口时夹住，避免负宽高的元素）
+        var hb = Math.Min(Band, width / 2);          // 左右带
+        var vb = Math.Min(Band, height / 2);         // 下方带
+        var tb = Math.Min(TopBand, height / 2);      // 上方带
+        var cw = Math.Min(Band, width / 2 - hb / 2); // 角宽
+        var ch = Math.Min(Band, height / 2 - vb / 2); // 角高
+        if (cw <= 0 || ch <= 0) return [];
+
+        var midW = width - (2 * hb);
+        var midH = height - tb - vb;
+        if (midW <= 0 || midH <= 0) return [];
 
         return
         [
-            new Zone(0, 0, w, height, ResizeGrip.Left),
-            new Zone(width - w, 0, w, height, ResizeGrip.Right),
-            new Zone(0, 0, width, h, ResizeGrip.Top),
-            new Zone(0, height - h, width, h, ResizeGrip.Bottom),
+            // 顶部只到 tb，角高与它对齐（角也只用 tb，免得盖住拖动区）
+            new Zone(0, 0, cw, tb, ResizeGrip.TopLeft),
+            new Zone(hb, 0, midW, tb, ResizeGrip.Top),
+            new Zone(width - cw, 0, cw, tb, ResizeGrip.TopRight),
+
+            new Zone(0, tb, hb, midH, ResizeGrip.Left),
+            new Zone(width - hb, tb, hb, midH, ResizeGrip.Right),
+
+            new Zone(0, height - ch, cw, ch, ResizeGrip.BottomLeft),
+            new Zone(hb, height - vb, midW, vb, ResizeGrip.Bottom),
+            new Zone(width - cw, height - ch, cw, ch, ResizeGrip.BottomRight),
         ];
     }
 }

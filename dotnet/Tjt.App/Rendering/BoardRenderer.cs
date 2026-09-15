@@ -47,26 +47,6 @@ internal static class BoardRenderer
         Grid.SetRow(header, 0);
         root.Children.Add(header);
 
-        // 边缘光标条：贴在网格之上、四条边的内侧。用 WinUI 原生光标
-        // （UIElement.ProtectedCursor）而不是 Win32 SetCursor —— 后者会被窗口过程/渲染层
-        // 在 WM_SETCURSOR 里按类光标重置（真机实测"能缩放但看不到缩放光标"）。
-        // 只挂光标、不放事件处理：拖拽判定仍在 Win32 侧（WindowEdgeResize）。
-        foreach (var zone in CursorZones.ForWindow(visual.CanvasWidth, visual.CanvasHeight))
-        {
-            var strip = new CursorStrip(CursorFor(zone.Grip))
-            {
-                Width = zone.Width,
-                Height = zone.Height,
-                HorizontalAlignment = zone.X <= 0 ? HorizontalAlignment.Left : HorizontalAlignment.Right,
-                VerticalAlignment = zone.Y <= 0 ? VerticalAlignment.Top : VerticalAlignment.Bottom,
-            };
-            // **必须显式放进 Star 行（row 1）**：默认落在 row 0（Auto 行），Auto 行为了容纳
-            // "底部对齐的下条"会被迫长到整窗高，把 Star 行挤成几十像素 —— 表现为
-            // 头部条被推到下方、上面一大片空白（真机逐子元素探针实测：row0 长到 606）。
-            Grid.SetRow(strip, 1);
-            root.Children.Add(strip);
-        }
-
         var canvas = BuildCanvas(visual, dark);
         // 网格可能比可用空间大（列宽或行高到了下限）—— 用 ScrollViewer 兜住，
         // 与渲染层 `.f-scroll` 的表现一致；装得下时滚动条不会出现。
@@ -96,15 +76,26 @@ internal static class BoardRenderer
         shell.Children.Add(root);
 
         var overlay = new Grid { IsHitTestVisible = true };
-        foreach (var zone in CursorZones.ForWindow(visual.CanvasWidth, visual.CanvasHeight))
+        var totalW = visual.CanvasWidth;
+        var totalH = visual.CanvasHeight;
+        foreach (var zone in CursorZones.ForWindow(totalW, totalH))
         {
-            overlay.Children.Add(new CursorStrip(CursorFor(zone.Grip))
-            {
-                Width = zone.Width,
-                Height = zone.Height,
-                HorizontalAlignment = zone.X <= 0 ? HorizontalAlignment.Left : HorizontalAlignment.Right,
-                VerticalAlignment = zone.Y <= 0 ? VerticalAlignment.Top : VerticalAlignment.Bottom,
-            });
+            // 用四边对齐 + Margin 精确定位：每块热区都是"贴哪两条边、离另一条边多远"。
+            // 这样不依赖父容器的行/列定义，也就不会再出现"元素落到错误行把布局撑坏"那类问题
+            // （本轮真的踩过：元素默认落 row 0，把 Auto 行撑到整窗高）。
+            var strip = new CursorStrip(zone, actions.ReportResizeGrip);
+            var left = zone.X;
+            var top = zone.Y;
+            var right = totalW - (zone.X + zone.Width);
+            var bottom = totalH - (zone.Y + zone.Height);
+            strip.HorizontalAlignment = left <= right ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+            strip.VerticalAlignment = top <= bottom ? VerticalAlignment.Top : VerticalAlignment.Bottom;
+            strip.Margin = new Thickness(
+                left <= right ? left : right,
+                top <= bottom ? top : bottom,
+                0,
+                0);
+            overlay.Children.Add(strip);
         }
 
         shell.Children.Add(overlay);
@@ -289,16 +280,6 @@ internal static class BoardRenderer
         button.Flyout = flyout;
         return button;
     }
-
-    /// <summary>边缘光标条用的光标类型（<c>InputSystemCursorShape</c>，WinUI 自带、任意 DPI 都清晰）。</summary>
-    /// <param name="grip">抓取边。</param>
-    private static InputSystemCursorShape CursorFor(ResizeGrip grip) => grip switch
-    {
-        ResizeGrip.Left or ResizeGrip.Right => InputSystemCursorShape.SizeWestEast,
-        ResizeGrip.Top or ResizeGrip.Bottom => InputSystemCursorShape.SizeNorthSouth,
-        ResizeGrip.TopLeft or ResizeGrip.BottomRight => InputSystemCursorShape.SizeNorthwestSoutheast,
-        _ => InputSystemCursorShape.SizeNortheastSouthwest,
-    };
 
     /// <summary>网格画布（尺寸已由呈现模型算好，单位 DIP）。</summary>
     private static Canvas BuildCanvas(BoardVisual visual, bool dark)

@@ -33,4 +33,13 @@ public sealed record WidgetActions
     /// 把顶部条注册成窗口拖动区（系统标题栏已被移除，拖动由 <c>WindowDrag</c> 自实现）。
     /// </summary>
     public Action<Microsoft.UI.Xaml.FrameworkElement>? AttachDragArea { get; init; }
+
+    /// <summary>
+    /// 报告"用户按下的正是哪条缩放边/哪个角"（由边缘光标条的 <c>PointerPressed</c> 触发）。
+    ///
+    /// <para>为什么由渲染层报告而不是外壳自己重新判定：边/角是**元素**，按下时元素自己是确定的
+    /// （`TopLeft` 就是 `TopLeft`）；外壳的轮询只能从光标坐标反推，而坐标反推在角上要靠
+    /// "先角后边"的分支才勉强对，且按下与轮询之间还有一拍延迟。让按下元素直接说，最准也最快。</para>
+    /// </summary>
+    public Action<Tjt.Widget.ResizeGrip>? ReportResizeGrip { get; init; }
 }

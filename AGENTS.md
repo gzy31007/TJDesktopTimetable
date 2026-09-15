@@ -221,8 +221,19 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     `BoardRenderer` 用 `CursorStrip`（继承 `Grid`，因为 WinUI 3 的 `Border` 是 **sealed**
     而 `ProtectedCursor` 是 **protected**）挂 `InputSystemCursor`。光标由框架按元素算，
     不参与"谁最后 SetCursor"的竞争。Win32 侧只留判定与搬窗口。
-  - 抓取带仍是 6px、仍用**内缩矩形**判边（`x < left + band`，
-    不是 `x - left < band`，后者会把窗口左侧外面整片桌面算成抓取带 —— 有单测钉住）。
+  - **热区几何对齐 DeskBox（2026-09-15 三次修正）**：原先只有"左右 + 上下"四条带，
+    结果真机反馈**"没有边角的缩放"** —— 四角被其中一条带盖住，按下去只能单轴缩放。
+    现在照 DeskBox 的 3×3 网格改成**八块热区（四边中点 + 四角）**：
+    左右带 8px、下方带 8px、四角 8×8，但**顶部只留 4px**（那 4px 让给顶部条拖动 ——
+    DeskBox 的 `RowDefinition Height="4"` 就是这个意思）。
+    - 八块**互不重叠**（有单测钉住）：角被边盖住就退化成单轴，这是本轮的正因。
+    - 定位改用**四边对齐 + `Margin`**，不用父容器的行列 —— 从根上避免"元素落错行把布局撑坏"。
+  - **方向由按下元素直接报告**：热区在 `PointerPressed` 里把 `ResizeGrip` 通过
+    `WidgetActions.ReportResizeGrip` 报给外壳（`WindowEdgeResize.NotePressedGrip`），
+    起拖时优先用它。理由：**元素自己知道"按在角上"**，而外壳靠坐标反推在角上要靠分支勉强对；
+    而且用户"移到边上立刻按下"时轮询还没更新，报告能补齐这一拍（顺带解决"不灵敏"的一半）。
+  - 判定仍以 `ResizePolicy.HitTest` 为准（内缩矩形：`x < left + band`，不是 `x - left < band`，
+    后者会把窗口左侧外面整片桌面算成抓取带 —— 有单测钉住），报告只用于"按下那一刻的方向"。
   - **⚠️ 光标条必须显式 `Grid.SetRow(strip, 1)`**：`BoardRenderer` 的内容根是两行 Grid
     （row 0 = Auto 头部条，row 1 = Star 滚动区），子元素**默认落在 row 0**。
     把"底部对齐的下光标条"放进 Auto 行，Auto 行为了容纳它会被迫长到整窗高
