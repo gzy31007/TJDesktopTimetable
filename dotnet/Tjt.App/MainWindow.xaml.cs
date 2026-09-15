@@ -40,6 +40,10 @@ public sealed partial class MainWindow : Window
 
     private LoadedTimetable? _loaded;
     private AppStartupOptions _options = new();
+    private WidgetSettings _settings = new();
+    private DesktopLayer? _layer;
+    private WindowBounds _targetBounds = new(0, 0, DefaultWidth, DefaultHeight);
+    private bool _userSizedRecently;
     private BackdropHelper? _backdrop;
     private FrameworkElement? _root;
     private double _dpiScale = 1.0;
@@ -92,10 +96,11 @@ public sealed partial class MainWindow : Window
 
         _options = startup;
         _loaded = loaded;
+        _settings = SettingsStore.Load();
 
         // 1) 材质：窗口创建后尽早设置
         AppLog.Line("[stage] window-created");
-        if (startup.NoBackdrop)
+        if (startup.NoBackdrop || _settings.NoBackdrop)
         {
             AppLog.Line("[backdrop] skipped (--no-backdrop)");
         }
@@ -118,8 +123,15 @@ public sealed partial class MainWindow : Window
         Render("首次布局");
         AppLog.Line("[stage] canvas-rendered");
 
-        // 4) 默认贴右下角（用户自己拖过之后就该由 settings 决定，那部分还没做）
-        PlaceBottomRight();
+        // 4) 位置：优先恢复上次保存的；没有（或已经不在可见工作区）才落到右下角
+        var restored = RestoreSavedBounds();
+        if (!restored) PlaceBottomRight();
+
+        // 5) 贴桌面层（owner 挂 SHELLDLL_DefView）+ 5 秒 owner 巡检 + 事件通道
+        var desktopLayer = startup.DesktopLayer ?? _settings.DesktopLayer;
+        _layer = DesktopLayer.Attach(this, desktopLayer);
+        InstallWindowHooks();
+        SaveBounds("启动");
 
         _nowTimer.Start();
         AppLog.Line($"[layout] canvas={Layout!.CanvasWidth:0}x{Layout.CanvasHeight:0}dip rowH={Layout.RowHeight:0.#} scroll={Layout.NeedsScroll} blocks={Layout.Blocks} header=\"{Layout.HeaderText}\"");
@@ -136,6 +148,13 @@ public sealed partial class MainWindow : Window
     internal void Teardown()
     {
         _nowTimer.Stop();
+        if (_layer is not null)
+        {
+            SaveBounds("退出");
+            _layer.Detach();
+            _layer = null;
+        }
+
         _backdrop?.Dispose();
         _backdrop = null;
     }
@@ -193,6 +212,163 @@ public sealed partial class MainWindow : Window
 
     /// <summary>窗口尺寸变化 → 重排（带一点去抖，拖动缩放时不必每帧都重建）。</summary>
     private void OnSizeChanged(object sender, WindowSizeChangedEventArgs args) => Render("窗口尺寸变化");
+
+    /// <summary>
+    /// 订阅三类窗口消息，把"用户开始拖动"、"拖动结束"、"窗口失活"变成事件。
+    ///
+    /// 拖动期间**必须暂停 owner 巡检**：巡检会在拖动中途重挂 owner、和拖动抢 z-order
+    /// （Electron 侧的老实现正是栽在这里）。
+    /// </summary>
+    private void InstallWindowHooks()
+    {
+        var hwnd = WindowNative.GetWindowHandle(this);
+        MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmEnterSizeMove, () =>
+        {
+            AppLog.Line("[layer] 开始拖动/缩放 → 暂停巡检并临时浮起");
+            _layer?.SuspendForInteraction("enter-size-move");
+        });
+        MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmExitSizeMove, () =>
+        {
+            // 先把新位置写盘，再落点：落点可能改变 z-order，但不改坐标。
+            // 标记"用户调过" → SaveBounds 会存实测外框（他想要的就是当前这个尺寸）。
+            _userSizedRecently = true;
+            SaveBounds("拖动结束");
+            _layer?.ResumeAfterInteraction("exit-size-move");
+        });
+        MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmActivate, () =>
+        {
+            // 窗口失活（用户点到别处）也是一次"位置可能变了"的信号，顺便持久化
+            SaveBounds("失活");
+        });
+    }
+
+    /// <summary>
+    /// 恢复上次保存的位置与尺寸。
+    ///
+    /// 校验两件事：尺寸可用、且**至少有一部分落在某个显示器的工作区内**
+    /// —— 否则拔掉外接屏之后挂件会恢复到看不见的地方。
+    /// </summary>
+    private bool RestoreSavedBounds()
+    {
+        if (_settings.Bounds is not { } bounds || !bounds.IsUsable)
+        {
+            return false;
+        }
+
+        // 保存的是外框：换算成 ResizeClient 需要的客户区（首帧没有校正值时先按外框试一次，
+        // 随后由 SaveBounds 实测出来的 FrameCorrection 收敛）。
+        var correction = _settings.FrameCorrection ?? new WindowBounds(0, 0, 15, 45);
+        var clientWidth = Math.Max(320, bounds.Width - correction.Width);
+        var clientHeight = Math.Max(240, bounds.Height - correction.Height);
+
+        AppWindow.Move(new PointInt32(
+            (int)Math.Ceiling(bounds.X * _dpiScale),
+            (int)Math.Ceiling(bounds.Y * _dpiScale)));
+        AppWindow.ResizeClient(new SizeInt32(
+            (int)Math.Ceiling(clientWidth * _dpiScale),
+            (int)Math.Ceiling(clientHeight * _dpiScale)));
+
+        _targetBounds = bounds;
+
+        if (!IsVisibleOnSomeDisplay(bounds))
+        {
+            return false;
+        }
+
+        AppLog.Line($"[window] 已恢复上次位置 bounds={bounds} correction={correction} → client={clientWidth}x{clientHeight}dip");
+        return true;
+    }
+
+    /// <summary>
+    /// 保存的位置是否还看得见（至少左上角落在某个显示器上）。
+    ///
+    /// 不需要枚举所有显示器：<see cref="DisplayArea.GetFromPoint"/> 在"该点不在任何显示器上"时
+    /// 会返回 <see cref="DisplayAreaFallback.Primary"/>，据此就能判定。WASDK 1.8 **没有**
+    /// <c>DisplayArea.FindAll()</c>，而构造 <c>DisplayId</c> 的投影类型也不稳（真机实测两次编译错），
+    /// 所以走这条更简单也更稳的路。
+    /// </summary>
+    private bool IsVisibleOnSomeDisplay(WindowBounds bounds)
+    {
+        // 左上角往内收一点：贴边摆放时 (x, y) 可能刚好在边界外半个像素
+        var x = bounds.X + 8;
+        var y = bounds.Y + 8;
+        var area = DisplayArea.GetFromPoint(new PointInt32(x, y), DisplayAreaFallback.None);
+        if (area is null)
+        {
+            AppLog.Line($"[window] 保存的位置 ({x},{y}) 不在任何显示器上，回退右下角");
+            return false;
+        }
+
+        var work = area.WorkArea;
+        var inside = x >= work.X && x < work.X + work.Width && y >= work.Y && y < work.Y + work.Height;
+        if (!inside)
+        {
+            AppLog.Line($"[window] 保存的位置 ({x},{y}) 落在工作区之外（work={work.X},{work.Y} {work.Width}x{work.Height}），回退右下角");
+        }
+
+        return inside;
+    }
+
+    /// <summary>
+    /// 把位置与尺寸写进设置（DIP，外框口径）。
+    ///
+    /// <para><b>为什么分两种口径</b>：Windows 会把窗口外框 snap 到一个**最小尺寸**，
+    /// 所以 `ResizeClient(期望值)` 之后实测外框可能比期望大一点点。如果把 snap 后的尺寸当
+    /// "用户尺寸"存回去，下次恢复就更大一点 —— 实测每跑一次长 30 DIP，是正反馈不是收敛。
+    /// 因此：</para>
+    /// <list type="bullet">
+    /// <item><description>**用户刚拖过 / 缩放过**（<c>WM_EXITSIZEMOVE</c>）→ 存实测外框（他想要的就是这个）；</description></item>
+    /// <item><description>否则 → 存**期望外框**，并把"实测外框 - 客户区"记成校正值，
+    /// 下次恢复用它把外框换算成 <c>ResizeClient</c> 要的客户区。</description></item>
+    /// </list>
+    /// </summary>
+    private void SaveBounds(string reason)
+    {
+        // 冒烟自检不写用户设置：它是"跑一遍就退出"的短命进程，落盘的坐标只会污染真实配置
+        if (_options.Smoke) return;
+
+        var hwnd = WindowNative.GetWindowHandle(this);
+        if (!NativeMethods.IsWindow(hwnd)) return;
+        if (!NativeMethods.GetWindowRect(hwnd, out var outer)) return;
+
+        var scale = _dpiScale > 0 ? _dpiScale : 1.0;
+        var measured = new WindowBounds(
+            (int)Math.Round(outer.Left / scale),
+            (int)Math.Round(outer.Top / scale),
+            (int)Math.Round((outer.Right - outer.Left) / scale),
+            (int)Math.Round((outer.Bottom - outer.Top) / scale));
+
+        var client = AppWindow.ClientSize;
+        var correction = new WindowBounds(
+            0,
+            0,
+            Math.Max(0, measured.Width - (int)Math.Round(client.Width / scale)),
+            Math.Max(0, measured.Height - (int)Math.Round(client.Height / scale)));
+
+        // 位置永远按实测存（拖动就是位置变化的唯一来源）
+        var stored = _userSizedRecently
+            ? measured
+            : _targetBounds with { X = measured.X, Y = measured.Y };
+
+        if (!stored.IsUsable)
+        {
+            AppLog.Line($"[settings] 尺寸不可用（{stored}），跳过保存（reason={reason}）");
+            return;
+        }
+
+        _targetBounds = stored;
+        _userSizedRecently = false;
+
+        if (_settings.Bounds == stored && _settings.FrameCorrection == correction) return;
+        _settings = _settings with { Bounds = stored, FrameCorrection = correction };
+        SettingsStore.Save(_settings);
+    }
+
+    /// <summary>层级状态快照（冒烟自检 / 真机日志用）。</summary>
+    internal LayerState? LayerSnapshot() => _layer?.Snapshot();
+
+    /// <summary>最近一次静息落点（冒烟自检 / 真机日志用）。</summary>
+    internal string LastDisposition => _layer?.LastDisposition ?? "none";
 
     /// <summary>客户区尺寸（DIP）。</summary>
     private (double Width, double Height) ClientSizeDip(nint handle)

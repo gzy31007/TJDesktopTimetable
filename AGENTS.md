@@ -161,6 +161,29 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
   `--no-backdrop`、换过日志通道，三次实验都停在同一处）。
   所以 CI 的 `winui-shell` job 只做**编译门禁**（真实 Windows SDK + XAML 编译器），
   运行时验证一律走本机 `.tools/build-winui.ps1 -RunSmoke`。
+- **贴桌面常驻（2026-09-15 完成）**：默认就是贴桌面层（`settings.DesktopLayer` 默认 true，
+  CLI 用 `--desktop-layer` / `--no-desktop-layer` 覆盖）。移植自 Electron 那套已验收的编排，
+  文件与职责一一对应：`Win32/Layer.cs`（编排）、`Win32/Resting.cs`（z-order 原语）、
+  `Win32/DesktopHost.cs`（owner 生命周期）、`Win32/MessageHook.cs`（窗口过程子类化）、
+  `Tjt.Widget/RestingPolicy.cs`（**纯策略 + 单测**）。
+  - **静息落点三态**（`RestingPolicy.Decide`，7 条单测）：无前台/前台是桌面壳 → 回桌面层（挂 owner + 置底）；
+    前台是自己或本应用 → **不动全局层级**；前台是第三方 → 插到它之后。
+  - **只有 5 秒 owner 巡检，没有每秒重压**：owner 正常时只做一次 `GetWindowLongPtrW` 读、不产生 z-order 变化。
+    Explorer 重启 / 显示拓扑变化走 `<c>WM_DISPLAYCHANGE</c>` / `WM_SETTINGCHANGE` / `TaskbarCreated`
+    的事件通道（作废宿主缓存后重新静息）。
+  - **交互期**：`WM_ENTERSIZEMOVE` → 暂停巡检 + 临时浮起（`HWND_TOPMOST` 脉冲）；
+    `WM_EXITSIZEMOVE` → 先存位置再落点。`WM_ACTIVATE` 也顺手存一次位置。
+  - **静息态不戴 `WS_EX_NOACTIVATE`**（戴上就拖不动，Electron 侧的硬结论，这里同样适用）。
+  - 真机验收（`live-check.ps1`）：`owner=0x10298 == defView`，Win+D 前后都
+    `visible=True iconic=False`，前台切到桌面壳 → 挂件既没被隐藏也没被最小化。
+- **设置持久化**：`%APPDATA%\TJDesktopTimetable\settings.json`（与 Electron 侧 userData 同名目录）。
+  **尺寸口径是"外框 + 实测边框校正"**：Windows 会把窗口 snap 到最小尺寸，若把 snap 后的尺寸
+  当"用户尺寸"存回去，下次恢复会更大一点 —— 实测每跑一次长 30 DIP（正反馈）。
+  现在只有用户真的拖过/缩放过（`WM_EXITSIZEMOVE`）才存实测外框，否则存**期望外框**并把
+  "外框 - 客户区"记成 `FrameCorrection` 供下次恢复换算。三次连续运行实测收敛在 `1080x700`。
+  - 冒烟自检**不写**设置（短命进程落盘只会污染真实配置）。
+  - 保存的位置若不在任何显示器上（拔了外接屏），回退右下角 —— 用 `DisplayArea.GetFromPoint`
+    判定：WASDK 1.8 **没有** `DisplayArea.FindAll()`，构造 `DisplayId` 的投影类型也不稳。
 - **外壳已经有的能力（2026-09-15）**：默认摆在**工作区右下角**（留 24px，用 `DisplayArea.WorkArea`
   而不是屏幕尺寸，免得压到任务栏）；顶部信息条显示「学期 · 第 N 周 · 今日 N 节」（对应渲染层
   `.widget-bar` 的三段）；窗口尺寸变化即重排。

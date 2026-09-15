@@ -48,7 +48,8 @@ public partial class App : Application
     {
         var options = Startup;
         var sizeText = options is { Width: { } w, Height: { } h } ? $"{w}x{h}" : "default";
-        AppLog.Line($"[start] smoke={options.Smoke} desktopLayer={options.DesktopLayer} noBackdrop={options.NoBackdrop} size={sizeText}");
+        var layerText = options.DesktopLayer is { } value ? value.ToString() : "from-settings";
+        AppLog.Line($"[start] smoke={options.Smoke} desktopLayer={layerText} noBackdrop={options.NoBackdrop} size={sizeText}");
 
         // 自检看门狗：无 GPU 的 runner 上曾卡到 CI 只能看到"90 秒超时"，不知道卡在哪一步。
         // 有它就能看到最后到达的阶段标记；同时给自检一个硬上限，绝不让 CI 悬着。
@@ -133,6 +134,21 @@ public partial class App : Application
             }
         }
 
+        // 层级层：贴桌面层时 owner 必须真的挂上（这是"Win+D 后仍可见"的唯一机制）
+        var layer = window.LayerSnapshot();
+        if (layer is not null)
+        {
+            if (layer.Enabled && layer.Owner != layer.Host)
+            {
+                problems.Add($"贴桌面层已启用但 owner 未挂上（owner=0x{layer.Owner:X}，host=0x{layer.Host:X}）");
+            }
+
+            if (layer.Host == 0)
+            {
+                Console.WriteLine("[smoke] warn: 没解析到桌面宿主（Explorer 未就绪？）");
+            }
+        }
+
         if (!noBackdrop && string.Equals(window.BackdropMode, "none", StringComparison.Ordinal))
         {
             // 材质拿不到不算失败（无显卡 / 老系统的 runner 上本来就没有 Mica），但要留痕。
@@ -142,7 +158,10 @@ public partial class App : Application
 
         if (problems.Count == 0)
         {
-            AppLog.Line($"[smoke] ok blocks={layout!.Blocks} canvas={layout.CanvasWidth:0}x{layout.CanvasHeight:0} title={layout.Title}");
+            AppLog.Line($"[smoke] ok blocks={layout!.Blocks} canvas={layout.CanvasWidth:0}x{layout.CanvasHeight:0} rowH={layout.RowHeight:0.#} scroll={layout.NeedsScroll} title={layout.Title}");
+            AppLog.Line(layer is null
+                ? "[smoke] layer 未启用"
+                : $"[smoke] layer enabled={layer.Enabled} owner=0x{layer.Owner:X} host=0x{layer.Host:X} disposition={window.LastDisposition} backdrop={window.BackdropMode}");
             return true;
         }
 
