@@ -35,6 +35,24 @@ internal static partial class NativeMethods
         /// <summary>不改变 z-order（<c>SWP_NOZORDER</c>）。</summary>
         public const uint SwpNoZOrder = 0x0004;
 
+        /// <summary>让 <c>GWL_STYLE</c> 的改动立即生效（<c>SWP_FRAMECHANGED</c>）。</summary>
+        public const uint SwpFrameChanged = 0x0020;
+
+        /// <summary>标题栏样式（<c>WS_CAPTION</c> = <c>WS_BORDER | WS_DLGFRAME</c>）。</summary>
+        public const long WsCaption = 0x00C00000L;
+
+        /// <summary>细边框（<c>WS_BORDER</c>）。</summary>
+        public const long WsBorder = 0x00800000L;
+
+        /// <summary>对话框边框（<c>WS_DLGFRAME</c>）。</summary>
+        public const long WsDlgFrame = 0x00400000L;
+
+        /// <summary>可缩放边框（<c>WS_THICKFRAME</c>）—— 也就是那圈"看不见的抓取边"的来源。</summary>
+        public const long WsThickFrame = 0x00040000L;
+
+        /// <summary>命中测试（<c>WM_NCHITTEST</c>）；返回 <c>HT*</c> 码决定鼠标按下交给谁。</summary>
+        public const uint WmNcHitTest = 0x0084;
+
         /// <summary>窗口不属于任务栏 / Alt+Tab（<c>WS_EX_TOOLWINDOW</c>）。</summary>
         public const long WsExToolWindow = 0x00000080L;
 

@@ -46,6 +46,7 @@ public sealed partial class MainWindow : Window
     private bool _userSizedRecently;
     private BackdropHelper? _backdrop;
     private WindowDrag? _drag;
+    private WindowResize? _resize;
     private Func<WidgetSettings, bool, WidgetSettings>? _openSettings;
     private FrameworkElement? _root;
     private double _dpiScale = 1.0;
@@ -63,15 +64,20 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 去掉系统标题栏与边框。
+    /// 去掉系统标题栏、边框与**缩放边框**。
     ///
     /// <para>原因：<c>ExtendsContentIntoTitleBar</c> 只是让内容延伸到标题栏，**右上角的
     /// 最小化/最大化/关闭按钮仍然画在我们内容之上**，把顶部条右侧的"刷新 / ⋯"压住了。
     /// WinUI 只能"禁用"关闭按钮（会变成灰色禁用态，反而更丑），没法只隐藏它；
     /// 而挂件本来就不需要这三个按钮（退出在 ⋯ 菜单与托盘里）。</para>
     ///
+    /// <para><b>清 <c>WS_THICKFRAME</c> 是这一版的第二半</b>：系统那圈缩放抓取带
+    /// （<c>SM_CXSIZEFRAME + SM_CXPADDEDBORDER</c> ≈ 8px）**整个画在窗口之外**，
+    /// 保留它等于在挂件四周留一圈"看不见、也没画出来的抓取边"。清掉之后改由我们自己回答
+    /// <c>WM_NCHITTEST</c>（见 <see cref="WindowResize"/>），把抓取带搬进**看得见的描边内侧**。</para>
+    ///
     /// <para>代价：失去系统标题栏的拖动区。所以顶部条自己充当拖动区（<c>SetTitleBar</c> 于
-    /// <c>ConfigureWindowChrome</c> 之后重新指定），并且保持 <c>IsResizable</c> 以便拖边缘缩放。</para>
+    /// <c>ConfigureWindowChrome</c> 之后重新指定）。</para>
     /// </summary>
     private void ConfigureWindowChrome()
     {
@@ -84,6 +90,56 @@ public sealed partial class MainWindow : Window
             presenter.SetBorderAndTitleBar(false, false);
             AppLog.Line("[window] 已隐藏系统标题栏与窗口按钮（挂件不需要最小化/最大化/关闭）");
         }
+
+        // 样式层再清一遍：presenter 只管它自己那套，WS_THICKFRAME 仍留在 GWL_STYLE 上
+        // （那正是"看得见的内容之外还有一圈抓不住也看不见的边"的来源）。
+        var hwnd = WindowNative.GetWindowHandle(this);
+        if (hwnd != nint.Zero)
+        {
+            var style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.Constants.GwlStyle).ToInt64();
+            var trimmed = style & ~(NativeMethods.Constants.WsCaption
+                | NativeMethods.Constants.WsBorder
+                | NativeMethods.Constants.WsDlgFrame
+                | NativeMethods.Constants.WsThickFrame);
+            NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.Constants.GwlStyle, (nint)trimmed);
+            // FRAMECHANGED 让样式改动立即生效（少了这一步要等下一次重画才认）
+            NativeMethods.SetWindowPos(
+                hwnd,
+                nint.Zero,
+                0, 0, 0, 0,
+                NativeMethods.Constants.SwpNoMove
+                | NativeMethods.Constants.SwpNoSize
+                | NativeMethods.Constants.SwpNoZOrder
+                | NativeMethods.Constants.SwpNoActivate
+                | NativeMethods.Constants.SwpFrameChanged);
+            AppLog.Line($"[window] 已清除 WS_CAPTION|WS_BORDER|WS_DLGFRAME|WS_THICKFRAME（缩放改由 WM_NCHITTEST 自答）：style 0x{style:X8} → 0x{trimmed:X8}");
+        }
+    }
+
+    /// <summary>
+    /// 光标（**屏幕物理像素**，来自 <c>WM_NCHITTEST</c> 的 <c>lParam</c>）该抓哪条边。
+    ///
+    /// <para><see cref="WindowResize"/> 每次都现问一次，而不是缓存矩形 —— 窗口刚被拖过、
+    /// 设置还没回写的时序里，缓存值会让命中带落在错误的位置上。</para>
+    ///
+    /// <para>外框由 <c>GetWindowRect</c> 取（同为屏幕物理像素，与光标同坐标系）；
+    /// <b>拖动/缩放期间每帧都会被问到</b>，所以这里不做任何分配。</para>
+    /// </summary>
+    /// <param name="screenX">光标屏幕 X（物理像素）。</param>
+    /// <param name="screenY">光标屏幕 Y（物理像素）。</param>
+    private ResizeGrip ResolveResizeGrip(int screenX, int screenY)
+    {
+        var hwnd = WindowNative.GetWindowHandle(this);
+        if (hwnd == nint.Zero) return ResizeGrip.None;
+        if (!NativeMethods.GetWindowRect(hwnd, out var outer)) return ResizeGrip.None;
+
+        var window = new WindowBounds(
+            outer.Left,
+            outer.Top,
+            outer.Right - outer.Left,
+            outer.Bottom - outer.Top);
+
+        return ResizePolicy.HitTest(window, screenX, screenY);
     }
 
     /// <summary>渲染结果自检信息（冒烟测试与日志用）。</summary>
@@ -252,6 +308,12 @@ public sealed partial class MainWindow : Window
     private void InstallWindowHooks()
     {
         var hwnd = WindowNative.GetWindowHandle(this);
+
+        // 缩放：清掉 WS_THICKFRAME 之后系统不再认边缘，由我们自己答 WM_NCHITTEST。
+        // 缩放本身仍是原生循环，所以下面 WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE 照旧生效。
+        _resize = WindowResize.Attach(hwnd, ResolveResizeGrip);
+        AppLog.Line($"[resize] 自答命中测试已挂上（抓取带 {ResizePolicy.BorderWidth}px，贴可见描边内侧）");
+
         MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmEnterSizeMove, () =>
         {
             AppLog.Line("[layer] 开始拖动/缩放 → 暂停巡检并临时浮起");
