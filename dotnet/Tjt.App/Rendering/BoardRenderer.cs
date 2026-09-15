@@ -251,11 +251,6 @@ internal static class BoardRenderer
         import.Click += (_, _) => actions.OpenImport?.Invoke();
         flyout.Items.Add(import);
 
-        // 推荐路径：在应用自己的窗口里登录 1 系统（不用去浏览器抓请求、不用碰 Edge 数据）
-        var login = new MenuFlyoutItem { Text = "登录同济获取课表…", Icon = new FontIcon { Glyph = IconGlyph.Account } };
-        login.Click += (_, _) => actions.OpenLogin?.Invoke();
-        flyout.Items.Add(login);
-
         var refresh = new MenuFlyoutItem { Text = "重新载入课表", Icon = new FontIcon { Glyph = IconGlyph.Refresh } };
         refresh.Click += (_, _) => actions.Refresh?.Invoke();
         flyout.Items.Add(refresh);

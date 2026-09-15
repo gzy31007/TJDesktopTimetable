@@ -35,7 +35,6 @@ public partial class App : Application
         ToggleDesktopLayer = 5,
         Import = 6,
         Exit = 7,
-        Login = 8,
     }
 
     private readonly List<MainWindow> _windows = [];
@@ -138,9 +137,20 @@ public partial class App : Application
             window.ShowWidget();
             _tray = BuildTray(window);
 
-            // 内置登录窗口的入口（挂件菜单、托盘菜单、设置页按钮三处都落到同一个 ShowTongjiLogin）
-            window.SetLoginOpener(() => ShowTongjiLogin(window.CurrentIsDark));
-            if (options.Login) ShowTongjiLogin(window.CurrentIsDark);
+            // 内置登录窗口只有两个触发点（**没有**菜单入口，见 ShowTongjiLogin 的说明）：
+            //   ① 用户在设置窗口「导入」页点按钮（SettingsHost.OpenLogin）
+            //   ② 启动时挂件上不是"用户自己导入的课表" —— 也就是**还没有真实课表**
+            // 走到这里的一定是交互模式：--smoke / --fetch-check / --login-check 都已提前 return。
+            if (options.Login)
+            {
+                AppLog.Line("[login] --login 显式要求：打开内置登录窗口");
+                ShowTongjiLogin(window.CurrentIsDark);
+            }
+            else if (loaded.Origin != TimetableOrigin.Imported)
+            {
+                AppLog.Line($"[login] 启动时没有真实课表（origin={loaded.Origin}，source={loaded.Source}）：自动打开内置登录窗口");
+                ShowTongjiLogin(window.CurrentIsDark);
+            }
 
             // 启动就停在某一页（验证导入页/截图用；托盘与挂件菜单也会用它）
             if (options.SettingsPage is { } page) ShowSettings(window.CurrentSettings, window.CurrentIsDark, page);
@@ -310,6 +320,11 @@ public partial class App : Application
     /// （含短信），课表页那条接口的响应被我们在一旁接住 —— 不碰浏览器数据、不猜加密、
     /// 也不接触用户密码。抓到的响应交给 <see cref="ImportService.ApplyCapturedResponse"/>，
     /// 与粘贴请求那条路落在同一个 <c>Apply</c> 上。</para>
+    ///
+    /// <para><b>触发点只有两个</b>（挂件 <c>⋯</c> 菜单与托盘里**没有**这一项了）：
+    /// ① 用户在设置窗口「导入」页点「登录同济并获取课表」（<c>SettingsHost.OpenLogin</c>）；
+    /// ② 启动时挂件上**没有真实课表**（<c>TimetableOrigin</c> 不是 <c>Imported</c>，
+    /// 也就是只有黄金 fixture 或内置样例）—— 见 <c>OnLaunched</c> 里那一段。</para>
     /// </summary>
     /// <param name="dark">当前是否深色主题（只影响这一个窗口）。</param>
     private void ShowTongjiLogin(bool dark)
@@ -395,7 +410,6 @@ public partial class App : Application
         new TrayMenuItem((uint)TrayCommand.Show, "显示挂件"),
         new TrayMenuItem((uint)TrayCommand.Settings, "设置…"),
         new TrayMenuItem((uint)TrayCommand.Import, "导入课表…"),
-        new TrayMenuItem((uint)TrayCommand.Login, "登录同济获取课表…"),
         new TrayMenuItem(null, string.Empty),
         new TrayMenuItem((uint)TrayCommand.Refresh, "重新载入课表"),
         new TrayMenuItem((uint)TrayCommand.ResetPosition, "恢复默认位置"),
@@ -416,9 +430,6 @@ public partial class App : Application
                 break;
             case TrayCommand.Import:
                 ShowSettings(widget.CurrentSettings, widget.CurrentIsDark, SettingsWindow.PageImport);
-                break;
-            case TrayCommand.Login:
-                ShowTongjiLogin(widget.CurrentIsDark);
                 break;
             case TrayCommand.Refresh:
                 widget.ReloadTimetable();

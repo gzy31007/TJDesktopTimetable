@@ -23,9 +23,6 @@ internal static class IconGlyph
     /// <summary>地球（<c>&#xE774;</c>）—— 从 1 系统抓取用。</summary>
     public const string Globe = "\uE774";
 
-    /// <summary>账号（<c>&#xE77B;</c>，Contact）—— 内置登录窗口用。</summary>
-    public const string Account = "\uE77B";
-
     /// <summary>更多（<c>&#xE712;</c>）—— 对应截图里那个 <c>⋯</c>。</summary>
     public const string More = "\uE712";
 

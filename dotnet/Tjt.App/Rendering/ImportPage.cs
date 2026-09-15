@@ -127,7 +127,8 @@ internal static class ImportPage
         loginRow.Children.Add(loginButton);
         loginRow.Children.Add(new TextBlock
         {
-            Text = "在应用自己的窗口里登录 1 系统（含短信验证），课表一打开就自动抓取导入。",
+            Text = "在应用自己的窗口里登录 1 系统（含短信验证），课表一打开就自动抓取导入。\n"
+                 + "还没有真实课表时，挂件启动也会自动打开这个窗口。",
             FontSize = StatusFontSize,
             Opacity = 0.66,
             VerticalAlignment = VerticalAlignment.Center,

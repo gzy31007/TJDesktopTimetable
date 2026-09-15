@@ -426,9 +426,17 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     其它 WebView2 应用隔离；登录态就留在那里，所以"下次打开还是登录状态"是自然结果）。
     关掉了 DevTools、右键菜单、**密码保存与自动填充**；`NewWindowRequested` 一律在当前窗口内继续导航
     （SSO / 短信页弹窗场景，否则用户会觉得"点了没反应"）；`WindowCloseRequested` → 关窗。
-  - **入口三处**（与导入一致）：挂件 `⋯` →「登录同济获取课表…」、托盘同名项、设置窗口「导入」页的
-    **登录同济并获取课表** 按钮。链路是 `WidgetActions.OpenLogin` → `MainWindow._openLogin` →
-    `App.ShowTongjiLogin`（窗口单例，已开着就 `Activate`）。
+  - **触发点只有两个（2026-09-16 收敛：挂件 `⋯` 菜单与托盘里那两项已移除）**：
+    ① **导入时手动** —— 设置窗口「导入」页的「登录同济并获取课表」按钮（`SettingsHost.OpenLogin` →
+    `ImportPage.Build(..., openLogin)`）；② **启动时没有真实课表就自动开** —— `OnLaunched` 在
+    `AppHost.Load` 之后判 `loaded.Origin != TimetableOrigin.Imported`（黄金 fixture 与内置样例都**不算**
+    真实课表，判据就这一条），命中即 `ShowTongjiLogin` 并打
+    `[login] 启动时没有真实课表（origin=…，source=…）：自动打开内置登录窗口`；`--login` 仍可显式开。
+    自检 / 诊断模式（`--smoke` / `--fetch-check` / `--login-check`）**一律不自动弹**（它们都在此之前 return，
+    `--fixture` 走 Explicit 也不命中）。窗口是单例（已开着就 `Activate`）。
+  - **验收**（`.tools/verify-auto-login.ps1`，纯 ASCII）：A 删掉 `timetable.json` 后启动 → 日志里有
+    `[login] …hwnd=0x…`（自动开了）；B 先 `--import <fixture>` 落盘、再启动 → 日志里**没有** `[login]`。
+    脚本会备份 / 还原用户真实的 `timetable.json`。
   - **CLI**：`--login`（启动就开登录窗口）与 `--login-check <url>`（自检：开真窗口导航到给定地址，
     捕获到课表 → 写日志 → `Environment.Exit`，退出码表成败；60 秒看门狗兜底）。
   - **验收**（`.tools/verify-login.ps1`，纯 ASCII，**实测全绿**）：本地 `HttpListener` 假扮 1 系统，
