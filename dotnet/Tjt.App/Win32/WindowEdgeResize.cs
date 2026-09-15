@@ -46,6 +46,7 @@ internal sealed class WindowEdgeResize
     private readonly DispatcherTimer _poll = new();
 
     private bool _resizing;
+    private bool _cursorLogged;
     private ResizeGrip _grip = ResizeGrip.None;
     private NativeMethods.Point _originCursor;
     private WindowBounds _originWindow = new(0, 0, 0, 0);
@@ -61,6 +62,30 @@ internal sealed class WindowEdgeResize
         _poll.Interval = PollInterval;
         _poll.Tick += (_, _) => Step();
         _poll.Start();
+
+        // WM_SETCURSOR 是**唯一**能保住自定义光标的地方：窗口过程每次鼠标移动都会在这里
+        // 用类光标重置一次。只在自己窗口（wParam == hwnd）且正悬停在抓取带上时接管。
+        MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmSetCursor, OnSetCursor);
+    }
+
+    /// <summary>
+    /// 光标消息：悬停在抓取带上 → 自己设缩放光标并声明"已处理"，让默认处理别再覆盖。
+    /// </summary>
+    /// <param name="wParam">发起消息的窗口（必须是我们自己，子窗口的不抢）。</param>
+    /// <param name="lParam">低位是命中测试码（这里不看，用当前抓取边判断）。</param>
+    private void OnSetCursor(nint wParam, nint lParam)
+    {
+        if (_grip == ResizeGrip.None) return;   // 不在带上：交回默认处理（按钮/文本的光标）
+        if (wParam != _hwnd) return;            // 不是本窗口发起的：不抢
+
+        var previous = ApplyCursor(_grip);
+        if (!_cursorLogged)
+        {
+            _cursorLogged = true;
+            AppLog.Line($"[resize] 已用 WM_SETCURSOR 设缩放光标 grip={_grip}（SetCursor 返回 0x{previous:X}）");
+        }
+
+        MessageHook.SetResult(1);               // TRUE = "光标已设好，别动它"
     }
 
     /// <summary>开始监听边缘（常驻定时器，窗口存活期间一直跑）。</summary>
@@ -85,10 +110,13 @@ internal sealed class WindowEdgeResize
     /// <summary>
     /// 缩放光标：按抓取边选 <c>IDC_SIZEWE/NS/NWSE/NESW</c>。
     ///
-    /// <para>不走 <c>WM_SETCURSOR</c> 返回 <c>HT*</c>：那要求窗口正在处理鼠标消息
-    /// （我们贴着桌面层，鼠标消息到得并不规律）。轮询里直接 <c>SetCursor</c> 更确定。</para>
+    /// <para>触发点是 <c>WM_SETCURSOR</c>（见构造函数里的订阅），不是轮询计数 ——
+    /// 因为**每次鼠标移动窗口过程都会重置光标**，只有在这个消息里设才不会被立刻覆盖
+    /// （真机验收"没有缩放图标，但可以缩放"就是这么来的）。
+    /// 只在"当前悬停在某条抓取带上"时设，其余情况把消息交回默认处理，
+    /// 免得抢掉按钮/文本自己该有的光标。</para>
     /// </summary>
-    private static void ApplyCursor(ResizeGrip grip)
+    private static nint ApplyCursor(ResizeGrip grip)
     {
         var id = grip switch
         {
@@ -100,7 +128,9 @@ internal sealed class WindowEdgeResize
         };
 
         var cursor = NativeMethods.LoadCursor(nint.Zero, id == nint.Zero ? 32512 : id);
-        if (cursor != nint.Zero) NativeMethods.SetCursor(cursor);
+        // SetCursor 返回"被替换掉的光标"：为 0 通常意味着这个线程不拥有光标
+        // （前台是别的进程时会发生），照着它就能判断"到底设成功了没有"。
+        return cursor == nint.Zero ? nint.Zero : NativeMethods.SetCursor(cursor);
     }
 
     /// <summary>轮询一步：先看左键是否按下决定"起拖 / 拖拽中 / 收尾"，没按下时只更新光标。</summary>
@@ -114,9 +144,10 @@ internal sealed class WindowEdgeResize
             if (grip == _grip) return;
 
             _grip = grip;
-            ApplyCursor(grip);
+            _cursorLogged = false;   // 换了抓取边，下次 WM_SETCURSOR 再打一行
 
-            // 抓取边变化时打一行（真机排查"拖不动"时，看它就能分清是命中测试没到还是循环没跑）
+            // 抓取边变化时打一行（真机排查"拖不动/没光标"时，看它就能分清
+            // 是命中测试没到、还是光标被别的东西覆盖了）
             if (grip != _loggedHover)
             {
                 _loggedHover = grip;
@@ -183,7 +214,8 @@ internal sealed class WindowEdgeResize
         _resizing = false;
         _grip = ResizeGrip.None;
         _loggedHover = ResizeGrip.None;
-        ApplyCursor(ResizeGrip.None);
+        _cursorLogged = false;
+        ApplyCursor(ResizeGrip.None);   // 还原箭头（此后 WM_SETCURSOR 交回默认处理）
         AppLog.Line($"[resize] 结束 reason={reason}");
         _onEnd();
     }

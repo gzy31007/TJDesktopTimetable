@@ -202,8 +202,13 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     <item><description>左键松开（`GetAsyncKeyState`）→ 存位置 + 重新落点 + 光标还原。</description></item>
     </list>
     与拖动同一套轮询机制（`WindowDrag` 是同一个模式），所以"这台机器挡掉合成指针输入"这条限制同样适用。
-  - **不要走 `WM_SETCURSOR` 返回 `HT*`**：那要求窗口正在处理鼠标消息，而挂件贴着桌面层、消息到得并不规律；
-    轮询里直接 `SetCursor` 更确定。抓取带仍是 6px、仍用**内缩矩形**判边（`x < left + band`，
+  - **光标必须靠 `WM_SETCURSOR` 才留得住**：第一版只在 16ms 轮询里 `SetCursor`，
+    真机结果是**"能缩放但看不到缩放光标"** —— 窗口过程每次鼠标移动都会在 `WM_SETCURSOR`
+    里用**类光标**覆盖一次，轮询设的立刻被冲掉。现在在 `WM_SETCURSOR` 回调里
+    （仅当 `wParam == 本窗口` 且当前悬停在抓取带上）设光标并 `SetResult(1)`（TRUE =
+    "已处理，别动"），其余情况不拦，免得抢掉按钮/文本自己的光标。
+    只在该消息里设、不在轮询里设，所以不会和框架抢。
+  - 抓取带仍是 6px、仍用**内缩矩形**判边（`x < left + band`，
     不是 `x - left < band`，后者会把窗口左侧外面整片桌面算成抓取带 —— 有单测钉住）。
   - **验收**（`.tools/verify-resize.ps1`，**不用合成鼠标**）：验三件能自动化的 ——
     ① 日志里有 `[resize] 边缘缩放已挂上`（说明自实现循环挂上了）；

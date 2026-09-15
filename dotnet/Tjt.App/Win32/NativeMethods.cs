@@ -53,6 +53,9 @@ internal static partial class NativeMethods
         /// <summary>命中测试（<c>WM_NCHITTEST</c>）；返回 <c>HT*</c> 码决定鼠标按下交给谁。</summary>
         public const uint WmNcHitTest = 0x0084;
 
+        /// <summary>光标即将被设置（<c>WM_SETCURSOR</c>）；窗口过程默认会在这里重置光标。</summary>
+        public const uint WmSetCursor = 0x0020;
+
         /// <summary>窗口描边颜色（<c>DWMWA_BORDER_COLOR</c>，Win11 21H2+）。</summary>
         public const uint DwmwaBorderColor = 34;
 
