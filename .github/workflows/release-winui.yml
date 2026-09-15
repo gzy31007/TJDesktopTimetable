@@ -1,0 +1,85 @@
+name: Release (WinUI)
+
+# v* tag → 发布自包含的 WinUI 挂件（解压即用，不需要预装 .NET 或 Windows App Runtime）。
+#
+# 为什么自包含：框架依赖版要求用户装 .NET 10 桌面运行时 **且** Windows App Runtime 1.8 —— 那条路
+# 对"下载一个 zip 就能用"来说太贵。`WindowsAppSDKSelfContained=true` + `--self-contained` 把两者
+# 都打进产物，代价只是 zip 大一些。
+#
+# 只做构建与发布，**不跑运行时冒烟**：GitHub runner 上 WASDK 引导路径会挂住且无输出（见 build-csharp.yml
+# 里的说明），运行时验证走本机 `.tools/build-winui.ps1 -RunSmoke` + `verify-import.ps1`。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish（Tjt.App，自包含 win-x64）
+        run: >
+          dotnet publish dotnet/Tjt.App/Tjt.App.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:WindowsAppSDKSelfContained=true
+          -p:Platform=x64
+          --output publish
+
+      - name: 打包（zip + 使用说明）
+        shell: pwsh
+        run: |
+          $exe = 'publish\Tjt.App.exe'
+          if (-not (Test-Path $exe)) { throw "publish 产物里没有 Tjt.App.exe" }
+          # 版本号取自 Directory.Build.props（Release tag 与它应当一致；不一致时以产物为准并提示）
+          $version = (Select-String -Path 'dotnet\Directory.Build.props' -Pattern '<Version>([^<]+)</Version>').Matches[0].Groups[1].Value
+          $name = "TJDesktopTimetable-v$version-win-x64"
+          $readme = @(
+            "TJDesktopTimetable v$version · 同济桌面课表小组件（WinUI 3）",
+            "",
+            "1. 把本目录解压到任意本地磁盘路径（不要放在 \\\\wsl.localhost\\... 这类 UNC 路径下）",
+            "2. 双击 Tjt.App.exe（自包含产物，不需要预装 .NET 或 Windows App Runtime）",
+            "3. 首次启动会打开设置窗口的「导入课表」页：浏览器 F12 → Network → 在「我的课表」页刷新 →",
+            "   找到返回 200、内容是课程列表的那条请求 → 右键 Copy → Copy as cURL → 粘贴 → 点「获取我的课表」",
+            "",
+            "数据目录：%APPDATA%\TJDesktopTimetable\（settings.json / timetable.json / credentials.json）",
+            "卸载：删掉本目录；想清干净就把数据目录一并删掉。",
+            "已知限制见仓库 README。"
+          ) -join "`r`n"
+          Set-Content -Path 'publish\使用说明.txt' -Value $readme -Encoding utf8
+          Compress-Archive -Path 'publish\*' -DestinationPath "$name.zip" -Force
+          Write-Host "打包完成：$name.zip"
+          Get-ChildItem "$name.zip" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+
+      - name: 创建/更新 Release 并上传资产
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $version = (Select-String -Path 'dotnet\Directory.Build.props' -Pattern '<Version>([^<]+)</Version>').Matches[0].Groups[1].Value
+          $zip = Get-ChildItem 'TJDesktopTimetable-v*-win-x64.zip' | Select-Object -First 1
+          if (-not $tag.StartsWith('v')) { throw "不是 tag 触发（ref=$tag），跳过发布" }
+          $notes = "docs/releases/$tag.md"
+          gh release view $tag --repo '${{ github.repository }}' 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            # 注意：不要把这个数组叫 $args —— PowerShell 的自动变量，会被悄悄吃掉
+            $ghArgs = @('release', 'create', $tag, '--repo', '${{ github.repository }}', '--title', "TJDesktopTimetable $tag", '--verify-tag')
+            if (Test-Path $notes) { $ghArgs += @('--notes-file', $notes) } else { $ghArgs += @('--generate-notes') }
+            & gh @ghArgs
+          }
+          gh release upload $tag $zip.FullName --repo '${{ github.repository }}' --clobber
+          gh release view $tag --repo '${{ github.repository }}'

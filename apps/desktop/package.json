@@ -1,7 +1,7 @@
 {
   "name": "@tjt/desktop",
   "productName": "TJDesktopTimetable",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "同济桌面课表小组件（Electron + Vue 3）",
   "author": "gzy31007",

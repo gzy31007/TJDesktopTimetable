@@ -74,4 +74,23 @@
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!--
+    `dotnet publish` 会漏掉 XAML 编译产物与资源索引（2026-09-16 实测）：
+
+      build 输出里有  App.xbf / MainWindow.xbf / SettingsWindow.xbf / Tjt.App.pri
+      publish 输出里**没有**（WinUI 的 targets 只把它们放进 build 输出）
+
+    而 `MainWindow.InitializeComponent()` → `LoadComponent("ms-appx:///MainWindow.xaml")` 正是靠这几件
+    解析 XAML —— 缺了就直接抛 `XamlParseException: XAML parsing failed`，表现为"自包含发布出来的 exe
+    一启动就退出"（`.tools/release-preflight.ps1` 抓到的就是这个）。所以显式补一份：
+    不补的话，Release 资产会变成"能下载、不能运行"。
+  -->
+  <Target Name="CopyXamlArtifactsToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <XamlPublishArtifact Include="$(TargetDir)*.xbf" />
+      <XamlPublishArtifact Include="$(TargetDir)Tjt.App.pri" />
+    </ItemGroup>
+    <Copy SourceFiles="@(XamlPublishArtifact)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

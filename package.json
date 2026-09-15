@@ -1,6 +1,6 @@
 {
   "name": "tj-desktop-timetable",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "同济大学课表桌面小组件 · 可扩展多校适配器",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "@tjt/core",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "课表核心：统一模型、周次/冲突/布局算法、多校适配器（纯 TypeScript，零平台依赖）",
   "type": "module",
