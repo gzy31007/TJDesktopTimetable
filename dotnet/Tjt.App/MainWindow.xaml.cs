@@ -643,6 +643,15 @@ public sealed partial class MainWindow : Window
             AppLog.Line($"[layer] 切换贴桌面层 → {next.DesktopLayer}");
         }
 
+        if (previous.Material != next.Material)
+        {
+            // 材质**即时切换**（不重建窗口）：换控制器而不是重建 —— 与 DeskBox 的
+            // ApplyBackdropPreference 同思路。Acrylic 需要透明窗口，非透明窗口上可能
+            // 拿不到糊感，这时 SetMaterial 会如实返回 false 并记日志。
+            var applied = _backdrop?.SetMaterial(next.Material) ?? false;
+            AppLog.Line($"[backdrop] 材质切换 {previous.Material} → {next.Material} applied={applied}");
+        }
+
         if (previous.Theme != next.Theme)
         {
             // 三件都要跟着走：装饰主题（否则会有白边）、材质主题（否则浅色模式下底色仍是深色）、

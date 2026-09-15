@@ -17,8 +17,8 @@ namespace Tjt.App;
 /// 所以这里不放导入面板 —— 宁可少做，也不要放一个点了没反应的按钮。</para>
 ///
 /// <para>改动**即时生效并落盘**（没有"保存"按钮）：设置项都是开关/单选/下拉，
-/// 改完立刻能看到效果，多一个"保存"只会多一个忘记点的机会。材质例外 —— 它只在窗口创建时
-/// 生效，所以那一项明确标注"重启后生效"。</para>
+/// 改完立刻能看到效果，多一个"保存"只会多一个忘记点的机会。**材质也在运行时即时切换**
+/// （换控制器、不重建窗口，见 <c>BackdropHelper.SetMaterial</c>）。</para>
 /// </summary>
 public sealed partial class SettingsWindow : Window
 {
@@ -258,7 +258,7 @@ public sealed partial class SettingsWindow : Window
                 },
             });
         };
-        rows.Add(SettingsView.Row("\uE790", "窗口材质", "材质在窗口创建时确定，改动**重启挂件后**生效", material, dark));
+        rows.Add(SettingsView.Row("\uE790", "窗口材质", "改动即时生效；Acrylic 需要透明窗口，个别机型上观感可能与 Mica 接近", material, dark));
 
         var fontSize = SettingsView.Switch(true);
         fontSize.IsEnabled = false;

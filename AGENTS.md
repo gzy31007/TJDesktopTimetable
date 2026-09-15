@@ -282,6 +282,21 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     就能一刀切开"这层像素是内容画的还是窗口装饰画的"；再配合"只改一个变量"的变体矩阵
     （`--border-color` / `--corner` 这类临时 CLI），两次测量就能锁定根因，
     比读文档猜快得多。**测完把探针和诊断开关删掉**。
+- **材质切换（2026-09-15 完成：运行时即时生效，不重建窗口）**：
+  - 界面上的「窗口材质」下拉**不再写"重启后生效"**：`BackdropHelper.SetMaterial(mode)` 换控制器、
+    复用同一个 `SystemBackdropConfiguration`（与 DeskBox 的 `ApplyBackdropPreference()` 同思路 ——
+    它在 `WidgetWindowBase.Backdrop` 里就是运行时按材质签名重绑控制器）。
+    `MainWindow.ApplySettings` 里材质一变就调它，并打
+    `[backdrop] 材质切换 A → B applied=True/False`。
+  - **`Dispose()` 必须解绑 `Activated`**：`SetMaterial` 每次 `Bind` 都会挂一次
+    `OnWindowActivated`，不解绑会随切换次数累积。
+  - **Acrylic 的固有代价仍在**：它要求窗口 `transparent: true`，我们按 mica/solid 创建（非透明），
+    所以运行时切到 Acrylic 拿到的是 `acrylic-controller` 但糊感可能不如专用透明窗口。
+    `SetMaterial` 会按实际结果返回 true/false 并记日志，**不假装成功**。
+  - **真机实测四种材质各不一样**（同尺寸同位置采样 `dy=120/400/700`）：
+    `solid` 中心 `#000000`（实色底）、`mica` `#281D1B`、`mica-alt` `#190400`（比 mica 更深、
+    分层更明显 —— 这是 BaseAlt 的预期观感）、`acrylic` `#3A1912`（透出更多壁纸）。
+    日志里 `[backdrop] mode=` 分别对应 `solid` / `mica-controller` / `mica-controller(alt)` / `acrylic-controller`。
 - **浅色模式"完全不是浅色"——材质主题没接主题（2026-09-15 结案）**：
   - **症状（真机采样）**：`--dark` 与 `--light` 两种模式的**底色像素一模一样**（顶部都是 `#261E1C`），
     更怪的是浅色模式的色块比深色的**更暗**。

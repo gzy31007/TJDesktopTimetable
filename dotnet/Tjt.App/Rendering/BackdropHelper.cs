@@ -70,11 +70,59 @@ internal sealed class BackdropHelper : IDisposable
             Theme = dark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light,
         };
         var helper = new BackdropHelper(window, configuration) { IsDark = dark };
+        helper.Bind(mode);
+        return helper;
+    }
+
+    /// <summary>
+    /// 运行时换材质（**即时生效**，不重建窗口）。
+    ///
+    /// <para>与 DeskBox 的 <c>ApplyBackdropPreference()</c> 同一个思路：它也是在运行时按
+    /// 材质签名重新绑控制器。这里先 <see cref="Dispose"/> 掉旧的再绑新的 ——
+    /// **复用 <see cref="SystemBackdropConfiguration"/>**，只换控制器。</para>
+    ///
+    /// <para><b>Acrylic 的固有代价仍然成立</b>：它要求窗口 <c>transparent: true</c>（Electron 侧的
+    /// 硬结论，WinUI 这里同样是合成要求）。我们的窗口按 mica/solid 创建（非透明），
+    /// 所以运行时切到 Acrylic 可能拿不到该有的糊感 —— 这时如实记日志，不假装成功。</para>
+    /// </summary>
+    /// <param name="mode">目标材质。</param>
+    /// <returns>是否真的绑上了（<c>Solid</c> 恒为 true）。</returns>
+    public bool SetMaterial(MaterialMode mode)
+    {
+        if (Mode == Describe(mode)) return true;
+
+        Dispose();
+        Bind(mode);
+        var ok = Mode == Describe(mode);
+        AppLog.Line(ok
+            ? $"[backdrop] 材质已切换 → {Mode}（运行时，未重建窗口）"
+            : $"[backdrop] 材质切换失败 → mode={mode}（实际 {Mode}），保留原观感");
+        return ok;
+    }
+
+    /// <summary>把材质模式映射成 <see cref="Mode"/> 的取值（两边要保持一致，供切换判定用）。</summary>
+    /// <param name="mode">材质模式。</param>
+    private static string Describe(MaterialMode mode) => mode switch
+    {
+        MaterialMode.Solid => "solid",
+        MaterialMode.Acrylic when DesktopAcrylicController.IsSupported() => "acrylic-controller",
+        MaterialMode.MicaAlt when MicaController.IsSupported() => "mica-controller(alt)",
+        MaterialMode.Mica when MicaController.IsSupported() => "mica-controller",
+        MaterialMode.Acrylic => "acrylic-builtin-fallback",
+        MaterialMode.MicaAlt => "mica-builtin-fallback",
+        _ => "none",
+    };
+
+    /// <summary>按材质模式绑定控制器（失败则退回内置 backdrop，再失败就是无材质）。</summary>
+    /// <param name="mode">材质模式。</param>
+    private void Bind(MaterialMode mode)
+    {
+        _builtInFallback = false;
 
         if (mode == MaterialMode.Solid)
         {
-            helper.Mode = "solid";
-            return helper;
+            Mode = "solid";
+            return;
         }
 
         try
@@ -83,46 +131,44 @@ internal sealed class BackdropHelper : IDisposable
             {
                 case MaterialMode.Acrylic when DesktopAcrylicController.IsSupported():
                     var acrylic = new DesktopAcrylicController { Kind = DesktopAcrylicKind.Base };
-                    acrylic.AddSystemBackdropTarget(window.As<ICompositionSupportsSystemBackdrop>());
-                    acrylic.SetSystemBackdropConfiguration(configuration);
-                    helper._acrylic = acrylic;
-                    helper.Mode = "acrylic-controller";
+                    acrylic.AddSystemBackdropTarget(_window.As<ICompositionSupportsSystemBackdrop>());
+                    acrylic.SetSystemBackdropConfiguration(_configuration);
+                    _acrylic = acrylic;
+                    Mode = "acrylic-controller";
                     break;
 
                 case MaterialMode.MicaAlt when MicaController.IsSupported():
-                    helper._mica = BindMica(window, configuration, MicaKind.BaseAlt);
-                    helper.Mode = "mica-controller(alt)";
+                    _mica = BindMica(_window, _configuration, MicaKind.BaseAlt);
+                    Mode = "mica-controller(alt)";
                     break;
 
                 case MaterialMode.Acrylic:
                 case MaterialMode.MicaAlt:
                 case MaterialMode.Mica when MicaController.IsSupported():
-                    helper._mica = BindMica(window, configuration, MicaKind.Base);
-                    helper.Mode = "mica-controller";
+                    _mica = BindMica(_window, _configuration, MicaKind.Base);
+                    Mode = "mica-controller";
                     break;
 
                 default:
                     // 控制器不可用：退回内置 backdrop（简单，但活跃状态交回系统）
-                    window.SystemBackdrop = mode == MaterialMode.Acrylic
+                    _window.SystemBackdrop = mode == MaterialMode.Acrylic
                         ? new DesktopAcrylicBackdrop()
                         : new MicaBackdrop { Kind = mode == MaterialMode.MicaAlt ? MicaKind.BaseAlt : MicaKind.Base };
-                    helper._builtInFallback = true;
-                    helper.Mode = mode == MaterialMode.Acrylic ? "acrylic-builtin-fallback" : "mica-builtin-fallback";
+                    _builtInFallback = true;
+                    Mode = mode == MaterialMode.Acrylic ? "acrylic-builtin-fallback" : "mica-builtin-fallback";
                     break;
             }
 
-            window.Activated += helper.OnWindowActivated;
+            _window.Activated += OnWindowActivated;
         }
         catch (Exception ex)
         {
-            helper._mica?.Dispose();
-            helper._mica = null;
-            helper._acrylic?.Dispose();
-            helper._acrylic = null;
-            helper.Mode = $"none({ex.GetType().Name})";
+            _mica?.Dispose();
+            _mica = null;
+            _acrylic?.Dispose();
+            _acrylic = null;
+            Mode = $"none({ex.GetType().Name})";
         }
-
-        return helper;
     }
 
     /// <summary>
@@ -175,6 +221,7 @@ internal sealed class BackdropHelper : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        // 必须解绑：SetMaterial 每次 Bind 都会挂一次，不解绑会随切换次数累积
         _window.Activated -= OnWindowActivated;
         _mica?.Dispose();
         _mica = null;
