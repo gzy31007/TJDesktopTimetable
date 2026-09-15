@@ -31,7 +31,7 @@ namespace Tjt.Core.Adapters;
 public sealed class TongjiStudentAdapter : ISchoolAdapter
 {
     public const string AdapterId = "tongji-student";
-    public const string AdapterVersion = "3.0.0";
+    public const string AdapterVersion = "3.1.0";
     public const string TongjiOrigin = "https://1.tongji.edu.cn";
 
     /// <summary>单例：适配器无状态。</summary>
@@ -48,7 +48,8 @@ public sealed class TongjiStudentAdapter : ISchoolAdapter
     public string Version => AdapterVersion;
 
     public string Description =>
-        "解析选课服务返回的个人课表（`data.selectedCourses[].course.times[]`），导入即用；也兼容排课服务的扁平格式。";
+        "解析 1 系统课表：个人课表（`data.selectedCourses[].course.times[]`）与课表页报表接口"
+        + "（`data[].timeTableList[]`，如 `reportManagement/findStudentTimetab`），也兼容排课服务的扁平格式。";
 
     /// <summary>目前仍是手动导入（Cookie 抓取在主进程侧），但接口本身支持抓取。</summary>
     public bool CanFetch => true;
@@ -66,10 +67,16 @@ public sealed class TongjiStudentAdapter : ISchoolAdapter
 
     private static readonly Regex IntegerRe = new(@"^-?[0-9]+$", RegexOptions.CultureInvariant);
 
-    /// <summary>分类结果：一个输入里可能同时含个人课表 / 排课扁平表 / 校历。</summary>
+    /// <summary>文本末尾是不是"（工号）"：<c>(12345)</c>（半角，实测就是这个形态）。</summary>
+    private static readonly Regex TrailingCodeRe = new(@"\([0-9]{3,6}\)$", RegexOptions.CultureInvariant);
+
+    /// <summary>分类结果：一个输入里可能同时含个人课表 / 报表课表 / 排课扁平表 / 校历。</summary>
     private sealed class Classified
     {
         public List<JsonElement> Selected { get; } = [];
+
+        /// <summary>报表服务（<c>reportManagement/findStudentTimetab</c> 等）返回的课程数组。</summary>
+        public List<JsonElement> Report { get; } = [];
 
         public List<JsonElement> Flat { get; } = [];
 
@@ -227,6 +234,164 @@ public sealed class TongjiStudentAdapter : ISchoolAdapter
         return SortCourses(courses);
     }
 
+    /// <summary>
+    /// 报表服务格式（<c>data[].timeTableList[]</c>，课表页真正调的那条接口）→ 课程列表。
+    ///
+    /// <para>与 <see cref="BuildCoursesFromSelected"/> 的差异只有"包法"：课程在数组顶层而不是
+    /// <c>selectedCourses[].course</c>，排课数组叫 <c>timeTableList</c> 而不是 <c>times</c>；
+    /// <c>dayOfWeek</c> / <c>timeStart</c> / <c>timeEnd</c> / <c>weeks</c> 数组的语义完全一致。</para>
+    ///
+    /// <para>教室：优先 <c>roomIdI18n</c>（如"北301"），空则退 <c>roomLable</c>
+    /// （线上课堂 / 操场这类没有教室编号的场地）—— 实测 27 条里 23 条是前者、4 条只有后者。</para>
+    /// </summary>
+    public static List<Course> BuildCoursesFromReport(IReadOnlyList<JsonElement> items, List<Diagnostic> diagnostics)
+    {
+        var courses = new List<Course>();
+        var skipped = 0;
+
+        foreach (var item in items)
+        {
+            if (item.ValueKind != JsonValueKind.Object) continue;
+
+            var times = Elements(Prop(item, "timeTableList"))
+                .Where(entry => entry.ValueKind == JsonValueKind.Object)
+                .ToList();
+            if (times.Count == 0)
+            {
+                // 军训等没有排课时段的课程不进课表
+                skipped += 1;
+                continue;
+            }
+
+            var courseCode = ToStr(Prop(item, "courseCode"));
+            var classCode = ToStr(Prop(item, "classCode"));
+            var id = ToStr(Prop(item, "teachingClassId")) ?? classCode ?? courseCode ?? $"course-{courses.Count}";
+            var name = ToStr(Prop(item, "courseName")) ?? "(未知课程)";
+
+            var teacherOrder = new List<string>();
+            var teacherSeen = new HashSet<string>(StringComparer.Ordinal);
+
+            // 同一格（同天 + 同起止节次 + 同教室）合并、周次取并集 —— 与选课服务那条路同规则
+            var sessions = new List<Session>();
+            var sessionIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            foreach (var time in times)
+            {
+                var day = ToInt(Prop(time, "dayOfWeek"));
+                var startSlot = ToInt(Prop(time, "timeStart"));
+                var endSlot = ToInt(Prop(time, "timeEnd"));
+                if (day is null || startSlot is null || endSlot is null) continue;
+                if (day is < 1 or > 7) continue;
+
+                // timeTableList[].teacherName 就是「姓名(工号)」；拿不到时退到 teacherCode 拼一个
+                AddTeacher(teacherOrder, teacherSeen, ToStr(Prop(time, "teacherName")), ToStr(Prop(time, "teacherCode")));
+
+                var weekList = AdapterInput.AsArray(Prop(time, "weeks"));
+                var weeks = weekList is not null && weekList.Value.GetArrayLength() > 0
+                    ? Weeks.FromWeeks(weekList.Value.EnumerateArray().Select(entry => ToInt(entry) ?? 0))
+                    : Weeks.FullMask(16);
+
+                var room = FirstNonEmpty(
+                    ToStr(Prop(time, "roomIdI18n")),
+                    ToStr(Prop(time, "roomLable")),
+                    ToStr(Prop(time, "classRoomName")));
+                var key = $"{day}-{startSlot}-{endSlot}-{room ?? ""}";
+
+                if (sessionIndex.TryGetValue(key, out var existing))
+                {
+                    sessions[existing] = sessions[existing] with { Weeks = sessions[existing].Weeks | weeks };
+                    continue;
+                }
+
+                sessionIndex[key] = sessions.Count;
+                sessions.Add(new Session(
+                    $"{id}-{key}",
+                    (Weekday)day.Value,
+                    startSlot.Value,
+                    endSlot.Value,
+                    weeks,
+                    room));
+            }
+
+            if (sessions.Count == 0)
+            {
+                skipped += 1;
+                continue;
+            }
+
+            // 兜底教师：课程级的 teacherName 是「张三,李四」这种纯名字列表（通常不带工号）
+            if (teacherOrder.Count == 0)
+            {
+                foreach (var teacher in SplitNames(ToStr(Prop(item, "teacherName"))))
+                {
+                    if (teacherSeen.Add(teacher)) teacherOrder.Add(teacher);
+                }
+            }
+
+            courses.Add(new Course(
+                id,
+                name,
+                teacherOrder,
+                [.. sessions.OrderBy(session => (int)session.Day).ThenBy(session => session.StartSlot)],
+                courseCode,
+                classCode,
+                null,
+                FirstNonEmpty(ToStr(Prop(item, "campusI18n")), ToStr(Prop(item, "campus")))));
+        }
+
+        if (skipped > 0)
+        {
+            diagnostics.Add(AdapterInput.Diagnostic(
+                DiagnosticLevel.Info,
+                "tongji.noSchedule",
+                $"有 {skipped} 门课没有排课时段（如军训），已跳过。"));
+        }
+
+        return SortCourses(courses);
+    }
+
+    /// <summary>
+    /// 登记一个教师：文本里**已经带工号**（"张三(12345)"）就原样收下，否则用同一行的
+    /// <c>teacherCode</c> 拼成"姓名(工号)"（工号是教师指纹的一半，能拼就拼）。
+    ///
+    /// <para>不能无条件拼：那样会得到 <c>教师M(10008)(10008)</c>。这道判断也不能只靠
+    /// <see cref="TeacherRe"/> —— 它只认"汉字姓名"，名字里带字母/数字时匹配不到，
+    /// 于是"已经有工号"会被漏判（fixture 里的 <c>教师M(10008)</c> 就踩到了）。</para>
+    /// </summary>
+    private static void AddTeacher(List<string> order, HashSet<string> seen, string? nameWithCode, string? code)
+    {
+        if (string.IsNullOrWhiteSpace(nameWithCode)) return;
+        var text = nameWithCode.Trim();
+
+        var formatted = TrailingCodeRe.IsMatch(text) || string.IsNullOrEmpty(code) ? text : $"{text}({code})";
+        if (seen.Add(formatted)) order.Add(formatted);
+    }
+
+    /// <summary>把「张三,李四 王五」这类纯名字列表切开（不带工号时的兜底）。</summary>
+    private static List<string> SplitNames(string? value)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrEmpty(value)) return result;
+
+        foreach (var part in value.Split([',', '，', ' ', '、', ';', '；'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = part.Trim();
+            if (trimmed.Length > 0) result.Add(trimmed);
+        }
+
+        return result;
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value)) return value;
+        }
+
+        return null;
+    }
+
     /// <summary>排课服务扁平格式 → 课程列表（兼容保留）。</summary>
     public static List<Course> BuildCoursesFromFlat(IReadOnlyList<JsonElement> items)
     {
@@ -301,9 +466,14 @@ public sealed class TongjiStudentAdapter : ISchoolAdapter
         {
             var classified = Classify(input, keepAlive);
 
+            // 学期 id：显式指定（抓取时从请求 URL 的 calendarId 取）优先于响应体里的 calendarId。
+            // 报表格式的响应体里没有 calendarId（它只在 URL 上），所以这一条是它能拿到
+            // 开学日期/教学周的前提 —— 内置学期表按 id 命中（见 TongjiTerms）。
+            var termId = input.TermId ?? classified.CalendarId;
+
             var term = BuildTerm(
-                PickTerm(classified.Calendar, input.TermId ?? classified.CalendarId),
-                classified.CalendarId,
+                PickTerm(classified.Calendar, termId),
+                termId,
                 classified.CalendarName,
                 diagnostics);
 
@@ -315,6 +485,14 @@ public sealed class TongjiStudentAdapter : ISchoolAdapter
                     DiagnosticLevel.Info,
                     "tongji.personal",
                     $"识别为个人课表：已选 {classified.Selected.Count} 门课。"));
+            }
+            else if (classified.Report.Count > 0)
+            {
+                courses = BuildCoursesFromReport(classified.Report, diagnostics);
+                diagnostics.Add(AdapterInput.Diagnostic(
+                    DiagnosticLevel.Info,
+                    "tongji.report",
+                    $"识别为 1 系统课表（报表接口格式）：共 {classified.Report.Count} 门课。"));
             }
             else if (classified.Flat.Count > 0)
             {
@@ -399,6 +577,18 @@ public sealed class TongjiStudentAdapter : ISchoolAdapter
                 continue;
             }
 
+            // 2) 报表服务：课表页真正调的那条接口。本科生
+            //    `GET /api/electionservice/reportManagement/findStudentTimetab?calendarId=…&studentCode=…`
+            //    返回 `data: [课程…]`，每门课带 `timeTableList[]`（与选课服务的 `times[]` 同义）；
+            //    研究生 `findSchoolTimetab2` 按前端源码是 `data.list`，同一套字段，这里一并认。
+            var reportItems = CollectReportItems(raw);
+            if (reportItems.Count > 0)
+            {
+                result.Report.AddRange(reportItems);
+                result.Sources.Add($"{label}:报表课表 {reportItems.Count} 门");
+                continue;
+            }
+
             var list = AdapterInput.AsArray(raw);
             if (list is null) continue;
 
@@ -424,13 +614,34 @@ public sealed class TongjiStudentAdapter : ISchoolAdapter
         return result;
     }
 
+    /// <summary>
+    /// 从报表服务的响应里挑出"带排课时段的课程项"。
+    ///
+    /// <para>认两种容器：<c>data</c> 直接是数组（本科 <c>findStudentTimetab</c>，已实测），
+    /// 或 <c>data.list</c>（研究生 <c>findSchoolTimetab2</c>，按前端源码推断，未实测）。
+    /// 判据是元素里有没有 <c>timeTableList</c> 数组 —— 它把报表格式与排课服务的扁平表区分开。</para>
+    /// </summary>
+    private static List<JsonElement> CollectReportItems(JsonElement raw)
+    {
+        var list = AdapterInput.AsArray(raw) ?? AdapterInput.AsArray(Prop(raw, "list"));
+        if (list is null) return [];
+
+        return
+        [
+            .. list.Value.EnumerateArray().Where(item =>
+                item.ValueKind == JsonValueKind.Object
+                && AdapterInput.AsArray(Prop(item, "timeTableList")) is not null),
+        ];
+    }
+
     /// <summary>自动探测：像不像可识别的同济课表数据。</summary>
     private static double DetectScore(ImportInput input)
     {
         foreach (var (_, text) in AdapterInput.Texts(input))
         {
             if (!text.Contains("selectedCourses", StringComparison.Ordinal) &&
-                !text.Contains("weekState", StringComparison.Ordinal)) continue;
+                !text.Contains("weekState", StringComparison.Ordinal) &&
+                !text.Contains("timeTableList", StringComparison.Ordinal)) continue;
 
             using var doc = AdapterInput.TryParseJson(text);
             if (doc is null) continue;
@@ -439,6 +650,7 @@ public sealed class TongjiStudentAdapter : ISchoolAdapter
             // 注意：用"是不是数组"而不是"长度" —— 空数组也算"识别成功"，
             // 好让解析器给出"已识别但没有课表数据"这类更有用的诊断，而不是"无法识别格式"。
             if (AdapterInput.AsArray(Prop(raw, "selectedCourses")) is not null) return 0.98;
+            if (CollectReportItems(raw).Count > 0) return 0.97;
 
             var list = AdapterInput.AsArray(raw);
             if (list is not null &&
