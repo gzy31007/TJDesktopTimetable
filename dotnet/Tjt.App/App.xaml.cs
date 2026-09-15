@@ -147,8 +147,11 @@ public partial class App : Application
                 AppLog.Line("[login] --login 显式要求：打开内置登录窗口");
                 ShowTongjiLogin(window.CurrentIsDark);
             }
-            else if (loaded.Origin != TimetableOrigin.Imported)
+            else if (loaded.Origin is TimetableOrigin.Fixture or TimetableOrigin.Demo)
             {
+                // 只有"随应用分发的黄金数据 / 内置样例"才算"没有真实课表"。
+                // `--fixture <path>` 是**显式**指定（自检、截图、排查视觉时用），不该被登录窗口盖住 ——
+                // 早先这里写的是 `Origin != Imported`，`--fixture` 会被判成"没有课表"而弹窗（实测踩到）。
                 AppLog.Line($"[login] 启动时没有真实课表（origin={loaded.Origin}，source={loaded.Source}）：自动打开内置登录窗口");
                 ShowTongjiLogin(window.CurrentIsDark);
             }

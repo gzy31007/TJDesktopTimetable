@@ -316,17 +316,56 @@ public static class BoardVisualBuilder
     /// </summary>
     public static double FontSizeFor(double width) => Math.Max(9.5, Math.Min(12, width / 7));
 
+    /// <summary>色块内文字左右的合计占用（边框 1×2 + 内边距 6×2，与渲染层 <c>Border</c> 同值）。</summary>
+    private const double BlockTextInsets = 14;
+
     /// <summary>
-    /// 按块宽压缩课程名（渲染层 <c>blockName()</c> 的档位表）：
-    /// &lt;62 → 2 字、&lt;80 → 4 字、&lt;100 → 6 字、否则 8 字，超出加省略号。
-    /// 完整名称仍在 tooltip 里，所以这里可以放心截断。
+    /// 按块宽压缩课程名：先由块宽定字号（<see cref="FontSizeFor"/>），再按**色块内可用宽度**逐字累加估宽
+    /// —— 西文（<c>U+0100</c> 以下）按 <c>0.55 em</c>、其余（中日韩与全角标点）按 <c>1.0 em</c>。
+    /// 放不下就截断并补省略号，且省略号**先占位**再定截几个字。
+    ///
+    /// <para><b>为什么不再按块宽分档</b>（旧实现：&lt;62 → 2 字、&lt;80 → 4 字、&lt;100 → 6 字、否则 8 字）：
+    /// 档位表在窄块上白丢字（40 宽的块其实放得下 2 个 9.5 号的字），在宽块上又白白空半格；
+    /// 按宽度算则"放得下几个就显示几个"，同一门课在不同列宽下观感一致。完整名称仍在 tooltip 里。</para>
     /// </summary>
     public static string ShortenName(string name, double width)
     {
         ArgumentNullException.ThrowIfNull(name);
-        var max = width < 62 ? 2 : width < 80 ? 4 : width < 100 ? 6 : 8;
-        return name.Length > max ? string.Concat(name.AsSpan(0, max), "…") : name;
+        var fontSize = FontSizeFor(width);
+        var available = width - BlockTextInsets;
+        if (available <= 0) return name; // 窄到任何字都放不下：交给渲染层的 TextTrimming 兜底
+
+        var used = 0d;
+        var take = 0;
+        foreach (var ch in name)
+        {
+            var advance = AdvanceWidth(ch, fontSize);
+            if (used + advance > available) break;
+            used += advance;
+            take += 1;
+        }
+
+        if (take >= name.Length) return name;
+
+        // 截断了就要补省略号：先把省略号的宽度留出来，再回退到真正放得下的字数
+        var ellipsis = AdvanceWidth('…', fontSize);
+        while (take > 0 && used + ellipsis > available)
+        {
+            take -= 1;
+            used -= AdvanceWidth(name[take], fontSize);
+        }
+
+        return take <= 0 ? "…" : string.Concat(name.AsSpan(0, take), "…");
     }
+
+    /// <summary>
+    /// 单字符的估算步进宽度（em × 字号）：西文按 <c>0.55 em</c>、其余按 <c>1.0 em</c>。
+    ///
+    /// <para>这是**估算**而非字体度量 —— <c>Tjt.Widget</c> 不引 WinUI，量不到真实字宽。口径偏保守
+    /// （CJK 一律全角、西文标点也算 0.55），宁可少显示一个字，也不要溢出后被渲染层二次截断出一截半个字。</para>
+    /// </summary>
+    private static double AdvanceWidth(char ch, double fontSize) =>
+        (ch < 0x0100 ? 0.55 : 1.0) * fontSize;
 
     /// <summary>悬停提示（渲染层 <c>title</c> 属性的四行格式，教师为空时显示破折号）。</summary>
     public static string TooltipOf(BoardBlock block)

@@ -61,19 +61,19 @@ public class BoardVisualTests
     public void 几何按可用宽度自适应_与核心库同一套算式()
     {
         var visual = Visual(1000);
-        // cellWidth = floor((1000 - 74) / 7) = 132
-        Assert.Equal(74d, visual.Geometry.GutterWidth);
-        Assert.Equal(132d, visual.Geometry.CellWidth);
+        // cellWidth = floor((1000 - 64) / 7) = 133
+        Assert.Equal(64d, visual.Geometry.GutterWidth);
+        Assert.Equal(133d, visual.Geometry.CellWidth);
         Assert.Equal(52d, visual.Geometry.RowHeight);
         Assert.Equal(28d, visual.Geometry.HeaderHeight);
         Assert.Equal(7, visual.Geometry.Cols);
         Assert.Equal(11, visual.Geometry.Rows);
 
         // 网格区域：左边距 = gutter，宽 = 列宽 × 天数；顶边 = 画布顶部呼吸位 + 表头行高
-        Assert.Equal(74d, visual.Grid.Left);
+        Assert.Equal(64d, visual.Grid.Left);
         Assert.Equal(6d, visual.HeaderTop);
         Assert.Equal(6d + 28d, visual.Grid.Top);
-        Assert.Equal(132d * 7, visual.Grid.Width);
+        Assert.Equal(133d * 7, visual.Grid.Width);
         Assert.Equal(52d * 11, visual.Grid.Height);
     }
 
@@ -98,7 +98,7 @@ public class BoardVisualTests
     [Fact]
     public void 列宽有下限_窗口极窄时不塌成零()
     {
-        // usable = 100 - 74 = 26 → 26/7 = 3 < 72（默认下限，与渲染层 minCellWidth 同值），取 72
+        // usable = 100 - 64 = 36 → 36/7 = 5 < 72（默认下限，与渲染层 minCellWidth 同值），取 72
         Assert.Equal(72d, BoardVisualBuilder.FitGeometry(100, 11, 7).CellWidth);
         // 可用宽度小于 gutter 时 usable 被夹到 0，仍走下限
         Assert.Equal(72d, BoardVisualBuilder.FitGeometry(10, 11, 7).CellWidth);
@@ -117,8 +117,8 @@ public class BoardVisualTests
         Assert.Equal(7, visual.Days.Count);
         for (var i = 0; i < visual.Days.Count; i += 1)
         {
-            Assert.Equal(74 + (132 * i), visual.Days[i].Left);
-            Assert.Equal(132d, visual.Days[i].Width);
+            Assert.Equal(64 + (133 * i), visual.Days[i].Left);
+            Assert.Equal(133d, visual.Days[i].Width);
         }
 
         Assert.Equal(Weekday.Monday, visual.Days[0].Day);
@@ -168,12 +168,12 @@ public class BoardVisualTests
         var rects = cell.OrderBy(b => b.Key.Split('-')[3]).Select(b => b.Frame).ToList();
         Assert.All(rects, r =>
         {
-            Assert.Equal(40d, r.Width);
+            Assert.Equal(40.333d, r.Width, 3); // (133 - 6) / 3 - 2
             Assert.Equal(102d, r.Height); // 2 行 × 52 - 2
             Assert.Equal(35d, r.Top);     // 顶部呼吸位 6 + 表头 28 + 1
         });
-        // 每块 42px 宽再收 2px，三块依次右移 42
-        Assert.Equal(new[] { 77d, 119d, 161d }, rects.Select(r => r.Left).ToArray());
+        // 每块 42.33px 宽再收 2px，三块依次右移 42.33（列宽 133 不被 3 整除，所以这里带小数）
+        Assert.Equal(new[] { 67d, 109.333d, 151.667d }, rects.Select(r => Math.Round(r.Left, 3)).ToArray());
         Assert.All(cell, b => Assert.True(b.IsStacked));
         Assert.Equal(3, cell.Select(b => b.Key).Distinct().Count());
     }
@@ -193,16 +193,20 @@ public class BoardVisualTests
     }
 
     [Fact]
-    public void 课程名按块宽分档压缩()
+    public void 课程名按色块可用宽度压缩()
     {
         var name = "测试高等数学";
-        // 档位：<62 → 2；<80 → 4；<100 → 6；否则 8
-        Assert.Equal("测试…", BoardVisualBuilder.ShortenName(name, 40));
+        // 字号 clamp(宽/7, 9.5, 12)；可用宽 = 块宽 - 14（边框 1×2 + 内边距 6×2）；
+        // 中文按 1 em、省略号先占位再定截几个字
+        Assert.Equal("测…", BoardVisualBuilder.ShortenName(name, 40));
         Assert.Equal("测试高等…", BoardVisualBuilder.ShortenName(name, 70));
         Assert.Equal("测试高等数学", BoardVisualBuilder.ShortenName(name, 90)); // 6 字刚好放得下
         Assert.Equal("测试高等数学", BoardVisualBuilder.ShortenName(name, 120));
-        // 压缩用的是**短名**（已去括号后缀）：12 字 > 8 → 截 8 字
-        Assert.Equal("测试高等数学（工…", BoardVisualBuilder.ShortenName("测试高等数学（工科类）", 120));
+        // 压缩用的是**短名**（已去括号后缀）：12 字在 120 宽下放得下 7 字 + 省略号
+        Assert.Equal("测试高等数学（…", BoardVisualBuilder.ShortenName("测试高等数学（工科类）", 120));
+        // 西文按 0.55 em —— 同样 40 宽的窄块，英文放得下 3 个字母而中文只放得下 1 个字
+        Assert.Equal("Cal…", BoardVisualBuilder.ShortenName("Calculus", 40));
+        Assert.Equal("Calculus", BoardVisualBuilder.ShortenName("Calculus", 90));
     }
 
     [Fact]
@@ -249,9 +253,9 @@ public class BoardVisualTests
         Assert.Equal("21", light.Tint.ToUpperInvariant().Substring(1, 2));
         Assert.Equal("42", light.Edge.ToUpperInvariant().Substring(1, 2));
         Assert.Equal("80", light.EdgeStrong.ToUpperInvariant().Substring(1, 2));
-        // 深色主题 0.30 → 77 / 0.45 → 115
-        Assert.Equal("4D", dark.Tint.ToUpperInvariant().Substring(1, 2));
-        Assert.Equal("73", dark.Edge.ToUpperInvariant().Substring(1, 2));
+        // 深色主题 0.38 → 97 / 0.52 → 133
+        Assert.Equal("61", dark.Tint.ToUpperInvariant().Substring(1, 2));
+        Assert.Equal("85", dark.Edge.ToUpperInvariant().Substring(1, 2));
     }
 
     [Fact]
@@ -263,9 +267,9 @@ public class BoardVisualTests
 
         // 浅色：原色 + 21（0.13 × 255）
         Assert.Equal($"#21{color[1..]}", light.ToUpperInvariant());
-        // 深色：先 lift(0.45) 再 4D
+        // 深色：先 lift(0.45) 再 61（0.38 × 255）
         var lifted = Colors.Lift(color, 0.45).ToUpperInvariant();
-        Assert.Equal($"#4D{lifted[1..]}", dark.ToUpperInvariant());
+        Assert.Equal($"#61{lifted[1..]}", dark.ToUpperInvariant());
         // 深色主题确实经过提亮：通道值不小于原色
         Assert.True(string.CompareOrdinal(lifted, color) > 0);
     }
@@ -315,8 +319,8 @@ public class BoardVisualTests
         Assert.Equal("1-16", maths.WeeksLabel);
         Assert.False(maths.IsSpecial);
         Assert.Equal("测试高等数学（工科类）", maths.Name);
-        // DisplayName 是按块宽（40px）压缩后的显示名，不是原始短名；完整名在 Name/Tooltip 里
-        Assert.Equal("测试…", maths.DisplayName);
+        // DisplayName 是按块宽（40.33px 的窄块）压缩后的显示名，不是原始短名；完整名在 Name/Tooltip 里
+        Assert.Equal("测…", maths.DisplayName);
         Assert.Equal("测试高等数学（工科类）", maths.Name);
 
         var physics = visual.Blocks.Single(b => b.CourseId == "p1");
@@ -371,7 +375,7 @@ public class BoardVisualTests
         Assert.Equal(49d, geometry.RowHeight);
 
         // 行高只受高度约束影响，列宽不受影响
-        Assert.Equal(132d, geometry.CellWidth);
+        Assert.Equal(133d, geometry.CellWidth);
     }
 
     [Fact]
@@ -411,15 +415,15 @@ public class BoardVisualTests
     {
         var board = Layout.BuildBoard([Maths, Physics, English], TestTerm, new BoardOptions { Today = "2026-09-14" });
 
-        // 宽 1000 → 列宽 132，画布宽 74 + 132*7 = 998 ≤ 1000 → 不需要横向滚动
+        // 宽 1000 → 列宽 133，画布宽 64 + 133*7 = 995 ≤ 1000 → 不需要横向滚动
         var wide = BoardVisualBuilder.Build(board, 1000, dark: false, availableHeight: 760);
-        Assert.Equal(74d + (132d * 7), wide.CanvasWidth);
+        Assert.Equal(64d + (133d * 7), wide.CanvasWidth);
         // 高 = 顶部呼吸位 + 表头 + 网格 + 底部留白
         Assert.Equal(6d + 28d + (52d * 11) + 6d, wide.CanvasHeight);
         Assert.False(wide.NeedsHorizontalScroll);
         Assert.False(wide.NeedsVerticalScroll);
 
-        // 窗口被拖窄：列宽撞到下限 72，画布 74 + 72*7 = 578 > 400 → 需要横向滚动
+        // 窗口被拖窄：列宽撞到下限 72，画布 64 + 72*7 = 568 > 400 → 需要横向滚动
         var narrow = BoardVisualBuilder.Build(board, 400, dark: false, availableHeight: 760);
         Assert.Equal(72d, narrow.Geometry.CellWidth);
         Assert.True(narrow.NeedsHorizontalScroll);

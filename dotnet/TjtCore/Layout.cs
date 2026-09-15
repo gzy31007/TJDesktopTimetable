@@ -175,8 +175,14 @@ public sealed record BlockRect(double Left, double Top, double Width, double Hei
 /// </summary>
 public static partial class Layout
 {
-    /// <summary>默认几何（TS 侧 <c>DEFAULT_GEOMETRY</c>，行列留 0）。</summary>
-    public static readonly BoardGeometry DefaultGeometry = new(74, 118, 52, 28);
+    /// <summary>
+    /// 默认几何（TS 侧 <c>DEFAULT_GEOMETRY</c>，行列留 0）。
+    ///
+    /// <para>左侧时间列（gutter）**64**：正好容下 <c>12 · 18:30</c> 这类标签（标签按
+    /// <c>GutterWidth - 8</c> 居中，右侧留给"正在上"竖条），再宽就是白占网格的地方
+    /// —— 2026-09-15 观感调整把 74 收到 64，列宽随之 +1。</para>
+    /// </summary>
+    public static readonly BoardGeometry DefaultGeometry = new(64, 118, 52, 28);
 
     /// <summary>
     /// 按可用宽度自适应列宽（桌面挂件用；列宽不低于 <paramref name="minCellWidth"/>）。

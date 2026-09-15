@@ -379,8 +379,8 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   - **诊断开关 `--no-weekend` / `--weekend`**（配 `--smoke`）只影响本次运行、**不落盘**，与 `--desktop-layer` 同口径；
     `VerifySmoke` 的断言跟着走：列数按有效值算（7 / 5），隐藏周末时色块数**不计周末时段**
     （否则会得到"色块数不一致"的假 FAIL）。
-  - 实测（`--fixture tongji-2026-1-personal.json`，14 门 / 19 条）：显示 → `days=7 blocks=19 colW=172`；
-    隐藏 → `days=5 blocks=17 colW=241`。
+  - 实测（`--fixture tongji-2026-1-personal.json`，14 门 / 19 条）：显示 → `days=7 blocks=19 colW=173`；
+    隐藏 → `days=5 blocks=17 colW=242`（窗口宽 1278 DIP；gutter 64 见下一条）。
 - **画布呼吸位与左侧时间列的对齐（2026-09-16，观感修复）** —— 用户反馈两条：
   "高度减小时第一列时间与窗口的边距过大"、"周一到周日那一行与上面的边距过小"。
   - **顶部呼吸位 = `Tjt.Widget` 的 `CanvasTopPadding`（6dip）**，与底部的 `GridBottomPadding` 对称；
@@ -392,6 +392,25 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     现在 `Width = GutterWidth - 8`、`Left = 4`（左右对称居中，右侧 8dip 留给"正在上"的竖条标记）。
   - 教训：这类"边距/留白"问题的根因经常是**对齐方式 × 字号自适应**的组合，而不是列宽本身；
     只调列宽（gutter）会改掉几何基准、牵动全部视觉断言，代价大且治不了根。
+- **时间列宽 / 深色色块 / 名称截断（2026-09-15 三项视觉调整）**：都落在视觉真源里，
+  期望值同步到 `BoardVisualTests` / `LayoutTests` / `CollisionE2ETests`（**改这三项 = 改 4 个文件 + 3 份测试**）。
+  - **左侧时间列 74 → 64 DIP**（`TjtCore/Layout.DefaultGeometry`）：标签按 `GutterWidth - 8` 居中，
+    64 正好容下 `12 · 18:30`，省下的 10 DIP 全给网格。⚠️ **gutter 是几何基准，测试数字要整体重算**：
+    `floor((1000-64)/7) = 133`（原 132）、`Days[i].Left = 64 + 133*i`、画布宽 `64 + 133*7 = 995`、
+    缩放下限画布 `64 + 72*7 = 568`；并排三块的宽从整数 40 变成 **40.333**（133 不被 3 整除），
+    断言要用 `Assert.Equal(40.333d, w, 3)` / `Math.Round(x, 3)` 而不是精确相等。
+  - **深色色块更亮**（`TintPalette.ForBlock`）：填充 30% → **38%**、悬停 40% → **48%**、描边 45% → **52%**；
+    **课程主色与 `lift(0.45)` 都没动**，浅色档（13% / 20% / 26%）也没动。深色 alpha 黄金值：`0.38 → 61`、`0.52 → 85`（旧 `4D` / `73`）。
+  - **名称截断改成"按实际宽度算"**（`BoardVisualBuilder.ShortenName`）：不再用块宽档位表
+    （<62 → 2 字 / <80 → 4 / <100 → 6 / 否则 8），改为**由块宽定字号 → 按色块内可用宽度逐字累加估宽**
+    （西文 0.55 em、其余 1.0 em；可用宽 = 块宽 − 14 = 边框 2 + 内边距 12），且**省略号先占位再定截几个字**。
+    窄块不再白丢字、宽块不再空半格。副作用（预期）：40 DIP 的窄块由"2 字 + …"变成"1 字 + …"——
+    旧版那两个字的第三个字符本来也会被渲染层的 `TextTrimming` 吃掉。估算偏保守是刻意的：`Tjt.Widget` 量不到真实字宽。
+  - **截图坑（新脚本 `.tools/shot-top.ps1`）**：挂件贴桌面层，`CopyFromScreen` 会抓到压在上面的窗口
+    （实测抓到聊天窗，得到"窗口没变"的假结论）。正解：`EnumWindows` 按 **PID** 找 HWND
+    （`MainWindowHandle` 对 no-activate 窗口不可靠）→ `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)` 脉冲 → 再截。
+  - 另一个同轮修掉的真 bug：**自动登录窗口的触发条件写成 `origin != Imported`**，于是 `--fixture`（Explicit）
+    启动也会弹登录窗口、盖住挂件；现在只认 `Fixture` / `Demo`（见「内置登录窗口」条）。
 - **课表导入（2026-09-16 完成：真实课表导入搬到了 WinUI 线）**：入口三处（设置窗口「导入」页、托盘「导入课表…」、
   挂件 `⋯` 菜单「导入课表…」），三处都落到同一页。功能与 Electron 侧导入面板对齐：粘贴浏览器请求抓取、
   粘贴/选择本地 JSON、选适配器、显示探测行与适配器诊断、清空/重新载入/打开数据目录。
@@ -444,11 +463,11 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   - **触发点只有两个（2026-09-16 收敛：挂件 `⋯` 菜单与托盘里那两项已移除）**：
     ① **导入时手动** —— 设置窗口「导入」页的「登录同济并获取课表」按钮（`SettingsHost.OpenLogin` →
     `ImportPage.Build(..., openLogin)`）；② **启动时没有真实课表就自动开** —— `OnLaunched` 在
-    `AppHost.Load` 之后判 `loaded.Origin != TimetableOrigin.Imported`（黄金 fixture 与内置样例都**不算**
-    真实课表，判据就这一条），命中即 `ShowTongjiLogin` 并打
+    `AppHost.Load` 之后判 `loaded.Origin is Fixture or Demo`（**2026-09-15 修**：原先写成
+    `!= Imported`，于是 `--fixture`（Explicit）启动也会弹登录窗口、把挂件盖住），命中即 `ShowTongjiLogin` 并打
     `[login] 启动时没有真实课表（origin=…，source=…）：自动打开内置登录窗口`；`--login` 仍可显式开。
-    自检 / 诊断模式（`--smoke` / `--fetch-check` / `--login-check`）**一律不自动弹**（它们都在此之前 return，
-    `--fixture` 走 Explicit 也不命中）。窗口是单例（已开着就 `Activate`）。
+    自检 / 诊断模式（`--smoke` / `--fetch-check` / `--login-check`）**一律不自动弹**（它们都在此之前 return）；
+    `--fixture` 走 Explicit **也不命中** —— 这条口径现在与代码一致了。窗口是单例（已开着就 `Activate`）。
   - **验收**（`.tools/verify-auto-login.ps1`，纯 ASCII）：A 删掉 `timetable.json` 后启动 → 日志里有
     `[login] …hwnd=0x…`（自动开了）；B 先 `--import <fixture>` 落盘、再启动 → 日志里**没有** `[login]`。
     脚本会备份 / 还原用户真实的 `timetable.json`。

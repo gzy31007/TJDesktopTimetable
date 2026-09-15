@@ -12,9 +12,9 @@ namespace Tjt.Widget;
 /// 表达方式：CSS 侧把 <c>--ink</c> 写成 <c>rgba(...)</c>，XAML 的 <c>Brush</c> 也能吃
 /// <c>#aarrggbb</c>，所以这里统一产出十六进制，避免渲染层再写一次字符串拼接。
 /// </summary>
-/// <param name="Tint">色块底色（浅色主题 13%、深色主题 30% 透明度）。</param>
-/// <param name="TintHover">悬停底色（20% / 40%）。</param>
-/// <param name="Edge">描边（26% / 45%）。</param>
+/// <param name="Tint">色块底色（浅色主题 13%、深色主题 38% 透明度）。</param>
+/// <param name="TintHover">悬停底色（20% / 48%）。</param>
+/// <param name="Edge">描边（26% / 52%）。</param>
 /// <param name="EdgeStrong">虚线描边（非全周课用；50% / 70%）。</param>
 /// <param name="Ink">课程名文字色。</param>
 /// <param name="InkSoft">教室 / 周次文字色。</param>
@@ -102,6 +102,10 @@ public static class TintPalette
     ///
     /// 深色主题先把课程色 <c>lift(color, 0.45)</c> 提亮，再整体加大透明度 —— 深底上直接压原色
     /// 会糊成一块，这是渲染层当初的结论，这里保持一致。
+    ///
+    /// <para><b>深色档在 2026-09-15 调高过一档</b>（填充 30% → 38%、悬停 40% → 48%、
+    /// 描边 45% → 52%）：提亮后的颜色再压 30% 在深色桌面上偏闷，远看像"灰块"，
+    /// 与旁边的网格线区分不出发色。课程主色与 <c>lift</c> 都**没动**，只提了不透明度。</para>
     /// </summary>
     /// <param name="color">课程主色（<c>#rrggbb</c>）。</param>
     /// <param name="dark">是否深色主题。</param>
@@ -110,9 +114,9 @@ public static class TintPalette
         ArgumentNullException.ThrowIfNull(color);
         var baseColor = dark ? Colors.Lift(color, 0.45) : color;
         return new BlockTint(
-            Tint: Rgba(baseColor, dark ? 0.30 : 0.13),
-            TintHover: Rgba(baseColor, dark ? 0.40 : 0.20),
-            Edge: Rgba(baseColor, dark ? 0.45 : 0.26),
+            Tint: Rgba(baseColor, dark ? 0.38 : 0.13),
+            TintHover: Rgba(baseColor, dark ? 0.48 : 0.20),
+            Edge: Rgba(baseColor, dark ? 0.52 : 0.26),
             EdgeStrong: Rgba(baseColor, dark ? 0.70 : 0.50),
             // 深色下必须白字；浅色下用固定的深墨字（比按亮度算更稳，与渲染层一致）
             Ink: dark ? "#FFFFFF" : "#17223A",

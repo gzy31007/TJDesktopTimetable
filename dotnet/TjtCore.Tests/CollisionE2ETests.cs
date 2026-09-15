@@ -160,9 +160,9 @@ public class CollisionE2ETests
         Assert.True(rects[2].Left > rects[1].Left);
         Assert.True(rects[1].Left >= rects[0].Left + rects[0].Width);
         Assert.True(rects[2].Left >= rects[1].Left + rects[1].Width);
-        // 参考数值：cellWidth = floor((1000-74)/7) = 132 → 列宽 (132-6)/3 = 42，色块再收 2px = 40
-        Assert.Equal(40d, rects[0].Width);
-        Assert.Equal(new[] { 77d, 119d, 161d }, rects.Select(r => r.Left).ToArray());
+        // 参考数值：cellWidth = floor((1000-64)/7) = 133 → 列宽 (133-6)/3 = 42.33，色块再收 2px
+        Assert.Equal(40.333d, rects[0].Width, 3);
+        Assert.Equal(new[] { 67d, 109.333d, 151.667d }, rects.Select(r => Math.Round(r.Left, 3)).ToArray());
         // 高度只由节次跨度决定（1-2 → 2 行）
         Assert.All(rects, r => Assert.Equal(102d, r.Height));
     }

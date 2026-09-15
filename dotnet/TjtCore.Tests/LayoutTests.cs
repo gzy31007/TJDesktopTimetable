@@ -176,20 +176,20 @@ public class LayoutTests
             .ToList();
         var rects = cell.Select(b => Layout.BlockRect(board, b, geo)).ToArray();
 
-        // cellWidth = floor((1000 - 74) / 7) = 132 → 整列留 6px、三块均分 = 42，每块再收 2px
+        // cellWidth = floor((1000 - 64) / 7) = 133 → 整列留 6px、三块均分 = 42.33，每块再收 2px
         Assert.All(rects, r =>
         {
-            Assert.Equal(40d, r.Width);
+            Assert.Equal(40.333d, r.Width, 3);
             Assert.Equal(102d, r.Height);
             Assert.Equal(29d, r.Top);
         });
-        Assert.Equal(new[] { 77d, 119d, 161d }, rects.Select(r => r.Left).ToArray());
+        Assert.Equal(new[] { 67d, 109.333d, 151.667d }, rects.Select(r => Math.Round(r.Left, 3)).ToArray());
     }
 
     [Fact]
     public void 列宽不低于下限且可用宽度不足时取最小值()
     {
-        // 可用宽度 100：usable = 26，26/7 = 3 < 64 → 取 64（不是 3，也不是负数）
+        // 可用宽度 100：usable = 36，36/7 = 5 < 64 → 取 64（不是 5，也不是负数）
         Assert.Equal(64d, Layout.FitGeometry(100, 11, 7).CellWidth);
         // 可用宽度小于 gutter：usable 被 Math.max(0, …) 夹到 0，仍然不会出现负列宽
         Assert.Equal(64d, Layout.FitGeometry(10, 11, 7).CellWidth);
