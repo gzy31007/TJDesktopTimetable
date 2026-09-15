@@ -51,8 +51,7 @@ internal static class BoardRenderer
         // （UIElement.ProtectedCursor）而不是 Win32 SetCursor —— 后者会被窗口过程/渲染层
         // 在 WM_SETCURSOR 里按类光标重置（真机实测"能缩放但看不到缩放光标"）。
         // 只挂光标、不放事件处理：拖拽判定仍在 Win32 侧（WindowEdgeResize）。
-        var zones = CursorZones.ForWindow(visual.CanvasWidth, visual.CanvasHeight);
-        foreach (var zone in zones)
+        foreach (var zone in CursorZones.ForWindow(visual.CanvasWidth, visual.CanvasHeight))
         {
             var strip = new CursorStrip(CursorFor(zone.Grip))
             {
@@ -61,6 +60,10 @@ internal static class BoardRenderer
                 HorizontalAlignment = zone.X <= 0 ? HorizontalAlignment.Left : HorizontalAlignment.Right,
                 VerticalAlignment = zone.Y <= 0 ? VerticalAlignment.Top : VerticalAlignment.Bottom,
             };
+            // **必须显式放进 Star 行（row 1）**：默认落在 row 0（Auto 行），Auto 行为了容纳
+            // "底部对齐的下条"会被迫长到整窗高，把 Star 行挤成几十像素 —— 表现为
+            // 头部条被推到下方、上面一大片空白（真机逐子元素探针实测：row0 长到 606）。
+            Grid.SetRow(strip, 1);
             root.Children.Add(strip);
         }
 
@@ -83,7 +86,29 @@ internal static class BoardRenderer
         Grid.SetRow(scroller, 1);
         root.Children.Add(scroller);
 
-        return root;
+        // 边缘光标条放在**独立覆盖层**里，和整块课表同处一格（z 序在后 → 盖在上面）。
+        // 不要把它们加进 `root` 本身：实测那样会把根网格的两行布局搞坏 ——
+        // 整个课表被推到下方、上方留一大片空白（`--size` 下的截图对比确认）。
+        // 用 WinUI 原生光标（`ProtectedCursor`）而不是 Win32 `SetCursor`：后者会被窗口过程
+        // 在 WM_SETCURSOR 里按类光标重置（真机实测"能缩放但看不到缩放光标"）。
+        // 只挂光标、不挂事件处理：拖拽判定仍在 Win32 侧（WindowEdgeResize）。
+        var shell = new Grid();
+        shell.Children.Add(root);
+
+        var overlay = new Grid { IsHitTestVisible = true };
+        foreach (var zone in CursorZones.ForWindow(visual.CanvasWidth, visual.CanvasHeight))
+        {
+            overlay.Children.Add(new CursorStrip(CursorFor(zone.Grip))
+            {
+                Width = zone.Width,
+                Height = zone.Height,
+                HorizontalAlignment = zone.X <= 0 ? HorizontalAlignment.Left : HorizontalAlignment.Right,
+                VerticalAlignment = zone.Y <= 0 ? VerticalAlignment.Top : VerticalAlignment.Bottom,
+            });
+        }
+
+        shell.Children.Add(overlay);
+        return shell;
     }
 
     /// <summary>

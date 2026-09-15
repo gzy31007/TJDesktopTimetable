@@ -223,6 +223,12 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     不参与"谁最后 SetCursor"的竞争。Win32 侧只留判定与搬窗口。
   - 抓取带仍是 6px、仍用**内缩矩形**判边（`x < left + band`，
     不是 `x - left < band`，后者会把窗口左侧外面整片桌面算成抓取带 —— 有单测钉住）。
+  - **⚠️ 光标条必须显式 `Grid.SetRow(strip, 1)`**：`BoardRenderer` 的内容根是两行 Grid
+    （row 0 = Auto 头部条，row 1 = Star 滚动区），子元素**默认落在 row 0**。
+    把"底部对齐的下光标条"放进 Auto 行，Auto 行为了容纳它会被迫长到整窗高
+    （真机逐子元素探针实测：`row0` 长到 606，Star 行只剩 138）——表现为**头部条被推到下方、
+    上面一大片空白**。这是本轮"布局忽然坏了"的真凶，靠"去掉条对比截图"+"逐子元素打印几何"
+    两步定位。教训：往有两行的 Grid 里加覆盖元素，先想清楚它落在哪一行。
   - **已知取舍**：顶部光标条（6px，`HorizontalAlignment=Stretch`）压在顶部条上，
     会吃掉那 6px 的 pointerdown —— 即"贴着窗口最上沿那一条按下去拖窗口"可能不响应。
     这是 DeskBox 也有的同类折中（它的 resize 边框同样盖在标题栏上）；真觉得别扭再给拖拽区让出 6px。
