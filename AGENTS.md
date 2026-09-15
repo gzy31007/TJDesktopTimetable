@@ -8,7 +8,11 @@ Windows 桌面小组件：把同济大学课表以半透明色块网格固定在
 
 - 本地目录：`/root/TJDesktopTimetable`（仓库根）
 - 远程仓库：https://github.com/gzy31007/TJDesktopTimetable （Public / MIT）
-- 技术栈：Electron 44 + TypeScript + Vite（electron-vite）+ Vue 3；核心逻辑纯 TS；Win32 调用走 `koffi`
+- 技术栈：**WinUI 3（C#，`dotnet/`）是唯一开发主线**；`TjtCore` 平台无关（Linux 可测）、`Tjt.Widget` 纯计算、`Tjt.App` 是 WinUI 外壳，Win32 直接 P/Invoke
+- **状态（2026-09-16，v1.0.0 已发布）**：Electron 线（`apps/desktop/` + `packages/core/`）**已弃用并冻结** ——
+  代码留作参考实现与**黄金 fixture 真源**，CI 仍跑它的单测（77 + 21），但**不再开发、不再出安装包**；
+  新功能一律进 `dotnet/` 线。发版：打了 `v*` tag 就走 `.github/workflows/release-winui.yml`
+  （自包含 publish → zip → 挂到 Release），版本号只在 `dotnet/Directory.Build.props` 改一处。
 
 ## 工作目录约定
 
@@ -131,7 +135,8 @@ docs/                 架构、数据模型、适配器指南
 > "用了哪些 API / 什么机制"这类**事实**，不得抄代码、注释、文档正文、美术资源
 > （依据 `docs/deskbox-refactor-assessment.md`）。实践口径：**先查它、后自己写**。
 
-技术栈正在从「Electron 独占」转向「WinUI 外壳 + 核心逻辑双实现」。原因是材质：Electron 的三条系统材质路径实测全拿不到 DeskBox 那种质感（DWM 对"从未被激活的窗口"一律降级成近黑平色），只有 WinUI 的 `MicaController` + `SystemBackdropConfiguration`（可强制 `IsInputActive`）能拿到。
+技术栈迁移**已完成**（2026-09-16 v1.0.0）：Electron 线弃用冻结，WinUI 线是唯一开发主线（见"项目定位"）。
+当初转过来的原因是材质：Electron 的三条系统材质路径实测全拿不到 DeskBox 那种质感（DWM 对"从未被激活的窗口"一律降级成近黑平色），只有 WinUI 的 `MicaController` + `SystemBackdropConfiguration`（可强制 `IsInputActive`）能拿到。
 
 ### 三个工程的分工（改动时必须守住）
 
@@ -149,10 +154,13 @@ docs/                 架构、数据模型、适配器指南
 ### 在 Windows 本机构建（WSL 侧编译不了 WinUI）
 
 ```bash
-B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.ps1','rb').read().decode('ascii').encode('utf-16-le')).decode())")
-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand "$B64"
+PS=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+$PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\TJDesktopTimetable\.tools\build-winui.ps1' -RunSmoke
 ```
 
+- **带开关时必须用 `-File` 这种形式**：把脚本 base64 成 `-EncodedCommand "$B64"` 之后**再跟 `-RunSmoke`**，
+  会被 PowerShell 当成非法参数、直接打印用法提示就退出（实测踩过，白跑一轮）；
+  `-EncodedCommand` 只适合"不带开关的构建"。
 - 脚本把源码 robocopy 到 `C:\tjt-tools\work`（**反向拉取**：Windows 侧读 `\\wsl.localhost\...`，不是 WSL 写 `/mnt/c`），
   再用 `C:\tjt-tools\dotnet\dotnet.exe`（.NET 10 SDK，装在工作区里，不污染系统）构建；加 `-RunSmoke` 还会跑冒烟自检。
   日志在 `C:\tjt-tools\build.log`。
