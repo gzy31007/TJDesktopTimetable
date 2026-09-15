@@ -233,10 +233,10 @@ internal static class BoardRenderer
     }
 
     /// <summary>
-    /// <c>⋯</c> 溢出菜单：设置 / 恢复默认位置 / 贴桌面层开关 / 隐藏挂件 / 退出。
+    /// <c>⋯</c> 溢出菜单：设置 / 恢复默认位置 / 贴桌面层开关 / 显示周末开关 / 隐藏挂件 / 退出。
     ///
-    /// 菜单里的"贴桌面层"用 <see cref="ToggleMenuFlyoutItem"/> 反映当前值 ——
-    /// 它是唯一能用勾选状态表达"当前是否生效"的项，其余都是动作。
+    /// 菜单里的两个**开关**（"贴桌面层"、"显示周末"）用 <see cref="ToggleMenuFlyoutItem"/> 反映当前值 ——
+    /// 它们是唯一能用勾选状态表达"当前是否生效"的项，其余都是动作。
     /// </summary>
     private static Button BuildOverflowButton(bool dark, WidgetActions actions)
     {
@@ -270,6 +270,18 @@ internal static class BoardRenderer
                 Icon = new FontIcon { Glyph = IconGlyph.Pin },
             };
             toggle.Click += (_, _) => actions.ToggleDesktopLayer();
+            flyout.Items.Add(toggle);
+        }
+
+        if (actions.ShowWeekend is { } weekend && actions.ToggleShowWeekend is not null)
+        {
+            var toggle = new ToggleMenuFlyoutItem
+            {
+                Text = "显示周末",
+                IsChecked = weekend,
+                Icon = new FontIcon { Glyph = IconGlyph.Weekend },
+            };
+            toggle.Click += (_, _) => actions.ToggleShowWeekend();
             flyout.Items.Add(toggle);
         }
 

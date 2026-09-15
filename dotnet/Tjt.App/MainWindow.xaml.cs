@@ -372,7 +372,7 @@ public sealed partial class MainWindow : Window
         var board = Tjt.Core.Layout.BuildBoard(
             _loaded.Timetable.Courses,
             _loaded.Timetable.Term,
-            new Tjt.Core.BoardOptions { TrimEmptySlots = true });
+            new Tjt.Core.BoardOptions { TrimEmptySlots = true, ShowWeekend = WeekendEnabled });
         var visual = BoardVisualBuilder.Build(
             board,
             widthDip,
@@ -632,6 +632,12 @@ public sealed partial class MainWindow : Window
             var next = _settings with { DesktopLayer = !_settings.DesktopLayer };
             ApplySettings(next);
         },
+        ShowWeekend = WeekendEnabled,
+        ToggleShowWeekend = () =>
+        {
+            var next = _settings with { ShowWeekend = !WeekendEnabled };
+            ApplySettings(next);
+        },
         ReportResizeGrip = grip => _edgeResize?.NotePressedGrip(grip),
         Hide = HideWidget,
         Exit = () => Application.Current.Exit(),
@@ -696,6 +702,13 @@ public sealed partial class MainWindow : Window
             ApplyWindowDecorationTheme(WindowNative.GetWindowHandle(this), dark);
             _backdrop?.UpdateTheme(dark);
             Render("主题变化");
+        }
+
+        if (previous.ShowWeekend != next.ShowWeekend)
+        {
+            // 列数变了（7 ↔ 5），必须整棵树重排 —— 网格几何 / 色块坐标 / 滚动判定全都跟着变
+            AppLog.Line($"[settings] 显示周末 → {next.ShowWeekend}");
+            Render("显示周末变化");
         }
     }
 
@@ -786,6 +799,14 @@ public sealed partial class MainWindow : Window
 
     /// <summary>当前是否贴桌面层（托盘菜单的勾选状态）。</summary>
     internal bool LayerEnabled => _layer?.Enabled ?? _settings.DesktopLayer;
+
+    /// <summary>
+    /// 当前是否显示周末（<c>⋯</c> 菜单与托盘勾选状态、<c>--no-weekend</c> 覆盖后的**有效值**）。
+    ///
+    /// <para>CLI 覆盖只影响本次运行、不落盘：与 <c>--desktop-layer</c> 同口径，
+    /// 供验收脚本在不碰用户设置的前提下跑另一种布局。</para>
+    /// </summary>
+    internal bool WeekendEnabled => _options.Weekend ?? _settings.ShowWeekend;
 
     /// <summary>层级状态快照（冒烟自检 / 真机日志用）。</summary>
     internal LayerState? LayerSnapshot() => _layer?.Snapshot();

@@ -335,12 +335,14 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     （按 ANSI 读，引号配对错乱）—— 单引号里只放 ASCII。
 - **入口与设置界面（2026-09-15）**：WinUI 侧现在有两个入口，都是照 DeskBox / 资源管理器的语言做的。
   - **挂件顶部条**（`Rendering/BoardRenderer.cs`）：左边应用图标 + 学期 + 「第 N 周 · 今日 N 节」，
-    右边 **刷新** 与 **⋯ 溢出菜单**（设置 / 导入课表… / 重新载入课表 / 恢复默认位置 / 贴桌面层勾选 / 隐藏 / 退出）。
+    右边 **刷新** 与 **⋯ 溢出菜单**（设置 / 导入课表… / 重新载入课表 / 恢复默认位置 / 贴桌面层勾选 /
+    显示周末勾选 / 隐藏 / 退出）。
     图标用 Segoe Fluent Icons 字形（`Rendering/IconGlyph.cs`），跟主题色走、任意 DPI 都清晰。
     动作经 `WidgetActions`（渲染层只发意图，逻辑留在 `MainWindow.BuildActions()`）。
   - **托盘图标**（`Win32/TrayIcon.cs`）：`Shell_NotifyIcon` + 消息专用窗口（`HWND_MESSAGE`，离屏、
     不参与层级）+ 原生右键菜单（`TrackPopupMenu(TPM_RETURNCMD)` 同步取回选中项，不需要消息分发）。
-    左键单击 = 显示挂件；菜单 = 显示 / 设置 / 导入课表… / 重新载入 / 恢复位置 / 贴桌面层勾选 / 退出。
+    左键单击 = 显示挂件；菜单 = 显示 / 设置 / 导入课表… / 重新载入 / 恢复位置 / 贴桌面层勾选 /
+    显示周末勾选 / 退出。
     WASDK 1.8 没有托盘 API，所以直接 P/Invoke；图标是 `Assets/app.ico`（运行时 `LoadImage` 加载）。
   - **设置窗口**（`SettingsWindow.xaml(.cs)` + `Rendering/SettingsView.cs`）：左侧 `NavigationView`
     导航（常规 / 导入 / 外观 / 关于）+ 卡片行（左图标、标题、说明，右控件），照 DeskBox 那套。
@@ -364,8 +366,21 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   - 自适应规则：**横向**保持最小列宽 72（沿用渲染层 `minCellWidth`），装不下就横向滚动；
     **纵向**把行高压到刚好铺满（下限 34），再装不下才纵向滚动 —— 也就是缩窗口先压行高、再出滚动条，
     不会把格子压成一条缝。实测：`--size 820x640 → rowH=52 无滚动`、`--size 760x420 → rowH=37 + 纵向滚动`。
-  - `--size WxH` 会真的改窗口尺寸（专门为验证自适应加的）；`--fixture/--log/--no-backdrop/--desktop-layer`
+  - `--size WxH` 会真的改窗口尺寸（专门为验证自适应加的）；`--fixture/--log/--no-backdrop/--desktop-layer/--weekend`
     见 `AppStartupOptions`。
+- **显示周末开关（2026-09-15 完成）**：外观页原先那个 disabled 占位开关做成了真的，并同步到挂件 `⋯` 菜单与托盘。
+  - **口径**：`WidgetSettings.ShowWeekend`（默认 true）→ `Layout.BuildBoard` 的 `BoardOptions.ShowWeekend`。
+    关掉后只生成周一到周五 **5 列**，周末的课**直接不占列**（被 `visibleDays` 过滤，且不计入"被周次过滤隐藏"
+    的统计 —— 与 Electron 侧语义一致）；列宽按剩余列重新自适应。
+  - **切换后必须整棵树重排**（列数 7↔5：几何 / 色块坐标 / 滚动判定全变）：
+    `MainWindow.ApplySettings` 比出 `ShowWeekend` 变化后 `Render`，并打 `[settings] 显示周末 → …`。
+  - **三个入口一份真源**：设置窗口「外观」页开关、挂件 `⋯` 菜单（`ToggleMenuFlyoutItem`）、托盘勾选项；
+    勾选状态都读 `MainWindow.WeekendEnabled`（= `--no-weekend` 覆盖后的**有效值**），所以三处永远一致。
+  - **诊断开关 `--no-weekend` / `--weekend`**（配 `--smoke`）只影响本次运行、**不落盘**，与 `--desktop-layer` 同口径；
+    `VerifySmoke` 的断言跟着走：列数按有效值算（7 / 5），隐藏周末时色块数**不计周末时段**
+    （否则会得到"色块数不一致"的假 FAIL）。
+  - 实测（`--fixture tongji-2026-1-personal.json`，14 门 / 19 条）：显示 → `days=7 blocks=19 colW=172`；
+    隐藏 → `days=5 blocks=17 colW=241`。
 - **画布呼吸位与左侧时间列的对齐（2026-09-16，观感修复）** —— 用户反馈两条：
   "高度减小时第一列时间与窗口的边距过大"、"周一到周日那一行与上面的边距过小"。
   - **顶部呼吸位 = `Tjt.Widget` 的 `CanvasTopPadding`（6dip）**，与底部的 `GridBottomPadding` 对称；

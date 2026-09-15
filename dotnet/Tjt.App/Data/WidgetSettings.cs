@@ -46,6 +46,15 @@ internal sealed record WidgetSettings
     public bool DesktopLayer { get; init; } = true;
 
     /// <summary>
+    /// 是否显示周末两列（周六 / 周日）。
+    ///
+    /// <para>默认 <c>true</c>（与历史行为一致）。关掉后课表只画周一到周五，周末的课**不占列**
+    /// —— 它们被布局层直接丢弃（<c>BoardOptions.ShowWeekend = false</c>），
+    /// 且不计入"被周次过滤隐藏的时段"统计（见 <c>Layout.BuildBoard</c>）。</para>
+    /// </summary>
+    public bool ShowWeekend { get; init; } = true;
+
+    /// <summary>
     /// 窗口**外框**位置与尺寸（DIP）；<c>null</c> = 首次启动，用默认右下角。
     ///
     /// <para>存外框而不是客户区：`AppWindow.ResizeClient` 收的是客户区尺寸，而 Windows 允许的

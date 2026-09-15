@@ -3,6 +3,10 @@ namespace Tjt.App;
 /// <summary>命令行选项（GUI 应用没有 TTY，参数是唯一的开关面）。</summary>
 /// <param name="Smoke">自带窗口跑一遍渲染自检后退出（CI 用）。</param>
 /// <param name="DesktopLayer">贴桌面层；<c>null</c> = 用设置里的值（默认 true）。</param>
+/// <param name="Weekend">
+/// 显示周末两列；<c>null</c> = 用设置里的值（默认 true）。
+/// 只影响本次运行、不落盘，供验收脚本跑"隐藏周末"那种布局。
+/// </param>
 /// <param name="NoBackdrop">跳过系统材质（无 GPU 的 CI runner 上 D3D 合成会挂住）。</param>
 /// <param name="LogPath">日志文件路径（WinExe 不附加控制台，CI 只能靠文件拿输出）。</param>
 /// <param name="FixturePath">显式指定要导入的课表 JSON；为空时按约定位置探测。</param>
@@ -30,6 +34,7 @@ namespace Tjt.App;
 internal sealed record AppStartupOptions(
     bool Smoke = false,
     bool? DesktopLayer = null,
+    bool? Weekend = null,
     bool NoBackdrop = false,
     string? LogPath = null,
     string? FixturePath = null,
@@ -45,7 +50,7 @@ internal sealed record AppStartupOptions(
     /// <summary>
     /// 解析命令行。
     ///
-    /// 支持的形态：<c>--smoke</c>、<c>--desktop-layer</c> / <c>--no-desktop-layer</c>、<c>--no-backdrop</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
+    /// 支持的形态：<c>--smoke</c>、<c>--desktop-layer</c> / <c>--no-desktop-layer</c>、<c>--weekend</c> / <c>--no-weekend</c>、<c>--no-backdrop</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>（不传就用窗口系统给的默认尺寸，传了就精确设成它，
     /// 便于验证自适应）、<c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>、
     /// <c>--login</c>、<c>--login-check &lt;url&gt;</c>。
@@ -55,6 +60,7 @@ internal sealed record AppStartupOptions(
     {
         var smoke = false;
         bool? desktopLayer = null;
+        bool? weekend = null;
         var noBackdrop = false;
         string? logPath = null;
         var dark = (bool?)null;
@@ -73,6 +79,8 @@ internal sealed record AppStartupOptions(
             if (Matches(arg, "smoke")) smoke = true;
             else if (Matches(arg, "desktop-layer")) desktopLayer = true;
             else if (Matches(arg, "no-desktop-layer")) desktopLayer = false;
+            else if (Matches(arg, "weekend")) weekend = true;
+            else if (Matches(arg, "no-weekend")) weekend = false;
             else if (Matches(arg, "no-backdrop")) noBackdrop = true;
             else if (Matches(arg, "log") && i + 1 < args.Length) logPath = args[++i];
             else if (Matches(arg, "dark")) dark = true;
@@ -95,7 +103,21 @@ internal sealed record AppStartupOptions(
             }
         }
 
-        return new AppStartupOptions(smoke, desktopLayer, noBackdrop, logPath, fixture, dark, width, height, importPath, fetchCheck, settingsPage, login, loginCheck);
+        return new AppStartupOptions(
+            Smoke: smoke,
+            DesktopLayer: desktopLayer,
+            Weekend: weekend,
+            NoBackdrop: noBackdrop,
+            LogPath: logPath,
+            FixturePath: fixture,
+            Dark: dark,
+            Width: width,
+            Height: height,
+            ImportPath: importPath,
+            FetchCheckPath: fetchCheck,
+            SettingsPage: settingsPage,
+            Login: login,
+            LoginCheckUrl: loginCheck);
     }
 
     /// <summary>支持 <c>--flag</c> / <c>-flag</c> / <c>/flag</c> 三种前缀。</summary>

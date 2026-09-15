@@ -26,6 +26,12 @@ public sealed record WidgetActions
     /// <summary>切换贴桌面层。</summary>
     public Action? ToggleDesktopLayer { get; init; }
 
+    /// <summary>当前是否显示周末（<c>null</c> = 不显示这一项）。</summary>
+    public bool? ShowWeekend { get; init; }
+
+    /// <summary>切换"显示周末"。</summary>
+    public Action? ToggleShowWeekend { get; init; }
+
     /// <summary>隐藏挂件（本次运行内；下次启动照常显示）。</summary>
     public Action? Hide { get; init; }
 

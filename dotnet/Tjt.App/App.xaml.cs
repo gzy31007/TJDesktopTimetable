@@ -35,6 +35,7 @@ public partial class App : Application
         ToggleDesktopLayer = 5,
         Import = 6,
         Exit = 7,
+        ToggleWeekend = 8,
     }
 
     private readonly List<MainWindow> _windows = [];
@@ -404,7 +405,7 @@ public partial class App : Application
         return tray;
     }
 
-    /// <summary>托盘菜单（每次弹出前重建，好让"贴桌面层"的勾选状态是最新的）。</summary>
+    /// <summary>托盘菜单（每次弹出前重建，好让两个开关的勾选状态是最新的）。</summary>
     private List<TrayMenuItem> BuildTrayMenu(MainWindow widget) =>
     [
         new TrayMenuItem((uint)TrayCommand.Show, "显示挂件"),
@@ -414,6 +415,7 @@ public partial class App : Application
         new TrayMenuItem((uint)TrayCommand.Refresh, "重新载入课表"),
         new TrayMenuItem((uint)TrayCommand.ResetPosition, "恢复默认位置"),
         new TrayMenuItem((uint)TrayCommand.ToggleDesktopLayer, "贴桌面层", widget.LayerEnabled),
+        new TrayMenuItem((uint)TrayCommand.ToggleWeekend, "显示周末", widget.WeekendEnabled),
         new TrayMenuItem(null, string.Empty),
         new TrayMenuItem((uint)TrayCommand.Exit, "退出"),
     ];
@@ -439,6 +441,10 @@ public partial class App : Application
                 break;
             case TrayCommand.ToggleDesktopLayer:
                 widget.BuildActions().ToggleDesktopLayer?.Invoke();
+                _tray?.SetMenu(1, BuildTrayMenu(widget));
+                break;
+            case TrayCommand.ToggleWeekend:
+                widget.BuildActions().ToggleShowWeekend?.Invoke();
                 _tray?.SetMenu(1, BuildTrayMenu(widget));
                 break;
             case TrayCommand.Exit:
@@ -480,11 +486,21 @@ public partial class App : Application
                 problems.Add($"画布尺寸非法：{layout.CanvasWidth}x{layout.CanvasHeight}");
             }
 
-            if (layout.Days != 7) problems.Add($"列数应为 7，实际 {layout.Days}");
+            // 列数跟着"显示周末"走：显示 = 7 列，隐藏 = 5 列（`--no-weekend` 时就是这个分支）
+            var weekend = window.WeekendEnabled;
+            var expectedDays = weekend ? 7 : 5;
+            if (layout.Days != expectedDays)
+            {
+                problems.Add($"列数应为 {expectedDays}（显示周末={weekend}），实际 {layout.Days}");
+            }
+
             if (layout.Slots <= 0) problems.Add($"节次行数应大于 0，实际 {layout.Slots}");
 
-            // 色块数必须等于"可见时段的条数"（周次过滤后仍可见的那些）
-            var expected = loaded.Timetable.Courses.Sum(course => course.Sessions.Count);
+            // 色块数必须等于"可见时段的条数"（周次过滤后仍可见、且落在可见列上的那些）。
+            // 隐藏周末时周末的课**不占列**，布局层直接丢弃，预期值也要跟着过滤。
+            var expected = loaded.Timetable.Courses
+                .SelectMany(course => course.Sessions)
+                .Count(session => weekend || !Tjt.Core.TimetableModel.IsWeekend(session.Day));
             if (layout.Blocks != expected)
             {
                 problems.Add($"色块数 {layout.Blocks} 与可见时段数 {expected} 不一致");
@@ -515,7 +531,7 @@ public partial class App : Application
 
         if (problems.Count == 0)
         {
-            AppLog.Line($"[smoke] ok blocks={layout!.Blocks} canvas={layout.CanvasWidth:0}x{layout.CanvasHeight:0} rowH={layout.RowHeight:0.#} scroll={layout.NeedsScroll} title={layout.Title}");
+            AppLog.Line($"[smoke] ok blocks={layout!.Blocks} days={layout.Days} canvas={layout.CanvasWidth:0}x{layout.CanvasHeight:0} rowH={layout.RowHeight:0.#} scroll={layout.NeedsScroll} title={layout.Title}");
             AppLog.Line(layer is null
                 ? "[smoke] layer 未启用"
                 : $"[smoke] layer enabled={layer.Enabled} owner=0x{layer.Owner:X} host=0x{layer.Host:X} disposition={window.LastDisposition} backdrop={window.BackdropMode}");

@@ -38,6 +38,9 @@ internal static class IconGlyph
     /// <summary>固定（<c>&#xE718;</c>）。</summary>
     public const string Pin = "\uE718";
 
+    /// <summary>显示周末（<c>&#xE8D2;</c>）—— 设置页与 <c>⋯</c> 菜单里那项用同一个字形。</summary>
+    public const string Weekend = "\uE8D2";
+
     /// <summary>回到原位（<c>&#xE73F;</c>）。</summary>
     public const string Recenter = "\uE73F";
 

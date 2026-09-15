@@ -364,10 +364,18 @@ public sealed partial class SettingsWindow : Window
         };
         rows.Add(SettingsView.Row("\uE790", "窗口材质", "改动即时生效；Acrylic 需要透明窗口，个别机型上观感可能与 Mica 接近", material, dark));
 
-        var fontSize = SettingsView.Switch(true);
-        fontSize.IsEnabled = false;
-        ToolTipService.SetToolTip(fontSize, "还没做：字号目前随行高自适应");
-        rows.Add(SettingsView.Row("\uE8D2", "显示周末", "还没做（需要用周次过滤那一套设置）", fontSize, dark));
+        var weekend = SettingsView.Switch(_current.ShowWeekend);
+        weekend.Toggled += (_, _) =>
+        {
+            if (_loading) return;
+            Apply(_current with { ShowWeekend = weekend.IsOn });
+        };
+        rows.Add(SettingsView.Row(
+            IconGlyph.Weekend,
+            "显示周末",
+            "关掉后课表只画周一到周五；周末的课不占列（随时可从挂件右上角 ⋯ 菜单切回来）",
+            weekend,
+            dark));
 
         return Page("外观", rows, dark);
     }
