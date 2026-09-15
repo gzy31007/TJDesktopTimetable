@@ -11,6 +11,9 @@ public sealed record WidgetActions
     /// <summary>打开设置窗口。</summary>
     public Action? OpenSettings { get; init; }
 
+    /// <summary>直接打开设置窗口的「导入课表」页（挂件上换课表的入口）。</summary>
+    public Action? OpenImport { get; init; }
+
     /// <summary>重新载入课表（改过 fixture / 设置之后不用重启）。</summary>
     public Action? Refresh { get; init; }
 

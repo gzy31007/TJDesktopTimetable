@@ -246,6 +246,11 @@ internal static class BoardRenderer
         settings.Click += (_, _) => actions.OpenSettings?.Invoke();
         flyout.Items.Add(settings);
 
+        // 换课表的入口放在最常用的位置：没导入过的挂件显示的是内置样例，用户第一件事就是导入
+        var import = new MenuFlyoutItem { Text = "导入课表…", Icon = new FontIcon { Glyph = IconGlyph.Import } };
+        import.Click += (_, _) => actions.OpenImport?.Invoke();
+        flyout.Items.Add(import);
+
         var refresh = new MenuFlyoutItem { Text = "重新载入课表", Icon = new FontIcon { Glyph = IconGlyph.Refresh } };
         refresh.Click += (_, _) => actions.Refresh?.Invoke();
         flyout.Items.Add(refresh);

@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Tjt.App.Data;
 using Tjt.App.Rendering;
+using Tjt.App.Win32;
 using Windows.Graphics;
 using WinRT.Interop;
 
@@ -12,41 +13,73 @@ namespace Tjt.App;
 /// <summary>
 /// 设置窗口 —— 视觉照 DeskBox 那套：**左侧导航 + 顶部搜索 + 右侧卡片行**。
 ///
-/// <para>页面：常规（启动/贴桌面层/位置）、外观（主题/材质）、关于。
-/// 只做本机设置；数据导入（粘贴 JSON / 选文件 / Cookie 抓取）还没搬过来，
-/// 所以这里不放导入面板 —— 宁可少做，也不要放一个点了没反应的按钮。</para>
+/// <para>页面：常规（启动/贴桌面层/位置）、导入（抓取 / 本地 JSON / 数据目录）、
+/// 外观（主题/材质）、关于。</para>
 ///
 /// <para>改动**即时生效并落盘**（没有"保存"按钮）：设置项都是开关/单选/下拉，
 /// 改完立刻能看到效果，多一个"保存"只会多一个忘记点的机会。**材质也在运行时即时切换**
 /// （换控制器、不重建窗口，见 <c>BackdropHelper.SetMaterial</c>）。</para>
+///
+/// <para><b>它不认识 <c>MainWindow</c></b>：需要外壳做的事（应用设置、重载课表、导入落盘）
+/// 全部通过 <see cref="SettingsHost"/> 的委托走 —— 窗口之间不互相引用，改一边不会牵动另一边。</para>
 /// </summary>
 public sealed partial class SettingsWindow : Window
 {
+    /// <summary>页下标：常规。</summary>
+    internal const int PageGeneral = 0;
+
+    /// <summary>页下标：导入课表。</summary>
+    internal const int PageImport = 1;
+
+    /// <summary>页下标：外观。</summary>
+    internal const int PageAppearance = 2;
+
+    /// <summary>页下标：关于。</summary>
+    internal const int PageAbout = 3;
+
     /// <summary>导航项定义（字形 + 文案 + 页面标题）。</summary>
     private static readonly (string Glyph, string Label, string PageTitle)[] NavItems =
     [
         ("\uE80F", "常规", "常规"),
+        (IconGlyph.Import, "导入", "导入课表"),
         ("\uE790", "外观", "外观"),
         ("\uE946", "关于", "关于"),
     ];
 
-    private readonly Action<WidgetSettings> _onChanged;
-    private readonly Action _onResetPosition;
+    private readonly SettingsHost _host;
     private readonly ContentPresenter _page = new();
+    private NavigationView? _nav;
     private WidgetSettings _current;
     private bool _loading = true;
+    private int _shownPage;
+
+    /// <summary>
+    /// 设置窗口需要外壳配合的三件事 + 导入编排。
+    /// </summary>
+    /// <param name="Apply">应用新设置（外壳负责落盘 + 立即生效）。</param>
+    /// <param name="ResetPosition">把挂件放回屏幕右下角。</param>
+    /// <param name="ReloadTimetable">按载入顺序重新读一遍课表。</param>
+    /// <param name="Imports">导入编排（抓取 / 本地导入 / 清空）。</param>
+    internal sealed record SettingsHost(
+        Action<WidgetSettings> Apply,
+        Action ResetPosition,
+        Action ReloadTimetable,
+        ImportService Imports);
 
     /// <summary>构造设置窗口。</summary>
     /// <param name="current">当前设置（用来回显）。</param>
     /// <param name="dark">当前是否深色主题。</param>
-    /// <param name="onChanged">设置变化回调（外壳负责应用 + 落盘）。</param>
-    /// <param name="onResetPosition">"把挂件放回右下角"的回调。</param>
-    internal SettingsWindow(WidgetSettings current, bool dark, Action<WidgetSettings> onChanged, Action onResetPosition)
+    /// <param name="host">外壳回调 + 导入编排。</param>
+    /// <param name="initialPage">
+    /// 打开时停在哪一页。**必须走构造参数**：只调 <see cref="SelectPage"/> 在"窗口还没加载"时
+    /// 可能不回调 <c>SelectionChanged</c>，于是托盘「导入课表…」第一次点开会落在「常规」页
+    /// （截图实测过这个 bug）。
+    /// </param>
+    internal SettingsWindow(WidgetSettings current, bool dark, SettingsHost host, int initialPage = 0)
     {
         ArgumentNullException.ThrowIfNull(current);
         _current = current;
-        _onChanged = onChanged ?? throw new ArgumentNullException(nameof(onChanged));
-        _onResetPosition = onResetPosition ?? throw new ArgumentNullException(nameof(onResetPosition));
+        _host = host ?? throw new ArgumentNullException(nameof(host));
 
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
@@ -59,11 +92,40 @@ public sealed partial class SettingsWindow : Window
         var layout = BuildLayout(dark);
         SetTitleBar(layout.TitleBar);
         Host.Children.Add(layout.Root);
-        Select(0);
+        Select(Math.Clamp(initialPage, 0, NavItems.Length - 1));
 
         _loading = false;
-        AppWindow.ResizeClient(new SizeInt32(980, 720));
+        ResizeForDpi(980, 720);
         CenterOnScreen();
+    }
+
+    /// <summary>
+    /// 按设计尺寸（DIP）设窗口客户区，并夹到当前显示器的工作区内。
+    ///
+    /// <para><b>为什么不能直接 <c>ResizeClient(980, 720)</c></b>：那个 API 收的是**物理像素**，
+    /// 所以 150% 缩放下窗口在屏幕上只有 653×480 DIP —— 左侧导航占掉 208 DIP 后，
+    /// 卡片只剩约 380 DIP 宽，导入页的说明文字一行只放得下十个字（真机截图实测）。
+    /// 这里按 <c>GetDpiForWindow()/96</c> 折算，让"看起来的大小"与缩放无关。</para>
+    /// </summary>
+    private void ResizeForDpi(int widthDip, int heightDip)
+    {
+        var handle = WindowNative.GetWindowHandle(this);
+        var dpi = NativeMethods.GetDpiForWindow(handle);
+        var scale = dpi > 0 ? dpi / NativeMethods.DefaultDpi : 1.0;
+        var width = (int)Math.Round(widthDip * scale);
+        var height = (int)Math.Round(heightDip * scale);
+
+        // 夹到工作区：小屏 + 高缩放时（如 1080p @150%）按 DIP 折算会超出屏幕高度
+        var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
+        if (area is not null)
+        {
+            var work = area.WorkArea;
+            width = Math.Min(width, work.Width - 40);
+            height = Math.Min(height, work.Height - 40);
+        }
+
+        AppWindow.ResizeClient(new SizeInt32(width, height));
+        AppLog.Line($"[settings] 客户区 {width}x{height}px（{widthDip}x{heightDip} DIP，scale={scale:0.##}）");
     }
 
     /// <summary>把窗口摆到工作区中间。</summary>
@@ -158,6 +220,7 @@ public sealed partial class SettingsWindow : Window
             var index = nav.MenuItems.IndexOf(args.SelectedItem);
             if (index >= 0) Select(index);
         };
+        _nav = nav;
 
         Grid.SetRow(nav, 1);
         root.Children.Add(nav);
@@ -170,10 +233,48 @@ public sealed partial class SettingsWindow : Window
         var dark = CurrentIsDark();
         _page.Content = index switch
         {
-            1 => BuildAppearancePage(dark),
-            2 => BuildAboutPage(dark),
+            PageImport => ImportPage.Build(_host.Imports, dark, WindowNative.GetWindowHandle(this), () => _page.XamlRoot),
+            PageAppearance => BuildAppearancePage(dark),
+            PageAbout => BuildAboutPage(dark),
             _ => BuildGeneralPage(dark),
         };
+        _shownPage = index;
+        // 左侧导航的高亮也要跟上（构造期选页时 SelectionChanged 可能还没挂上）
+        if (_nav is not null && index < _nav.MenuItems.Count && !ReferenceEquals(_nav.SelectedItem, _nav.MenuItems[index]))
+        {
+            _nav.SelectedItem = _nav.MenuItems[index];
+        }
+    }
+
+    /// <summary>当前真正显示的是第几页（自检与截图脚本用它确认"打开时停在哪一页"）。</summary>
+    internal int ShownPageIndex => _shownPage;
+
+    /// <summary>
+    /// 从外面切页（托盘「导入课表…」要直接落在导入页）。
+    ///
+    /// 走导航项的选中状态而不是直接 <c>Select</c>：否则左侧高亮与右侧内容会不一致
+    /// （看起来像点错了页）。
+    /// </summary>
+    internal void SelectPage(int index)
+    {
+        if (_loading || _nav is null) return;
+        if (index < 0 || index >= _nav.MenuItems.Count) return;
+        _nav.SelectedItem = _nav.MenuItems[index];
+    }
+
+    /// <summary>
+    /// 把某一页真的建出来并量一遍（<c>--smoke --settings-page N</c> 用）。
+    ///
+    /// <para>为什么要 <c>Measure</c>：只"造出来"不足以发现版式问题 —— 上一轮"光标条落错行"
+    /// 就是构建成功但尺寸塌掉的典型。量一遍能同时验证"分支跑通"和"尺寸算得出来"。</para>
+    /// </summary>
+    internal bool VerifyPage(int index)
+    {
+        Select(index);
+        if (_page.Content is not Panel panel) return false;
+        panel.Measure(new Windows.Foundation.Size(900, 1600));
+        AppLog.Line($"[settings] page={index} children={panel.Children.Count} desired={panel.DesiredSize.Width:0}x{panel.DesiredSize.Height:0}");
+        return panel.Children.Count > 0 && panel.DesiredSize.Height > 0;
     }
 
     /* ------------------------------------------------------------------ 页面 */
@@ -222,7 +323,7 @@ public sealed partial class SettingsWindow : Window
         rows.Add(SettingsView.Row("\uE718", "贴桌面层", "固定在桌面图标之上：Win+D 之后仍然可见", desktopLayer, dark));
 
         var reset = new Button { Content = "恢复", MinWidth = 96 };
-        reset.Click += (_, _) => _onResetPosition();
+        reset.Click += (_, _) => _host.ResetPosition();
         rows.Add(SettingsView.Row("\uE73F", "恢复默认位置", "把挂件放回屏幕右下角（尺寸不变）", reset, dark));
 
         return Page("常规", rows, dark);
@@ -273,8 +374,8 @@ public sealed partial class SettingsWindow : Window
         var rows = new List<FrameworkElement>
         {
             SettingsView.InfoRow("版本", Version(), dark),
-            SettingsView.InfoRow("课表数据", "读的是 packages/core/fixtures 里的样例数据；导入真实课表还没搬过来", dark),
-            SettingsView.InfoRow("设置文件", SettingsStore.FilePath, dark),
+            SettingsView.InfoRow("当前课表", _host.Imports.DescribeCurrent(), dark),
+            SettingsView.InfoRow("数据目录", ImportService.DataDirectory + "（settings.json / timetable.json / credentials.json）", dark),
         };
         return Page("关于", rows, dark);
     }
@@ -305,6 +406,6 @@ public sealed partial class SettingsWindow : Window
     private void Apply(WidgetSettings next)
     {
         _current = next;
-        _onChanged(next);
+        _host.Apply(next);
     }
 }

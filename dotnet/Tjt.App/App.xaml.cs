@@ -1,6 +1,9 @@
 using Microsoft.UI.Xaml;
 using Tjt.App.Data;
 using Tjt.App.Win32;
+using Tjt.Core;
+using Tjt.Core.Adapters;
+using WinRT.Interop;
 
 namespace Tjt.App;
 
@@ -27,12 +30,14 @@ public partial class App : Application
         Refresh = 3,
         ResetPosition = 4,
         ToggleDesktopLayer = 5,
-        Exit = 6,
+        Import = 6,
+        Exit = 7,
     }
 
     private readonly List<MainWindow> _windows = [];
     private readonly List<SettingsWindow> _settingsWindows = [];
     private TrayIcon? _tray;
+    private ImportService? _imports;
 
     /// <summary>
     /// 构造应用。
@@ -72,8 +77,35 @@ public partial class App : Application
 
         try
         {
+            // 0) 抓取诊断（--fetch-check）：只抓一次、把结论写日志、退出。**不落盘**。
+            if (options.FetchCheckPath is not null)
+            {
+                SmokePassed = RunFetchCheck(options.FetchCheckPath);
+                return; // finally 里收尾（smoke 之外也会正常退出：这是一条"跑完即走"的路径）
+            }
+
+            // 导入编排要在建窗口之前就绪：`--import` 与设置窗口都依赖它。
+            // `apply` 里对"窗口还没建"做了兜底（直接落盘）—— 否则 `--import` 会因为
+            // 那一刻 _windows 还是空的而静默失败。
+            _imports = new ImportService(
+                apply: (timetable, source) =>
+                {
+                    var widget = _windows.FirstOrDefault();
+                    return widget is not null
+                        ? widget.ApplyImportedTimetable(timetable, source)
+                        : TimetableStore.Save(timetable);
+                },
+                reload: () => _windows.FirstOrDefault()?.ReloadTimetable() ?? false,
+                describe: () => _windows.FirstOrDefault()?.DescribeTimetable() ?? "还没有课表");
+
+            // 0b) 导入一条命令行指定的课表（--import）：走的就是界面那条管线
+            if (options.ImportPath is not null && !ImportFromFile(options.ImportPath))
+            {
+                SmokePassed = false;
+            }
+
             var loaded = AppHost.Load(options.FixturePath);
-            AppLog.Line($"[data] source={loaded.Source} courses={loaded.Timetable.Courses.Count} sessions={SessionCount(loaded)}");
+            AppLog.Line($"[data] source={loaded.Source} origin={AppHost.OriginLabel(loaded.Origin)} courses={loaded.Timetable.Courses.Count} sessions={SessionCount(loaded)}");
 
             var window = new MainWindow();
             _windows.Add(window);
@@ -82,12 +114,18 @@ public partial class App : Application
 
             if (options.Smoke)
             {
-                SmokePassed = VerifySmoke(window, loaded, options.NoBackdrop);
+                // 两个检查都要跑（不用 && 短路：设置页构建失败的原因也想知道）
+                var layoutOk = VerifySmoke(window, loaded, options.NoBackdrop);
+                var pagesOk = VerifySettingsPage(options);
+                SmokePassed = layoutOk && pagesOk;
                 return; // finally 里收尾
             }
 
             window.ShowWidget();
             _tray = BuildTray(window);
+
+            // 启动就停在某一页（验证导入页/截图用；托盘与挂件菜单也会用它）
+            if (options.SettingsPage is { } page) ShowSettings(window.CurrentSettings, window.CurrentIsDark, page);
         }
         catch (Exception ex)
         {
@@ -96,40 +134,150 @@ public partial class App : Application
         }
         finally
         {
-            if (options.Smoke)
+            // 自检与抓取诊断都是"跑完即走"的短命进程：一律**硬退出**。
+            // 实测 Application.Exit() 在"窗口从未激活"的路径上会让进程挂住（退出消息投给消息循环，
+            // 而循环在窗口激活前不推进），CI 上表现为 job 无限期 in_progress。
+            if (options.Smoke || options.FetchCheckPath is not null)
             {
-                // 冒烟模式一律**硬退出**：实测 Application.Exit() 在这种"窗口从未激活"的路径上
-                // 会让进程挂住（退出消息投给消息循环，而循环在窗口激活前不推进），
-                // CI 上表现为 job 无限期 in_progress。自检是纯短命进程，不需要 WinUI 的清理路径，
-                // 用 Environment.Exit 保证一定结束（退出码直接决定 CI 成败）。
-                                Environment.Exit(SmokePassed ? 0 : 1);
+                Environment.Exit(SmokePassed ? 0 : 1);
             }
         }
     }
 
     /// <summary>
-    /// 打开设置窗口（已开着就激活它）。
+    /// <c>--import &lt;path&gt;</c>：把文件内容交给导入管线（同时落盘），与界面点「导入并应用」是同一条路。
+    /// </summary>
+    private bool ImportFromFile(string path)
+    {
+        try
+        {
+            var outcome = _imports!.ImportText(File.ReadAllText(path), null, null);
+            foreach (var diagnostic in outcome.Diagnostics)
+            {
+                AppLog.Line($"[import] 诊断 {diagnostic.Level} {diagnostic.Code}：{diagnostic.Message}");
+            }
+
+            AppLog.Line($"[import] --import {path} ok={outcome.Ok}：{outcome.Message}");
+            return outcome.Ok;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"[import] --import 失败：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// <c>--fetch-check &lt;path&gt;</c>：用文件里那段浏览器请求抓一次个人课表，把探测结果写日志。
+    ///
+    /// <para><b>不落盘</b>：这是诊断路径，不该改用户的课表文件。失败即退出码非零，
+    /// 用来回答"我这条请求为什么抓不到"。</para>
+    /// </summary>
+    private static bool RunFetchCheck(string requestPath)
+    {
+        string requestText;
+        try
+        {
+            requestText = File.ReadAllText(requestPath);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"[fetch-check] 读不到 {requestPath}：{ex.Message}");
+            return false;
+        }
+
+        // 只记长度：内容含 Cookie
+        AppLog.Line($"[fetch-check] 开始（请求 {requestText.Trim().Length} 字符）");
+        // 在 UI 线程上阻塞等待是安全的：TongjiFetcher 内部一律 ConfigureAwait(false)，
+        // 它的续体不需要回到 UI 线程，因此不会互相等（死锁）。
+        var fetched = TongjiFetcher.FetchAsync(requestText).GetAwaiter().GetResult();
+        foreach (var probe in fetched.Probes) AppLog.Line($"[fetch-check] {probe.Label}：{probe.Value}");
+        AppLog.Line($"[fetch-check] 抓取 ok={fetched.Ok}：{fetched.Message}");
+        if (!fetched.Ok || fetched.TimetableText is null) return false;
+
+        try
+        {
+            var result = ImportPipeline.ImportTimetable(new ImportInput
+            {
+                Text = fetched.TimetableText,
+                AdapterId = TongjiStudentAdapter.AdapterId,
+            });
+            foreach (var diagnostic in result.Diagnostics)
+            {
+                AppLog.Line($"[fetch-check] 诊断 {diagnostic.Level} {diagnostic.Code}：{diagnostic.Message}");
+            }
+
+            var sessions = result.Courses.Sum(course => course.Sessions.Count);
+            AppLog.Line($"[fetch-check] 解析 {result.AdapterId}：{result.Courses.Count} 门 / {sessions} 条，学期 {result.Term.Label}");
+            return result.Courses.Count > 0;
+        }
+        catch (ImportException ex)
+        {
+            AppLog.Error($"[fetch-check] 解析失败 {ex.Code}：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// <c>--settings-page &lt;n&gt;</c> 在自检模式下的对应检查：把那一页真的建出来并量一遍。
+    /// </summary>
+    private bool VerifySettingsPage(AppStartupOptions options)
+    {
+        if (options.SettingsPage is not { } page) return true;
+        var widget = _windows.FirstOrDefault();
+        if (widget is null) return false;
+
+        try
+        {
+            var window = new SettingsWindow(widget.CurrentSettings, widget.CurrentIsDark, new SettingsWindow.SettingsHost(
+                Apply: next => widget.ApplySettings(next),
+                ResetPosition: () => widget.BuildActions().ResetPosition?.Invoke(),
+                ReloadTimetable: () => widget.ReloadTimetable(),
+                Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化")), page);
+            _settingsWindows.Add(window);
+            // 两个都要：VerifyPage 量一遍布局，shown 确认"打开时真的停在这一页"
+            var built = window.VerifyPage(page);
+            var onRequestedPage = window.ShownPageIndex == page;
+            AppLog.Line($"[smoke] settings page={page} built={built} shown={window.ShownPageIndex}");
+            return built && onRequestedPage;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"[smoke] 设置页 {page} 构建失败：{ex}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 打开设置窗口（已开着就激活它，并切到请求的那一页）。
     ///
     /// 参数里带当前设置是为了**回显**，返回新设置是为了把"用户改了什么"带回调用方
     /// （挂件负责落盘与生效）—— 设置窗口因此不需要认识存储层。
     /// </summary>
-    private WidgetSettings ShowSettings(WidgetSettings current, bool dark)
+    /// <param name="current">当前设置。</param>
+    /// <param name="dark">当前是否深色主题。</param>
+    /// <param name="page">初始页下标（0 常规 / 1 导入 / 2 外观 / 3 关于）。</param>
+    private WidgetSettings ShowSettings(WidgetSettings current, bool dark, int page)
     {
         var existing = _settingsWindows.FirstOrDefault();
         if (existing is not null)
         {
             existing.Activate();
+            existing.SelectPage(page);
             return current;
         }
 
-        var window = new SettingsWindow(current, dark, next => _windows.FirstOrDefault()?.ApplySettings(next), () =>
-        {
-            _windows.FirstOrDefault()?.BuildActions().ResetPosition?.Invoke();
-        });
+        var window = new SettingsWindow(current, dark, new SettingsWindow.SettingsHost(
+            Apply: next => _windows.FirstOrDefault()?.ApplySettings(next),
+            ResetPosition: () => _windows.FirstOrDefault()?.BuildActions().ResetPosition?.Invoke(),
+            ReloadTimetable: () => _windows.FirstOrDefault()?.ReloadTimetable(),
+            Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化")), page);
         _settingsWindows.Add(window);
         window.Closed += (_, _) => _settingsWindows.Remove(window);
         window.Activate();
-        AppLog.Line("[settings] 已打开设置窗口");
+        // hwnd 进日志：自动化截图脚本靠它定位设置窗口（它是进程里的第二个顶层窗口，
+        // MainWindowHandle 永远指向挂件那个）
+        AppLog.Line($"[settings] 已打开设置窗口 page={page} shown={window.ShownPageIndex} hwnd=0x{WindowNative.GetWindowHandle(window):X}");
         return current;
     }
 
@@ -148,6 +296,7 @@ public partial class App : Application
     [
         new TrayMenuItem((uint)TrayCommand.Show, "显示挂件"),
         new TrayMenuItem((uint)TrayCommand.Settings, "设置…"),
+        new TrayMenuItem((uint)TrayCommand.Import, "导入课表…"),
         new TrayMenuItem(null, string.Empty),
         new TrayMenuItem((uint)TrayCommand.Refresh, "重新载入课表"),
         new TrayMenuItem((uint)TrayCommand.ResetPosition, "恢复默认位置"),
@@ -164,7 +313,10 @@ public partial class App : Application
                 widget.ShowWidgetAgain();
                 break;
             case TrayCommand.Settings:
-                ShowSettings(widget.CurrentSettings, widget.CurrentIsDark);
+                ShowSettings(widget.CurrentSettings, widget.CurrentIsDark, SettingsWindow.PageGeneral);
+                break;
+            case TrayCommand.Import:
+                ShowSettings(widget.CurrentSettings, widget.CurrentIsDark, SettingsWindow.PageImport);
                 break;
             case TrayCommand.Refresh:
                 widget.ReloadTimetable();

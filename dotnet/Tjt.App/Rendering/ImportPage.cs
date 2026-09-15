@@ -1,0 +1,396 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Tjt.App.Data;
+using Tjt.Core;
+using Tjt.Core.Adapters;
+using Windows.Storage;
+using Windows.Storage.Pickers;
+using Windows.UI;
+using WinRT.Interop;
+
+namespace Tjt.App.Rendering;
+
+/// <summary>
+/// 设置窗口的「导入课表」页（照 Electron 侧管理窗口的导入面板那一套功能做的 C# 版）：
+/// ① 从 1 系统抓取（粘贴 F12 复制出来的浏览器请求）；② 本地 JSON 导入（粘贴 / 选文件 / 选适配器）；
+/// ③ 当前课表摘要与"清空 / 重新载入 / 打开数据目录"。
+///
+/// <para>为什么整页单独一个文件：设置窗口本体只有"导航 + 三张卡"那么简单，而导入页有
+/// 输入框、异步抓取、文件选择、结果面板四类东西 —— 混在一起会让 <c>SettingsWindow</c>
+/// 从"搭骨架"变成"什么都干"。</para>
+///
+/// <para><b>只发意图</b>：本页不认识 <c>MainWindow</c>，所有动作都通过 <see cref="ImportService"/>
+/// 走（它再回调外壳落盘/重画）。窗口与会话状态因此不需要泄漏到渲染层。</para>
+/// </summary>
+internal static class ImportPage
+{
+    private const double StatusFontSize = 12;
+
+    /// <summary>构造整页。</summary>
+    /// <param name="imports">导入编排（落盘 / 抓取 / 重新载入都从这里走）。</param>
+    /// <param name="dark">深色主题（用色）。</param>
+    /// <param name="windowHandle">设置窗口句柄（文件选择器要 <c>InitializeWithWindow</c>）。</param>
+    /// <param name="xamlRoot">取当前 XamlRoot（<see cref="ContentDialog"/> 需要）。</param>
+    public static UIElement Build(ImportService imports, bool dark, nint windowHandle, Func<XamlRoot?> xamlRoot)
+    {
+        ArgumentNullException.ThrowIfNull(imports);
+
+        var panel = new StackPanel { Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Left };
+        panel.Children.Add(SettingsView.PageTitle("导入课表"));
+
+        // ── 卡 1：当前课表
+        var summary = new TextBlock
+        {
+            Text = imports.DescribeCurrent(),
+            FontSize = 12,
+            Opacity = 0.66,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        };
+
+        var reload = new Button { Content = "重新载入", MinWidth = 96 };
+        var clear = new Button { Content = "清空课表", MinWidth = 96 };
+        var openFolder = new Button { Content = "打开数据目录", MinWidth = 120 };
+        var dataButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        dataButtons.Children.Add(reload);
+        dataButtons.Children.Add(clear);
+        dataButtons.Children.Add(openFolder);
+
+        var dataStatus = StatusPanel();
+
+        var dataBody = new StackPanel { Spacing = 10 };
+        dataBody.Children.Add(summary);
+        dataBody.Children.Add(dataButtons);
+        dataBody.Children.Add(dataStatus);
+
+        var dataCard = SettingsView.Block(IconGlyph.Folder, "当前课表", null, dataBody, dark);
+
+        // ── 卡 2：从 1 系统获取
+        var requestBox = new TextBox
+        {
+            Text = ImportService.LoadSavedRequest(),
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 112,
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 12,
+            PlaceholderText =
+                "在这里粘贴从浏览器复制的请求（F12 → Network → 右键该请求 → Copy → Copy as cURL）。\n"
+                + "也支持 PowerShell 的 Invoke-WebRequest 片段。整条请求自带登录态，程序只做这一次请求。",
+        };
+
+        // 主操作放在卡片标题行右侧：不用滚动就能看见（放输入框下面会掉到首屏之外，截图实测过）
+        var fetch = new Button { Content = "获取我的课表", MinWidth = 132, Style = AccentButtonStyle() };
+        var fetchRing = new ProgressRing { IsActive = false, Width = 20, Height = 20, Margin = new Thickness(4, 0, 0, 0) };
+        var fetchAction = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        fetchAction.Children.Add(fetchRing);
+        fetchAction.Children.Add(fetch);
+
+        var help = new TextBlock
+        {
+            FontSize = StatusFontSize,
+            Opacity = 0.66,
+            TextWrapping = TextWrapping.Wrap,
+            Text =
+                "怎么复制这条请求？（一次即可，课表变了再重来一次）\n"
+                + "1. 浏览器登录 1.tongji.edu.cn，打开选课 / 我的课表页面。\n"
+                + "2. 按 F12 → Network → 刷新页面。\n"
+                + "3. 找到返回 200、体积较大的那条（一般是 /api/electionservice/student/xxxx/getDataBk），"
+                + "右键 → Copy → Copy as cURL。\n"
+                + "4. 粘贴到上面的框里 → 点「获取我的课表」。\n"
+                + "粘贴内容只保存在本机 " + ImportService.DataDirectory + "\\credentials.json，不上传、不进日志。",
+        };
+
+        var fetchStatus = StatusPanel();
+        var fetchBody = new StackPanel { Spacing = 10 };
+        fetchBody.Children.Add(requestBox);
+        fetchBody.Children.Add(fetchStatus);
+        fetchBody.Children.Add(help);
+
+        var fetchCard = SettingsView.Block(IconGlyph.Globe, "从 1 系统获取", "用浏览器里那条请求自带登录态，不需要在本应用里输密码", fetchBody, dark, fetchAction);
+
+        // ── 卡 3：本地 JSON
+        var adapters = new List<(string Id, string Name)> { (string.Empty, "自动探测（推荐）") };
+        foreach (var adapter in imports.Adapters) adapters.Add((adapter.Id, adapter.DisplayName));
+        var adapterCombo = new ComboBox
+        {
+            ItemsSource = adapters.Select(item => item.Name).ToList(),
+            SelectedIndex = 0,
+            MinWidth = 240,
+        };
+
+        var jsonBox = new TextBox
+        {
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 96,
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 12,
+            PlaceholderText =
+                "把课表接口的响应 JSON 直接粘贴到这里，或点「选择 JSON 文件…」。\n"
+                + "支持：同济 1 系统个人课表 / 课表预览页 HTML / 通用 JSON（courses[].sessions[]）。",
+        };
+
+        var pick = new Button { Content = "选择 JSON 文件…", MinWidth = 132 };
+        var runImport = new Button { Content = "导入并应用", MinWidth = 108, Style = AccentButtonStyle() };
+        var clearInput = new Button { Content = "清空输入", MinWidth = 96 };
+        var importRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        importRow.Children.Add(pick);
+        importRow.Children.Add(clearInput);
+
+        var fileList = new StackPanel { Spacing = 4 };
+        var importStatus = StatusPanel();
+        var importBody = new StackPanel { Spacing = 10 };
+        importBody.Children.Add(adapterCombo);
+        importBody.Children.Add(jsonBox);
+        importBody.Children.Add(importRow);
+        importBody.Children.Add(fileList);
+        importBody.Children.Add(importStatus);
+
+        var importCard = SettingsView.Block(IconGlyph.Document, "本地 JSON 导入", "解析结果直接落盘并替换桌面挂件上的课表", importBody, dark, runImport);
+
+        panel.Children.Add(SettingsView.Card([dataCard], dark));
+        panel.Children.Add(SettingsView.Card([fetchCard], dark));
+        panel.Children.Add(SettingsView.Card([importCard], dark));
+
+        // ── 已选文件：整页范围内共享（抓取与本地导入是两条独立的路，不共用这个列表）
+        var picked = new List<ImportFile>();
+
+        void RefreshFileList()
+        {
+            fileList.Children.Clear();
+            foreach (var file in picked)
+            {
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+                row.Children.Add(new TextBlock
+                {
+                    Text = file.Name,
+                    FontSize = StatusFontSize,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    Width = 420,
+                });
+                row.Children.Add(new TextBlock
+                {
+                    Text = $"{file.Text.Length / 1024.0:0.0} KB",
+                    FontSize = StatusFontSize,
+                    Opacity = 0.6,
+                });
+                fileList.Children.Add(row);
+            }
+        }
+
+        // ── 动作
+        reload.Click += (_, _) =>
+        {
+            Report(dataStatus, imports.ReloadTimetable(), dark);
+            summary.Text = imports.DescribeCurrent();
+        };
+
+        openFolder.Click += (_, _) => OpenDataDirectory();
+
+        clear.Click += async (_, _) =>
+        {
+            var root = xamlRoot();
+            if (root is null) return;
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = root,
+                Title = "清空已保存的课表？",
+                Content = $"将删除 {TimetableStore.FilePath}，挂件回退到内置样例（再导入一次即替换）。",
+                PrimaryButtonText = "清空",
+                CloseButtonText = "取消",
+                DefaultButton = ContentDialogButton.Close,
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+            Report(dataStatus, imports.ClearTimetable(), dark);
+            summary.Text = imports.DescribeCurrent();
+        };
+
+        fetch.Click += async (_, _) =>
+        {
+            fetch.IsEnabled = false;
+            fetchRing.IsActive = true;
+            Clear(fetchStatus);
+            try
+            {
+                var outcome = await imports.FetchAsync(requestBox.Text);
+                Report(fetchStatus, outcome, dark);
+                summary.Text = imports.DescribeCurrent();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error($"[import] 抓取时异常：{ex}");
+                Report(fetchStatus, ImportOutcome.Failure($"抓取时出错：{ex.Message}"), dark);
+            }
+            finally
+            {
+                fetch.IsEnabled = true;
+                fetchRing.IsActive = false;
+            }
+        };
+
+        pick.Click += async (_, _) =>
+        {
+            try
+            {
+                var files = await PickJsonFiles(windowHandle);
+                if (files.Count == 0) return;
+                picked.AddRange(files);
+                RefreshFileList();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error($"[import] 选择文件失败：{ex}");
+                Report(importStatus, ImportOutcome.Failure($"选择文件失败：{ex.Message}"), dark);
+            }
+        };
+
+        runImport.Click += (_, _) =>
+        {
+            var adapterId = adapterCombo.SelectedIndex > 0 ? adapters[adapterCombo.SelectedIndex].Id : null;
+            var outcome = imports.ImportText(jsonBox.Text, adapterId, picked);
+            Report(importStatus, outcome, dark);
+            summary.Text = imports.DescribeCurrent();
+        };
+
+        clearInput.Click += (_, _) =>
+        {
+            jsonBox.Text = string.Empty;
+            picked.Clear();
+            RefreshFileList();
+            Clear(importStatus);
+        };
+
+        return panel;
+    }
+
+    /// <summary>用系统的文件选择对话框挑若干 JSON / HTML（返回全文，失败的文件跳过）。</summary>
+    private static async Task<IReadOnlyList<ImportFile>> PickJsonFiles(nint windowHandle)
+    {
+        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+        InitializeWithWindow.Initialize(picker, windowHandle);
+        foreach (var extension in new[] { ".json", ".html", ".htm", "*" }) picker.FileTypeFilter.Add(extension);
+
+        var files = await picker.PickMultipleFilesAsync();
+        var result = new List<ImportFile>();
+        foreach (var file in files)
+        {
+            try
+            {
+                result.Add(new ImportFile(file.Name, await FileIO.ReadTextAsync(file)));
+            }
+            catch (Exception ex)
+            {
+                AppLog.Line($"[import] 读取所选文件失败：{ex.GetType().Name}");
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>用资源管理器打开数据目录（用户要备份 / 手工替换 timetable.json 时最省事）。</summary>
+    private static void OpenDataDirectory()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{ImportService.DataDirectory}\"",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Line($"[import] 打开数据目录失败：{ex.Message}");
+        }
+    }
+
+    /* ------------------------------------------------------------------ 结果面板 */
+
+    private static StackPanel StatusPanel() => new() { Spacing = 6 };
+
+    private static void Clear(Panel target) => target.Children.Clear();
+
+    /// <summary>把一次导入/抓取的结果铺进面板：一句话结论 + 探测行 + 适配器诊断。</summary>
+    private static void Report(Panel target, ImportOutcome outcome, bool dark)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+        target.Children.Clear();
+        target.Children.Add(Banner(outcome.Message, outcome.Ok, dark));
+
+        if (outcome.Probes.Count > 0)
+        {
+            var probes = new StackPanel { Spacing = 2 };
+            foreach (var probe in outcome.Probes)
+            {
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+                row.Children.Add(new TextBlock { Text = probe.Label, FontSize = StatusFontSize, Opacity = 0.6, Width = 76 });
+                row.Children.Add(new TextBlock
+                {
+                    Text = probe.Value,
+                    FontSize = StatusFontSize,
+                    FontFamily = new FontFamily("Consolas"),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxWidth = 620,
+                });
+                probes.Children.Add(row);
+            }
+
+            target.Children.Add(probes);
+        }
+
+        if (outcome.Diagnostics.Count > 0)
+        {
+            var diagnostics = new StackPanel { Spacing = 4 };
+            foreach (var diagnostic in outcome.Diagnostics)
+            {
+                diagnostics.Children.Add(Banner(
+                    $"[{Level(diagnostic.Level)}] {diagnostic.Message}",
+                    diagnostic.Level != DiagnosticLevel.Error,
+                    dark));
+            }
+
+            target.Children.Add(diagnostics);
+        }
+    }
+
+    /// <summary>一句话结论的横幅（成功偏中性、失败偏红；与 Electron 侧导入面板的语义一致）。</summary>
+    private static Border Banner(string text, bool ok, bool dark)
+    {
+        // 成功色：深色主题下要亮一档，否则压在深底上读不清
+        var accent = ok
+            ? (dark ? Color.FromArgb(255, (byte)108, (byte)203, (byte)108) : Color.FromArgb(255, (byte)15, (byte)123, (byte)15))
+            : Color.FromArgb(255, (byte)196, (byte)43, (byte)28);
+
+        return new Border
+        {
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(10, 7, 10, 7),
+            Background = new SolidColorBrush(Color.FromArgb(ok ? (byte)18 : (byte)23, accent.R, accent.G, accent.B)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(ok ? (byte)44 : (byte)56, accent.R, accent.G, accent.B)),
+            Child = new TextBlock
+            {
+                Text = text,
+                FontSize = StatusFontSize,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+            },
+        };
+    }
+
+    private static string Level(DiagnosticLevel level) => level switch
+    {
+        DiagnosticLevel.Error => "错误",
+        DiagnosticLevel.Warn => "警告",
+        _ => "提示",
+    };
+
+    /// <summary>主按钮样式（WinUI 的强调色按钮在资源字典里，直接取来用，不自己配色）。</summary>
+    private static Style? AccentButtonStyle() =>
+        Application.Current.Resources.TryGetValue("AccentButtonStyle", out var style) ? style as Style : null;
+}

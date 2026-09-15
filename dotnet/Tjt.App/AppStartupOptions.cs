@@ -9,6 +9,15 @@ namespace Tjt.App;
 /// <param name="Dark">强制深色主题；<c>null</c> 表示跟随系统。</param>
 /// <param name="Width">显式指定的窗口宽度（DIP）；<c>null</c> = 用系统默认尺寸。</param>
 /// <param name="Height">显式指定的窗口高度（DIP）；<c>null</c> = 用系统默认尺寸。</param>
+/// <param name="ImportPath">
+/// 启动时先走一遍**导入管线**把这份 JSON 导入并落盘，再按载入顺序读回来
+/// （<c>--import</c>）。用来验证"导入 → 落盘 → 下次启动读回"整条链路，不用手点界面。
+/// </param>
+/// <param name="FetchCheckPath">
+/// 只做一次抓取诊断：读文件里的浏览器请求 → 抓一次 → 把探测结果与解析结果写日志 → 退出
+/// （<c>--fetch-check</c>）。**不落盘**（诊断不该改用户数据）；失败时进程退出码非零。
+/// </param>
+/// <param name="SettingsPage">启动时直接打开设置窗口的第 N 页（0 常规 / 1 导入 / 2 外观 / 3 关于）。</param>
 internal sealed record AppStartupOptions(
     bool Smoke = false,
     bool? DesktopLayer = null,
@@ -17,14 +26,18 @@ internal sealed record AppStartupOptions(
     string? FixturePath = null,
     bool? Dark = null,
     int? Width = null,
-    int? Height = null)
+    int? Height = null,
+    string? ImportPath = null,
+    string? FetchCheckPath = null,
+    int? SettingsPage = null)
 {
     /// <summary>
     /// 解析命令行。
     ///
     /// 支持的形态：<c>--smoke</c>、<c>--desktop-layer</c> / <c>--no-desktop-layer</c>、<c>--no-backdrop</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>（不传就用窗口系统给的默认尺寸，传了就精确设成它，
-    /// 便于验证自适应）。未知参数被忽略（不崩在 CLI 上）。
+    /// 便于验证自适应）、<c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>。
+    /// 未知参数被忽略（不崩在 CLI 上）。
     /// </summary>
     public static AppStartupOptions Parse(string[] args)
     {
@@ -36,6 +49,9 @@ internal sealed record AppStartupOptions(
         string? fixture = null;
         int? width = null;
         int? height = null;
+        string? importPath = null;
+        string? fetchCheck = null;
+        int? settingsPage = null;
 
         for (var i = 0; i < args.Length; i += 1)
         {
@@ -48,6 +64,13 @@ internal sealed record AppStartupOptions(
             else if (Matches(arg, "dark")) dark = true;
             else if (Matches(arg, "light")) dark = false;
             else if (Matches(arg, "fixture") && i + 1 < args.Length) fixture = args[++i];
+            else if (Matches(arg, "import") && i + 1 < args.Length) importPath = args[++i];
+            else if (Matches(arg, "fetch-check") && i + 1 < args.Length) fetchCheck = args[++i];
+            else if (Matches(arg, "settings-page") && i + 1 < args.Length && int.TryParse(args[i + 1], out var page))
+            {
+                settingsPage = page;
+                i += 1;
+            }
             else if (Matches(arg, "size") && i + 1 < args.Length && TryParseSize(args[i + 1], out var w, out var h))
             {
                 width = w;
@@ -56,7 +79,7 @@ internal sealed record AppStartupOptions(
             }
         }
 
-        return new AppStartupOptions(smoke, desktopLayer, noBackdrop, logPath, fixture, dark, width, height);
+        return new AppStartupOptions(smoke, desktopLayer, noBackdrop, logPath, fixture, dark, width, height, importPath, fetchCheck, settingsPage);
     }
 
     /// <summary>支持 <c>--flag</c> / <c>-flag</c> / <c>/flag</c> 三种前缀。</summary>

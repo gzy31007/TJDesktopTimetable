@@ -11,6 +11,18 @@ internal static class IconGlyph
     /// <summary>刷新（<c>&#xE72C;</c>）。</summary>
     public const string Refresh = "\uE72C";
 
+    /// <summary>导入（<c>&#xE896;</c>，Download）—— 导入课表用。</summary>
+    public const string Import = "\uE896";
+
+    /// <summary>文件夹（<c>&#xE8B7;</c>）—— 当前课表 / 数据目录用。</summary>
+    public const string Folder = "\uE8B7";
+
+    /// <summary>文档（<c>&#xE8A5;</c>）—— 本地 JSON 导入用。</summary>
+    public const string Document = "\uE8A5";
+
+    /// <summary>地球（<c>&#xE774;</c>）—— 从 1 系统抓取用。</summary>
+    public const string Globe = "\uE774";
+
     /// <summary>更多（<c>&#xE712;</c>）—— 对应截图里那个 <c>⋯</c>。</summary>
     public const string More = "\uE712";
 

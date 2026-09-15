@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Media;
 using Tjt.App.Data;
 using Tjt.App.Rendering;
 using Tjt.App.Win32;
+using Tjt.Core;
 using Tjt.Widget;
 using Windows.Graphics;
 using WinRT.Interop;
@@ -47,7 +48,7 @@ public sealed partial class MainWindow : Window
     private BackdropHelper? _backdrop;
     private WindowDrag? _drag;
     private WindowEdgeResize? _edgeResize;
-    private Func<WidgetSettings, bool, WidgetSettings>? _openSettings;
+    private Func<WidgetSettings, bool, int, WidgetSettings>? _openSettings;
     private FrameworkElement? _root;
     private double _dpiScale = 1.0;
 
@@ -584,8 +585,9 @@ public sealed partial class MainWindow : Window
     /// <summary>顶部条与 <c>⋯</c> 菜单要执行的动作（渲染层只发意图，逻辑留在这里）。</summary>
     internal WidgetActions BuildActions() => new()
     {
-        OpenSettings = () => _openSettings?.Invoke(_settings, IsDark()),
-        Refresh = ReloadTimetable,
+        OpenSettings = () => _openSettings?.Invoke(_settings, IsDark(), SettingsWindow.PageGeneral),
+        OpenImport = () => _openSettings?.Invoke(_settings, IsDark(), SettingsWindow.PageImport),
+        Refresh = () => ReloadTimetable(),
         ResetPosition = () =>
         {
             PlaceBottomRight();
@@ -664,26 +666,57 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>重新读一遍课表数据并重画（改过 fixture 之后不用重启）。</summary>
-    internal void ReloadTimetable()
+    /// <summary>
+    /// 按载入顺序重新读一遍课表并重画（改过 fixture / 刚导入过之后不用重启）。
+    ///
+    /// <para>走 <see cref="AppHost.Load"/> 而不是"重读上次那个文件"：导入的课表在
+    /// <c>timetable.json</c>、黄金数据在输出目录、样例在代码里，三者语义不同；
+    /// 只有共用同一个入口，才不会出现"两条路径越走越偏"。</para>
+    /// </summary>
+    internal bool ReloadTimetable()
     {
         try
         {
-            var path = _loaded?.Source;
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                AppLog.Line($"[reload] 源文件不可用（{path}），跳过重新载入");
-                return;
-            }
-
-            _loaded = AppHost.Load(path);
+            _loaded = AppHost.Load(_options.FixturePath);
             Render("重新载入课表");
-            AppLog.Line($"[reload] 已重新载入 {path}");
+            AppLog.Line($"[reload] 已重新载入：{AppHost.OriginLabel(_loaded.Origin)} ← {_loaded.Source}");
+            return true;
         }
         catch (Exception ex)
         {
             AppLog.Error($"[reload] 失败：{ex.Message}");
+            return false;
         }
+    }
+
+    /// <summary>
+    /// 应用一份**导入的**课表：落盘 → 换掉当前课表 → 重画。
+    ///
+    /// <para>落盘失败也算失败并如实返回：画面上课表变了、下次启动却又回去，
+    /// 这种"看起来成功"必须让用户知道。</para>
+    /// </summary>
+    internal bool ApplyImportedTimetable(Timetable timetable, string source)
+    {
+        ArgumentNullException.ThrowIfNull(timetable);
+        if (timetable.Courses.Count == 0)
+        {
+            AppLog.Line("[import] 拒绝应用空课表");
+            return false;
+        }
+
+        var saved = TimetableStore.Save(timetable);
+        _loaded = new LoadedTimetable(TimetableStore.FilePath, timetable, TimetableOrigin.Imported);
+        Render("导入课表");
+        AppLog.Line($"[import] 已应用 {timetable.Courses.Count} 门 / {TimetableStore.Count(timetable)} 条上课安排（来源：{source}）saved={saved}");
+        return saved;
+    }
+
+    /// <summary>当前课表摘要（设置页「当前课表」那一行）。</summary>
+    internal string DescribeTimetable()
+    {
+        if (_loaded is null) return "还没有课表";
+        var sessions = TimetableStore.Count(_loaded.Timetable);
+        return $"{_loaded.Timetable.Courses.Count} 门课程 · {sessions} 条上课安排 · {AppHost.OriginLabel(_loaded.Origin)}\n{_loaded.Source}";
     }
 
     /// <summary>
@@ -710,7 +743,7 @@ public sealed partial class MainWindow : Window
         AppLog.Line("[window] 从托盘恢复显示");
     }
 
-    internal void SetSettingsOpener(Func<WidgetSettings, bool, WidgetSettings> opener) => _openSettings = opener;
+    internal void SetSettingsOpener(Func<WidgetSettings, bool, int, WidgetSettings> opener) => _openSettings = opener;
 
     /// <summary>当前设置（托盘菜单与设置窗口读它）。</summary>
     internal WidgetSettings CurrentSettings => _settings;
