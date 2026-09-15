@@ -117,6 +117,39 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 让 DWM 用它自己的**深色装饰**画这扇窗口。
+    ///
+    /// <para><b>背景（真机采样得出结论）</b>：清掉 <c>WS_THICKFRAME</c> 之后窗口仍保留一圈
+    /// <b>非客户区边框</b>（本机 150% 缩放下约 10px，客户区从 (1272,700) 才开始），
+    /// 而 DWM 默认用**浅色装饰集**画它 —— 挂件是深色圆角卡片，这圈浅色就成了一整条白边
+    /// （实测 <c>#F3F3F3</c>，四个方向都有）。</para>
+    ///
+    /// <para><b>为什么改主题而不是改颜色</b>：对照实验排除了其它三条路 ——
+    /// <c>DWMWA_BORDER_COLOR = NONE</c> 只关掉最外 1~2px 的描边（那圈白边照旧）、
+    /// <c>DwmExtendFrameIntoClientArea(0,0,0,0)</c> 与 <c>DWMWA_NCRENDERING_POLICY = DISABLED</c>
+    /// 都毫无影响；只有把 DWM 的装饰切到深色，非客户区才跟着变深（实测白边消失、
+    /// 挂件本体像素不变）。所以修的是"系统拿浅色画装饰"这个根因，而不是盖一层颜色上去。</para>
+    ///
+    /// <para>挂件随主题走：深色主题 → 深色装饰；浅色主题下这圈本来就是浅色、与内容协调。
+    /// 该属性只影响窗口装饰与系统绘制部分，<b>不影响</b> XAML 内容（渲染层仍按自己的主题画）。</para>
+    /// </summary>
+    /// <param name="hwnd">窗口句柄。</param>
+    /// <param name="dark">是否让 DWM 走深色装饰。</param>
+    private void ApplyWindowDecorationTheme(nint hwnd, bool dark)
+    {
+        var value = dark ? 1u : 0u;
+        var hr = NativeMethods.DwmSetWindowAttribute(
+            hwnd,
+            NativeMethods.Constants.DwmwaUseImmersiveDarkMode,
+            ref value,
+            sizeof(uint));
+
+        AppLog.Line(hr == 0
+            ? $"[window] DWM 装饰主题 = {(dark ? "深色" : "浅色")}（消掉客户区外那圈白边）"
+            : $"[window] DWM 装饰主题设置失败 hr=0x{hr:X8}（该系统可能不支持，白边可能残留）");
+    }
+
+    /// <summary>
     /// 光标（**屏幕物理像素**，来自 <c>WM_NCHITTEST</c> 的 <c>lParam</c>）该抓哪条边。
     ///
     /// <para><see cref="WindowResize"/> 每次都现问一次，而不是缓存矩形 —— 窗口刚被拖过、
@@ -185,6 +218,11 @@ public sealed partial class MainWindow : Window
 
         // 1) 材质：窗口创建后尽早设置
         AppLog.Line("[stage] window-created");
+
+        // 1b) DWM 装饰主题：决定客户区之外那圈非客户区边框用什么颜色画。
+        // 必须放在 `Initialize` 里而不是构造函数：`IsDark()` 要读已解析的设置。
+        ApplyWindowDecorationTheme(WindowNative.GetWindowHandle(this), IsDark());
+
         if (startup.NoBackdrop || _settings.NoBackdrop)
         {
             AppLog.Line("[backdrop] skipped (--no-backdrop)");
@@ -542,7 +580,12 @@ public sealed partial class MainWindow : Window
             AppLog.Line($"[layer] 切换贴桌面层 → {next.DesktopLayer}");
         }
 
-        if (previous.Theme != next.Theme) Render("主题变化");
+        if (previous.Theme != next.Theme)
+        {
+            // 装饰主题也要跟着走：否则深色挂件在浅色设置下又会亮起一圈白边
+            ApplyWindowDecorationTheme(WindowNative.GetWindowHandle(this), IsDark());
+            Render("主题变化");
+        }
     }
 
     /// <summary>重新读一遍课表数据并重画（改过 fixture 之后不用重启）。</summary>

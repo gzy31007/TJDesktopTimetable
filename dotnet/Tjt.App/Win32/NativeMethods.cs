@@ -53,6 +53,14 @@ internal static partial class NativeMethods
         /// <summary>命中测试（<c>WM_NCHITTEST</c>）；返回 <c>HT*</c> 码决定鼠标按下交给谁。</summary>
         public const uint WmNcHitTest = 0x0084;
 
+        /// <summary>
+        /// 沉浸式深色模式（<c>DWMWA_USE_IMMERSIVE_DARK_MODE</c>，Win10 20H1 起为 20）。
+        ///
+        /// 用途见 <c>MainWindow.ApplyWindowDecorationTheme</c>：让 DWM 用深色装饰画非客户区边框，
+        /// 否则深色挂件四周会有一整圈浅色边。
+        /// </summary>
+        public const uint DwmwaUseImmersiveDarkMode = 20;
+
         /// <summary>窗口不属于任务栏 / Alt+Tab（<c>WS_EX_TOOLWINDOW</c>）。</summary>
         public const long WsExToolWindow = 0x00000080L;
 
@@ -239,6 +247,16 @@ internal static partial class NativeMethods
         /// <summary>下。</summary>
         public int Bottom;
     }
+
+    /// <summary>
+    /// 设置窗口 DWM 属性（<c>DwmSetWindowAttribute</c>）。
+    ///
+    /// 目前只用来设 <c>DWMWA_USE_IMMERSIVE_DARK_MODE</c>（见
+    /// <c>MainWindow.ApplyWindowDecorationTheme</c>）。老系统上属性不存在会返回失败，
+    /// 调用方据此记日志 —— 不做版本判断，免得随手写死 build 号。
+    /// </summary>
+    [LibraryImport("dwmapi.dll")]
+    internal static partial int DwmSetWindowAttribute(nint hwnd, uint attribute, ref uint value, int size);
 
     /// <summary>调用原始窗口过程（子类化后必须转发，见 <c>MessageHook</c>）。</summary>
     [LibraryImport("user32.dll", EntryPoint = "CallWindowProcW")]

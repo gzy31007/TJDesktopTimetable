@@ -63,6 +63,8 @@ public partial class App : Application
         var sizeText = options is { Width: { } w, Height: { } h } ? $"{w}x{h}" : "default";
         var layerText = options.DesktopLayer is { } value ? value.ToString() : "from-settings";
         AppLog.Line($"[start] smoke={options.Smoke} desktopLayer={layerText} noBackdrop={options.NoBackdrop} size={sizeText}");
+        // 原始 argv 也打一行：CLI 解析出问题（参数没到进程 / 前缀不符）时，这是唯一能分辨的线索
+        AppLog.Line($"[start] argv=[{string.Join(' ', Environment.GetCommandLineArgs().Skip(1))}]");
 
         // 自检看门狗：无 GPU 的 runner 上曾卡到 CI 只能看到"90 秒超时"，不知道卡在哪一步。
         // 有它就能看到最后到达的阶段标记；同时给自检一个硬上限，绝不让 CI 悬着。
