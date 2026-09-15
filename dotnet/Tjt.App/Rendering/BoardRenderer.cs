@@ -1,4 +1,5 @@
 using Microsoft.UI;
+using System.IO;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -148,22 +149,34 @@ internal static class BoardRenderer
         return host;
     }
 
-    /// <summary>应用图标（头部用的 16×16 尺寸）：强调色圆角底 + 白色显示器字形。</summary>
+    /// <summary>
+    /// 应用图标（头部用）：直接用托盘那份 <c>Assets/app.ico</c>，两处观感一致。
+    ///
+    /// 用 <see cref="BitmapIcon"/>（<c>ShowAsMonochrome=false</c>）而不是字形：
+    /// 日历图标是多色的（蓝色头带 + 白色卡片 + 圆点），单色字形表达不出来。
+    /// </summary>
     private static FrameworkElement BuildAppGlyph(string accent)
     {
         var host = new Grid { Width = 18, Height = 18, VerticalAlignment = VerticalAlignment.Center };
+        // 必须写全名：本文件同时 using 了 Microsoft.UI.Xaml.Shapes（Path 是图形）
+        var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+        if (File.Exists(iconPath))
+        {
+            host.Children.Add(new BitmapIcon
+            {
+                UriSource = new Uri(iconPath),
+                ShowAsMonochrome = false,
+                Width = 18,
+                Height = 18,
+            });
+            return host;
+        }
+
+        // 兜底：图标缺失时退回强调色圆角块（绝不因为少个资源就渲染不出东西）
         host.Children.Add(new Border
         {
             CornerRadius = new CornerRadius(5),
             Background = new SolidColorBrush(Parse(accent)),
-        });
-        host.Children.Add(new FontIcon
-        {
-            Glyph = IconGlyph.Monitor,
-            FontSize = 11,
-            Foreground = new SolidColorBrush(Colors.White),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
         });
         return host;
     }
