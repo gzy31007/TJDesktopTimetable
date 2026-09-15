@@ -35,3 +35,12 @@
   - **它认两种同济课表接口**（诊断码 `tongji.personal` 与 `tongji.report`）：课表页那条报表接口把
     `calendarId` 放在 **URL 上**，所以抓取时由 `HttpRequestParser.QueryValue(spec, "calendarId")` 取出来
     当 `ImportInput.TermId` —— 不这么做学期会退化成"未知"（详见「易错知识点」里"两条接口两种包法"）。
+  - **内置登录窗口与粘贴请求共用同一条落盘路径**：`TongjiLoginWindow`（WebView2）把捕获到的响应交给
+    `ImportService.ApplyCapturedResponse` → 内部的 `Apply`（与 `FetchAsync` 完全一致），所以诊断、
+    探测行、学期解析、"解析出 0 门课"这些行为两边不会分叉。窗口本身只做三件事：把 WebView2 事件喂给
+    `TjtCore/TongjiWebCapture`（纯函数：URL 是不是课表接口 / `calendarId` 在哪 / cookie 怎么拼）、
+    读响应体、成功后关窗。**不猜 `studentCode`**（前端加密的 uid）：页面自己发那条请求，我们只旁观。
+  - **`TongjiFetcher.FetchSpecAsync` 是从 `FetchAsync` 里抽出来的**：前者吃"已解析好的
+    `HttpRequestSpec`"并负责发送/探测/文案，后者只剩"解析粘贴文本 + 没 Cookie 时的引导提示"。
+    登录窗口的兜底（响应体读不到时用页面 cookie 重发一次 GET）复用它 —— 这是**抽取而不是复制**，
+    以后改发送细节只需改一处。

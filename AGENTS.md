@@ -79,7 +79,12 @@ docs/                 desktop-layer（层级层结论）· winui-build（DeskBox
 ## 注意事项
 
 - 仓库 Public：fixtures 与文档中不得出现学号、姓名、cookie、token 等任何个人凭据。
-- **不做** 1 系统自动登录（SSO 带短信增强，塞进桌面客户端不划算）：改为用户手动粘贴 Cookie，外壳 `Data/TongjiFetcher.cs` 发起请求并探测接口路径。Cookie 存 `credentials.json`，**任何日志都不得打印 Cookie 内容**。
+- **登录态有两条路，都不是"破解浏览器数据"**（2026-09-16 更新；旧口径"不做 1 系统自动登录、只手动粘 Cookie"已作废）：
+  ① **推荐**：内置登录窗口（`TongjiLoginWindow` + WebView2，见下节「内置登录窗口」）—— 用户在学校自己的页面上登录，
+  课表页那条接口的响应被我们**旁路接住**；② 粘贴一条浏览器请求（`Data/TongjiFetcher.cs`），Cookie 存 `credentials.json`。
+  **不做**"读 Edge/Chrome 的 Cookies 库"：实测 Edge 153 的 Cookies 被独占锁（Edge 运行时连复制都失败）且启用了
+  App-Bound 加密（`Local State` 里 `app_bound_encrypted_key` 前缀 `APPB`），要解 v20 就得调它的 IElevator COM ——
+  那是绕过浏览器安全机制，收益也不如方案 ①。**任何日志都不得打印 Cookie 内容**（只记长度/条数）。
 - 窗口默认「桌面层 + 静息」：Owner 设为桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见），静息落点按前台窗口三选一（机制与证据见 [`docs/desktop-layer.md`](docs/desktop-layer.md)；现行实现见下节「贴桌面常驻」）；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
 - 拖动与缩放都是自实现（`Win32/WindowDrag.cs` / `Win32/WindowEdgeResize.cs`），**起手先校验指针归属**（`PointerTarget`）；静息态**不戴** `WS_EX_NOACTIVATE`（戴了拖不动，见"易错知识点"），交互期只做"临时浮起 + 结束后重新落点"。
 
@@ -403,6 +408,39 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     14 门课解析出来、且**没有** `tongji.term.unknown`（学期命中内置表）。
   - **真机实测（用用户自己的那条报表请求）**：`--fetch-check` → HTTP 200 / 30261 字节 / `data 数组 15 条` /
     `tongji.report` → **14 门 / 19 条**、学期 `2026-2027学年第1学期`（16 教学周）。
+- **内置登录窗口（2026-09-16，「登录同济获取课表」）** —— 登录态的第一条路（见「注意事项」第一条）：
+  在应用自己的 WebView2 里打开 `https://1.tongji.edu.cn/`，用户走学校自己的统一身份认证（含短信），
+  课表页那条接口的响应由我们**旁路接住**，再走与粘贴请求**完全相同**的导入管线。
+  - **分层**：纯逻辑进 `dotnet/TjtCore/TongjiWebCapture.cs`（单测 `TjtCore.Tests/TongjiWebCaptureTests.cs`）——
+    `IsEndpoint`（三条接口路径特征）/ `EndpointLabel` / `IsTongjiHost` / `CalendarIdOf` /
+    `CookieHeader`（RFC 6265 简化版：域 + 路径 + 同名取更长路径）/ `Inspect`（URL 是端点 且 响应像课表）；
+    窗口与 WebView2 事件留在 `dotnet/Tjt.App/TongjiLoginWindow.xaml(.cs)`；落盘走
+    `ImportService.ApplyCapturedResponse`（内部仍是同一个 `Apply`，诊断/探测行/落盘不会分叉）。
+  - **为什么让页面自己发请求**：报表接口要 `studentCode`（前端加密的 uid，算法在 bundle 里、随发版变），
+    所以**不猜算法、也不读浏览器的 cookie 库** —— 页面自己去请求，我们只旁观，前端怎么改都抓得到。
+  - **兜底：cookie 重发**。`GetContentAsync()` 读得到 GET 的响应体（实测 34 KB 一次成功），
+    但 POST（旧 `getDataBk`）读不到 → 这时用 `CoreWebView2.CookieManager.GetCookiesAsync(url)` 取 cookie，
+    经 `TongjiWebCapture.CookieHeader` 拼头，交给 **`TongjiFetcher.FetchSpecAsync`**（本轮新抽出的
+    "已解析好的请求直接发"，`FetchAsync` 也走它）重发一次 GET。**cookie 只进请求头，日志只记条数**。
+  - **WebView2 用独立 user data folder**：`%APPDATA%\TJDesktopTimetable\WebView2`（与用户的 Edge /
+    其它 WebView2 应用隔离；登录态就留在那里，所以"下次打开还是登录状态"是自然结果）。
+    关掉了 DevTools、右键菜单、**密码保存与自动填充**；`NewWindowRequested` 一律在当前窗口内继续导航
+    （SSO / 短信页弹窗场景，否则用户会觉得"点了没反应"）；`WindowCloseRequested` → 关窗。
+  - **入口三处**（与导入一致）：挂件 `⋯` →「登录同济获取课表…」、托盘同名项、设置窗口「导入」页的
+    **登录同济并获取课表** 按钮。链路是 `WidgetActions.OpenLogin` → `MainWindow._openLogin` →
+    `App.ShowTongjiLogin`（窗口单例，已开着就 `Activate`）。
+  - **CLI**：`--login`（启动就开登录窗口）与 `--login-check <url>`（自检：开真窗口导航到给定地址，
+    捕获到课表 → 写日志 → `Environment.Exit`，退出码表成败；60 秒看门狗兜底）。
+  - **验收**（`.tools/verify-login.ps1`，纯 ASCII，**实测全绿**）：本地 `HttpListener` 假扮 1 系统，
+    页面自己 `fetch` 报表接口（`?calendarId=122&studentCode=verify`）→ 程序捕获 → 14 门 / 19 条落盘。
+    实测日志：`[login] WebView2 已就绪(profile=…)` → `[login] 撞上课表接口：报表接口 findStudentTimetab（HTTP 200）`
+    → `[import] adapter=tongji-student 14 门课程 / 19 条上课安排…applied=True` → `[login] 捕获成功：…，34354 字节，calendarId=122`。
+  - **踩过的坑**：① **验收脚本里不能出现中文**（PowerShell 5 按 ANSI 读，会报"字符串缺少终止符"）——
+    匹配日志里的中文请用 ASCII 锚点（如 `\[login\].*findStudentTimetab`），别抄日志原文；
+    ② **"读 Edge 的 cookie"这条路本机实测走不通**：Edge 运行时 Cookies 库被独占锁（`Copy-Item` / `cmd copy` /
+    `robocopy` 全失败，`IOException`），且 Edge 153 已启用 App-Bound 加密（`Local State` 的
+    `app_bound_encrypted_key` 前缀 `APPB`）——要解 v20 得调 IElevator COM。所以本功能**不碰浏览器数据**；
+    ③ 登录窗口**不设** `ExtendsContentIntoTitleBar`（保留系统标题栏，拖窗/关闭更省事，与设置窗口的策略不同）。
 - **本机的两个冒烟组合（都实测通过）**：
   - `-RunSmoke`：带材质 → `[backdrop] mode=mica-controller`；
   - `-RunSmoke -NoBackdrop`：跳过材质 → `[backdrop] skipped`；
