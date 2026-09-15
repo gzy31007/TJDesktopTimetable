@@ -102,6 +102,36 @@ public class ResizePolicyTests
     }
 
     [Fact]
+    public void 边缘光标条覆盖四条边且与抓取带同宽()
+    {
+        var zones = CursorZones.ForWindow(1000, 700);
+
+        Assert.Equal(4, zones.Count);
+        // 宽度口径与抓取带一致：能拖到的范围 = 显示缩放光标的范围
+        Assert.All(zones, z => Assert.True(z.Width == ResizePolicy.BorderWidth || z.Height == ResizePolicy.BorderWidth));
+        // 左/右条竖着铺满，上/下条横着铺满
+        Assert.Contains(zones, z => z.Grip == ResizeGrip.Left && z.X == 0 && z.Height == 700);
+        Assert.Contains(zones, z => z.Grip == ResizeGrip.Right && z.X + z.Width == 1000);
+        Assert.Contains(zones, z => z.Grip == ResizeGrip.Top && z.Y == 0 && z.Width == 1000);
+        Assert.Contains(zones, z => z.Grip == ResizeGrip.Bottom && z.Y + z.Height == 700);
+    }
+
+    [Fact]
+    public void 极小窗口不产生负尺寸的光标条()
+    {
+        var zones = CursorZones.ForWindow(3, 2, band: 6);
+        Assert.Equal(4, zones.Count);
+        Assert.All(zones, z =>
+        {
+            Assert.True(z.Width > 0 && z.Height > 0);
+            Assert.True(z.Width <= 3 && z.Height <= 2);
+        });
+
+        Assert.Empty(CursorZones.ForWindow(0, 700));
+        Assert.Empty(CursorZones.ForWindow(1000, 700, band: 0));
+    }
+
+    [Fact]
     public void 尺寸下限与窗口可用判据同口径()
     {
         var size = ResizePolicy.ClampSize(10, 10);

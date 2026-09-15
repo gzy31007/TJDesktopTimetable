@@ -117,6 +117,14 @@ docs/                 架构、数据模型、适配器指南
 
 ## C# / WinUI 线（2026-09-15 起）
 
+> **常驻规则（2026-09-15 用户明确定下）：今后前端一律以 DeskBox 为参照实现。**
+> 遇到"观感/交互与 DeskBox 不一致"时，默认动作是**去 `.refs/DeskBox` 找它怎么做的**，
+> 而不是自己从 Win32/WinUI 文档推。本轮四次返工（材质、白边→黑带、边缘缩放失效、缩放光标）
+> 全都是"自己想当然"导致的，而四次的答案都写在 DeskBox 里。
+> **边界仍是许可**：`.refs/DeskBox` 是 **GPL-3.0-only** 只读副本，只能提取
+> "用了哪些 API / 什么机制"这类**事实**，不得抄代码、注释、文档正文、美术资源
+> （依据 `docs/deskbox-refactor-assessment.md`）。实践口径：**先查它、后自己写**。
+
 技术栈正在从「Electron 独占」转向「WinUI 外壳 + 核心逻辑双实现」。原因是材质：Electron 的三条系统材质路径实测全拿不到 DeskBox 那种质感（DWM 对"从未被激活的窗口"一律降级成近黑平色），只有 WinUI 的 `MicaController` + `SystemBackdropConfiguration`（可强制 `IsInputActive`）能拿到。
 
 ### 三个工程的分工（改动时必须守住）
@@ -202,14 +210,22 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     <item><description>左键松开（`GetAsyncKeyState`）→ 存位置 + 重新落点 + 光标还原。</description></item>
     </list>
     与拖动同一套轮询机制（`WindowDrag` 是同一个模式），所以"这台机器挡掉合成指针输入"这条限制同样适用。
-  - **光标必须靠 `WM_SETCURSOR` 才留得住**：第一版只在 16ms 轮询里 `SetCursor`，
-    真机结果是**"能缩放但看不到缩放光标"** —— 窗口过程每次鼠标移动都会在 `WM_SETCURSOR`
-    里用**类光标**覆盖一次，轮询设的立刻被冲掉。现在在 `WM_SETCURSOR` 回调里
-    （仅当 `wParam == 本窗口` 且当前悬停在抓取带上）设光标并 `SetResult(1)`（TRUE =
-    "已处理，别动"），其余情况不拦，免得抢掉按钮/文本自己的光标。
-    只在该消息里设、不在轮询里设，所以不会和框架抢。
+  - **光标最后改走渲染层（Win32 那条路两轮都没成）**：先是只在 16ms 轮询里 `SetCursor`
+    → 真机"能缩放但看不到缩放光标"；再改成 `WM_SETCURSOR` 里设 + `SetResult(1)` → 用户仍看不到。
+    实测证据：`SetCursor` **返回成功**（旧光标从箭头 `0x10003` 变成 `IDC_SIZEWE 0x10011`）、
+    `WM_SETCURSOR` 也确实到了窗口过程（计数从 0 涨到 2），但用户看不到 —— 而
+    `GetCursor`/`GetCursorInfo` **从别的进程读不到当前光标**（前者只报本线程拥有的，
+    后者在这个宿主里恒为 0），所以"到底谁赢了"没法用程序判定。
+    **结论：不要在挂件上跟系统光标缠斗**，改用渲染层光标 ——
+    `Tjt.Widget/CursorZones.ForWindow()` 算出四条边缘条（纯函数、有单测），
+    `BoardRenderer` 用 `CursorStrip`（继承 `Grid`，因为 WinUI 3 的 `Border` 是 **sealed**
+    而 `ProtectedCursor` 是 **protected**）挂 `InputSystemCursor`。光标由框架按元素算，
+    不参与"谁最后 SetCursor"的竞争。Win32 侧只留判定与搬窗口。
   - 抓取带仍是 6px、仍用**内缩矩形**判边（`x < left + band`，
     不是 `x - left < band`，后者会把窗口左侧外面整片桌面算成抓取带 —— 有单测钉住）。
+  - **已知取舍**：顶部光标条（6px，`HorizontalAlignment=Stretch`）压在顶部条上，
+    会吃掉那 6px 的 pointerdown —— 即"贴着窗口最上沿那一条按下去拖窗口"可能不响应。
+    这是 DeskBox 也有的同类折中（它的 resize 边框同样盖在标题栏上）；真觉得别扭再给拖拽区让出 6px。
   - **验收**（`.tools/verify-resize.ps1`，**不用合成鼠标**）：验三件能自动化的 ——
     ① 日志里有 `[resize] 边缘缩放已挂上`（说明自实现循环挂上了）；
     ② 几何：右边/下边增长时左上角锚定不动（`SetWindowPos` + 轮询等待尺寸生效）；

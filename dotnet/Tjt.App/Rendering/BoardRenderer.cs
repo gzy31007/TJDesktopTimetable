@@ -1,4 +1,5 @@
 using Microsoft.UI;
+using Microsoft.UI.Input;
 using System.IO;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -45,6 +46,23 @@ internal static class BoardRenderer
         var header = BuildHeaderBar(visual.Header, dark, actions);
         Grid.SetRow(header, 0);
         root.Children.Add(header);
+
+        // 边缘光标条：贴在网格之上、四条边的内侧。用 WinUI 原生光标
+        // （UIElement.ProtectedCursor）而不是 Win32 SetCursor —— 后者会被窗口过程/渲染层
+        // 在 WM_SETCURSOR 里按类光标重置（真机实测"能缩放但看不到缩放光标"）。
+        // 只挂光标、不放事件处理：拖拽判定仍在 Win32 侧（WindowEdgeResize）。
+        var zones = CursorZones.ForWindow(visual.CanvasWidth, visual.CanvasHeight);
+        foreach (var zone in zones)
+        {
+            var strip = new CursorStrip(CursorFor(zone.Grip))
+            {
+                Width = zone.Width,
+                Height = zone.Height,
+                HorizontalAlignment = zone.X <= 0 ? HorizontalAlignment.Left : HorizontalAlignment.Right,
+                VerticalAlignment = zone.Y <= 0 ? VerticalAlignment.Top : VerticalAlignment.Bottom,
+            };
+            root.Children.Add(strip);
+        }
 
         var canvas = BuildCanvas(visual, dark);
         // 网格可能比可用空间大（列宽或行高到了下限）—— 用 ScrollViewer 兜住，
@@ -246,6 +264,16 @@ internal static class BoardRenderer
         button.Flyout = flyout;
         return button;
     }
+
+    /// <summary>边缘光标条用的光标类型（<c>InputSystemCursorShape</c>，WinUI 自带、任意 DPI 都清晰）。</summary>
+    /// <param name="grip">抓取边。</param>
+    private static InputSystemCursorShape CursorFor(ResizeGrip grip) => grip switch
+    {
+        ResizeGrip.Left or ResizeGrip.Right => InputSystemCursorShape.SizeWestEast,
+        ResizeGrip.Top or ResizeGrip.Bottom => InputSystemCursorShape.SizeNorthSouth,
+        ResizeGrip.TopLeft or ResizeGrip.BottomRight => InputSystemCursorShape.SizeNorthwestSoutheast,
+        _ => InputSystemCursorShape.SizeNortheastSouthwest,
+    };
 
     /// <summary>网格画布（尺寸已由呈现模型算好，单位 DIP）。</summary>
     private static Canvas BuildCanvas(BoardVisual visual, bool dark)
