@@ -23,6 +23,13 @@
     <RootNamespace>Tjt.App</RootNamespace>
     <AssemblyName>Tjt.App</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!--
+      exe 的图标（PE 资源）：资源管理器 / 任务管理器 / "固定到任务栏"读的是它。
+      **窗口自身的图标不靠它** —— WinUI 3 的窗口类不带图标，不显式 `AppWindow.SetIcon`
+      就回落到系统默认图标（登录窗口实测如此），那份在 Rendering/WindowIcon.cs，两件缺一不可。
+      只在 Windows 上设：Linux 侧那次 EnableWindowsTargeting 编译级检查用不到资源编译器。
+    -->
+    <ApplicationIcon Condition="'$(OS)' == 'Windows_NT'">Assets\app.ico</ApplicationIcon>
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>

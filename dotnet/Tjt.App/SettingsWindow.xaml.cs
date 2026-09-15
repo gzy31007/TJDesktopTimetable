@@ -86,6 +86,7 @@ public sealed partial class SettingsWindow : Window
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SystemBackdrop = new MicaBackdrop();
+        WindowIcon.Apply(this);
         if (Content is FrameworkElement root)
         {
             root.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;

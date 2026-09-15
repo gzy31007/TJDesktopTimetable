@@ -69,6 +69,8 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(null);
         ConfigureWindowChrome();
+        // 任务栏 / Alt-Tab 也读窗口图标（挂件自己没有标题栏，但这两个地方会用上）
+        WindowIcon.Apply(this);
         SizeChanged += OnSizeChanged;
         _nowTimer.Interval = NowRefreshInterval;
         _nowTimer.Tick += (_, _) => Render(reason: "时间线刷新");

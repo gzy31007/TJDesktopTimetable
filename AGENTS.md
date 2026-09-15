@@ -441,6 +441,12 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     `robocopy` 全失败，`IOException`），且 Edge 153 已启用 App-Bound 加密（`Local State` 的
     `app_bound_encrypted_key` 前缀 `APPB`）——要解 v20 得调 IElevator COM。所以本功能**不碰浏览器数据**；
     ③ 登录窗口**不设** `ExtendsContentIntoTitleBar`（保留系统标题栏，拖窗/关闭更省事，与设置窗口的策略不同）。
+    ④ **窗口图标必须显式设**（2026-09-16 修）——WinUI 3 的 `Window` **没有** `Icon` 属性，它注册的窗口类
+    也不带图标，不设就回落到系统默认的"空白应用"图标（登录窗口的标题栏与任务栏实测就是它，而托盘图标
+    因为走 `LoadImage` 一直是对的）。正解**两件一起**：`Rendering/WindowIcon.cs`（`AppWindow.SetIcon(Assets/app.ico)`，
+    三个窗口构造里各调一次；失败只记日志不抛）＋ csproj 的 `<ApplicationIcon>`（只改 exe 的 PE 资源，
+    **不能**替代 SetIcon）。验收：`.tools/verify-icon.ps1`（读 `WM_GETICON`，非零即 PASS）＋
+    `.tools/dump-window-icon.ps1`（把窗口当前图标 dump 成 PNG，与 `Assets/app.ico` 的 48×48 逐像素相等即确证）。
 - **本机的两个冒烟组合（都实测通过）**：
   - `-RunSmoke`：带材质 → `[backdrop] mode=mica-controller`；
   - `-RunSmoke -NoBackdrop`：跳过材质 → `[backdrop] skipped`；

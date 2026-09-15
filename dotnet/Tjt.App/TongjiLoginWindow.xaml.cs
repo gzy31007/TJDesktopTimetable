@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using Tjt.App.Data;
+using Tjt.App.Rendering;
 using Tjt.App.Win32;
 using Tjt.Core;
 using Windows.Graphics;
@@ -58,6 +59,8 @@ internal sealed partial class TongjiLoginWindow : Window
 
         InitializeComponent();
         SystemBackdrop = new MicaBackdrop();
+        // 这一窗是**系统标题栏**（刻意不 ExtendsContentIntoTitleBar），图标不设就是系统默认那个
+        WindowIcon.Apply(this);
         if (Content is FrameworkElement root) root.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
 
         Host.Children.Add(BuildLayout());
