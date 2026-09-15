@@ -68,10 +68,14 @@ pnpm dist:win      # WSL 内交叉打包 Windows 免安装版 → apps/desktop/d
 **A. 从 1 系统直接获取（推荐）**
 
 1. 浏览器登录 [1 系统](https://1.tongji.edu.cn/)，打开"我的课表"页面。
-2. F12 → **Network** → 刷新页面 → 找到返回 200、体积较大的那条（一般是
-   `/api/electionservice/student/xxxx/getDataBk`）→ 右键 → **Copy → Copy as cURL**。
+2. F12 → **Network** → 刷新页面 → 找到**返回 200 且内容是课程列表**的那条请求 → 右键 → **Copy → Copy as cURL**。
+   - 现在课表页调的是 `GET /api/electionservice/reportManagement/findStudentTimetab?calendarId=…&studentCode=…`
+     （研究生页是 `findSchoolTimetab2`）；旧接口 `…/student/xxxx/getDataBk` 同样支持。
+   - 复制错请求（例如 `schoolCalendar/detail`——那是**校历**、里面没有课程）时，程序会在探测行里如实告诉你
+     它看到了什么，而不是默默失败。
 3. 打开"导入课表"页，把这条请求整段粘贴进去 → 点 **获取我的课表**。
-4. 程序照原样请求一次（请求里自带 Cookie 与 `x-token`）→ 解析 → 立即应用到桌面挂件。
+4. 程序照原样请求一次（请求里自带 Cookie 与 `x-token`）→ 解析 → 立即应用到桌面挂件；
+   学期 id 直接从请求 URL 的 `calendarId` 取，所以"当前第几周"也是准的。
 
 > 粘贴内容只保存在本机 `%APPDATA%\TJDesktopTimetable\credentials.json`，不会上传、不进日志（日志里只记长度）；
 > 用完可在浏览器退出登录使其失效。粘贴请求而不是猜接口路径，是因为接口里的 `{id}` 是选课批次相关的内部 id，无法稳定构造。

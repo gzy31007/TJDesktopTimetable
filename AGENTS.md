@@ -58,7 +58,13 @@ docs/                 架构、数据模型、适配器指南
 
 ## 易错知识点
 
-- **已移除**「专业培养计划（`timetable/major`）适配器」与「教学班勾选」流程：现在只支持个人课表导入即用。若用户误把培养计划数据导进来（同一门课多个教学班），会表现为导入结果异常（**没有** `tongji.looksLikePlan` 这类专门警告——2026-09-15 全仓 grep 确认该标识在 TS/C# 源码里都不存在，旧文档此条不准；适配器层里真正的诊断码是 `tongji.personal` / `tongji.flat` / `tongji.noSchedule` / `tongji.schedule.missing` / `tongji.term.unknown` / `tongji.term.startDate` / `tongji.summary`）。
+- **已移除**「专业培养计划（`timetable/major`）适配器」与「教学班勾选」流程：现在只支持个人课表导入即用。若用户误把培养计划数据导进来（同一门课多个教学班），会表现为导入结果异常（**没有** `tongji.looksLikePlan` 这类专门警告——2026-09-15 全仓 grep 确认该标识在 TS/C# 源码里都不存在，旧文档此条不准；适配器层里真正的诊断码是 `tongji.personal` / `tongji.report` / `tongji.flat` / `tongji.noSchedule` / `tongji.schedule.missing` / `tongji.term.unknown` / `tongji.term.startDate` / `tongji.summary`）。
+- **同济个人课表有两条接口、两种"包法"（2026-09-16 补第二条）**：以 1 系统前端 bundle（`/static/js/app.<hash>.js` + 懒加载 chunk）为准：
+  - 选课服务 `POST /api/electionservice/student/{选课批次id}/getDataBk` → `data.selectedCourses[].course.times[]`（旧路径，`{id}` 无法稳定构造）；
+  - **课表页真正调的那条**：`GET /api/electionservice/reportManagement/findStudentTimetab?calendarId=<学期id>&studentCode=<前端加密的uid>`（研究生 `findSchoolTimetab2`，按前端源码走 `data.list`）→ `data[].timeTableList[]`。
+    两者 `dayOfWeek`/`timeStart`/`timeEnd`/`weeks` 数组语义**完全一致**，只是课程在数组顶层、排课数组改名、教室多一层 `roomLable`（线上课堂/操场这类没有教室编号的场地，`roomIdI18n` 为空时才用它）。
+  - **`calendarId` 只在请求 URL 上**（报表响应体里没有），所以抓取时要从粘贴的请求里把它取出来当 `ImportInput.TermId`，否则学期退化成"未知"（`tongji.term.unknown`）：C# 侧 `HttpRequestParser.QueryValue(spec, "calendarId")` → `TongjiFetchOutcome.TermId` → `ImportService`。
+  - 两条接口对同一个人给出的课表**逐条一致**（实测：14 门 / 19 条，条数一致是"同格多教师合并"后的结果，原始 `timeTableList` 有 27 条）。fixture：`packages/core/fixtures/tongji-2026-1-report.json`（脱敏：教师姓名→教师A…Z、工号→10001+、教学班 id→9xxxxxxxxxxxxxxx；TS 与 C# 共用）。
 - 个人课表与培养计划是**同一套后端字段**（`dayOfWeek` / `weekState` / `timeStart` / `roomName` …），区别只在数据范围，所以字段映射逻辑可复用。
 - `weekState` 是 16 位周次掩码，bit0 = 第 1 周；单双周掩码不要硬编码 `0x5555/0xAAAA`（只对 16 周成立），按 `term.totalWeeks` 生成。
 - `dayOfWeek` 取值 1–7，**7 = 周日**（注意与 JS `Date.getDay()` 的 0=周日 区分）。
@@ -426,11 +432,18 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     150% 缩放下窗口在屏幕上只有 653×480 DIP —— 左导航吃掉 208 DIP 后卡片只剩约 380 DIP 宽，
     说明文字一行只放得下十个字。现在按 `GetDpiForWindow()/96` 折算成 DIP 意图，并夹到工作区内
     （实测 150% → 客户区 1470×1080 px = 980×720 DIP）。
+  - **它认两种同济课表接口**（诊断码 `tongji.personal` 与 `tongji.report`）：课表页那条报表接口把
+    `calendarId` 放在 **URL 上**，所以抓取时由 `HttpRequestParser.QueryValue(spec, "calendarId")` 取出来
+    当 `ImportInput.TermId` —— 不这么做学期会退化成"未知"（详见「易错知识点」里"两条接口两种包法"）。
   - **验收**（`.tools/verify-import.ps1`，纯 ASCII，实测全绿）：A 无导入 → 黄金数据；B `--import` → 管线 + 落盘
     （并检查文件是 camelCase 且 14 门）；C 再启动 → 读回 `timetable.json`（导入优先于 fixtures）；
     D 四个设置页都能构建并量出尺寸；E 用**本地 `HttpListener` 合成服务**跑完整抓取链路（该方法不需要用户的
     Cookie：请求里写 `cookie: JSESSIONID=VERIFY` 就够走通"解析 → 发请求 → 探测 → 适配器"），
-    外加服务端报错的负例，并核对服务端**实际收到**的 method / content-type / cookie。
+    外加服务端报错的负例，并核对服务端**实际收到**的 method / content-type / cookie；
+    G 同一台合成服务再喂**报表格式**的响应（`data[].timeTableList[]`），验证 `calendarId` 从 URL 取到、
+    14 门课解析出来、且**没有** `tongji.term.unknown`（学期命中内置表）。
+  - **真机实测（用用户自己的那条报表请求）**：`--fetch-check` → HTTP 200 / 30261 字节 / `data 数组 15 条` /
+    `tongji.report` → **14 门 / 19 条**、学期 `2026-2027学年第1学期`（16 教学周）。
 - **本机的两个冒烟组合（都实测通过）**：
   - `-RunSmoke`：带材质 → `[backdrop] mode=mica-controller`；
   - `-RunSmoke -NoBackdrop`：跳过材质 → `[backdrop] skipped`；

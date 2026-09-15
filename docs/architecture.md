@@ -75,11 +75,16 @@ AppHost.Load()                   载入顺序：--fixture → 用户导入的 ti
 
 - **`ImportService` 不认识窗口**（三个回调：`apply` / `reload` / `describe`），设置窗口也不认识 `MainWindow`；
   两端都只依赖接口，窗口层改动不会牵动导入逻辑。
+- **同济个人课表有两条接口，适配器都认**（诊断码 `tongji.personal` / `tongji.report`）：
+  - 选课服务 `POST …/electionservice/student/{批次id}/getDataBk` → `data.selectedCourses[].course.times[]`；
+  - 课表页真正调的 `GET …/electionservice/reportManagement/findStudentTimetab?calendarId=…&studentCode=…`
+    （研究生 `findSchoolTimetab2`）→ `data[].timeTableList[]`。
+    后者的学期 id 只在 **URL** 上，所以抓取链路会把它取出来当 `ImportInput.TermId`（`HttpRequestParser.QueryValue`）。
 - **落盘文件两端同形**：`timetable.json`（camelCase，对齐 TS 的 `Timetable`）与
   `credentials.json`（`{ tongjiRequest, savedAt }`）在 Electron 线与 WinUI 线之间可以互相读 ——
   实测 WinUI 侧直接读到了 Electron 侧 2026-09-14 导入的那份课表。
 - 验收脚本：`.tools/verify-import.ps1`（载入顺序 / 导入落盘 / 读回 / 四个设置页构建 /
-  本地合成服务上的完整抓取链路与失败负例）。
+  本地合成服务上的完整抓取链路（含报表格式）与失败负例）。
 
 ## 窗口层设计
 
