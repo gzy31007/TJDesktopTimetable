@@ -53,6 +53,9 @@ internal static partial class NativeMethods
         /// <summary>命中测试（<c>WM_NCHITTEST</c>）；返回 <c>HT*</c> 码决定鼠标按下交给谁。</summary>
         public const uint WmNcHitTest = 0x0084;
 
+        /// <summary>取根窗口（<c>GA_ROOT</c>）：把子窗口并到它所属的顶层窗口。</summary>
+        public const uint GaRoot = 2;
+
         /// <summary>窗口描边颜色（<c>DWMWA_BORDER_COLOR</c>，Win11 21H2+）。</summary>
         public const uint DwmwaBorderColor = 34;
 
@@ -236,6 +239,23 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", EntryPoint = "GetWindowRect", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool GetWindowRect(nint hwnd, out Rect rect);
+
+    /// <summary>
+    /// 命中测试：屏幕上该点最上层的窗口（<c>WindowFromPoint</c>）。
+    ///
+    /// 只看几何与 z-order，**不受鼠标捕获影响** —— 用来判断"这次按下到底按在谁身上"
+    /// （见 <c>PointerTarget</c>）。
+    /// </summary>
+    [LibraryImport("user32.dll")]
+    internal static partial nint WindowFromPoint(Point point);
+
+    /// <summary>
+    /// 取祖先窗口（<c>GetAncestor</c>）；<paramref name="flags"/> 见
+    /// <see cref="Constants.GaRoot"/>。WinUI 的 XAML 内容挂在子窗口（DesktopChildSiteBridge）上，
+    /// 所以 <c>WindowFromPoint</c> 的结果必须先并到根窗口才能跟顶层 HWND 比较。
+    /// </summary>
+    [LibraryImport("user32.dll")]
+    internal static partial nint GetAncestor(nint hwnd, uint flags);
 
     /// <summary>窗口矩形（物理像素）。</summary>
     [StructLayout(LayoutKind.Sequential)]

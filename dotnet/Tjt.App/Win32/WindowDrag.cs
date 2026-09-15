@@ -69,6 +69,16 @@ internal sealed class WindowDrag
     private void OnPressed(object sender, PointerRoutedEventArgs e)
     {
         if (_tracking) return;
+
+        // 指针事件按理只在"按下落在我们窗口上"时才来，这里再核一次归属（与缩放同一个坑）：
+        // 挂件被别的窗口遮挡时，任何漏进来的按下都会把它拖走 —— 起手那一刻校验代价极低。
+        if (!PointerTarget.CursorIsOurs(_hwnd, out var who))
+        {
+            AppLog.Line($"[drag] 忽略按下：指针不在挂件上（{who}）");
+            e.Handled = true;
+            return;
+        }
+
         if (!NativeMethods.GetCursorPos(out _originCursor)) return;
         if (!NativeMethods.GetWindowRect(_hwnd, out var rect)) return;
 

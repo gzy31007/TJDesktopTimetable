@@ -20,11 +20,15 @@ namespace Tjt.App.Win32;
 ///
 /// <para><b>实现</b>：16ms <c>DispatcherTimer</c> 轮询光标（与拖动同一套，实测稳）——
 /// <list type="bullet">
-/// <item><description>左键按下且落在带内 → 记下起点与起始外框，开始拖拽；</description></item>
+/// <item><description>左键按下且落在带内、**且指针确实归我们**（<see cref="PointerTarget"/>）→
+/// 记下起点与起始外框，开始拖拽；</description></item>
 /// <item><description>每帧用 <see cref="ResizePolicy.Resolve"/>（纯函数，有单测）算新外框，
 /// 一次 <c>SetWindowPos</c> 搬窗口；</description></item>
 /// <item><description>左键松开 → 收尾（存位置 + 重新落点），并把光标还原成箭头。</description></item>
-/// </list></para>
+/// </list>
+/// 「指针确实归我们」这一条是**必需**的：抓取带只看坐标，看不见窗口上面压着谁，
+/// 挂件被别的窗口遮挡时，用户在遮挡窗口上按住左键拖动、光标扫过挂件边缘带就会把挂件一起缩放
+/// （真机 bug）。</para>
 ///
 /// <para><b>为什么要轮询而不是 XAML 指针事件</b>：与拖动同因 ——
 /// <c>CapturePointer</c> 会在元素重建时丢掉捕获，<c>PointerMoved</c> 一条都收不到
@@ -62,6 +66,9 @@ internal sealed class WindowEdgeResize
     private int _ticks;
     private ResizeGrip _loggedHover = ResizeGrip.None;
 
+    /// <summary>已经为用户记过一次"被遮挡，忽略起手"的日志（避免 16ms 刷屏）。</summary>
+    private bool _blockedLogged;
+
     private WindowEdgeResize(nint hwnd, Func<int, int, ResizeGrip> resolve, Action onStart, Action onEnd)
     {
         _hwnd = hwnd;
@@ -91,6 +98,10 @@ internal sealed class WindowEdgeResize
 
     /// <summary>
     /// 渲染层报告"用户按下的热区方向"。由边缘热区的 <c>PointerPressed</c> 调用。
+    ///
+    /// <para>这是"先移到边缘、再按下"能起手的唯一来源：那一拍抓取边没有发生变化，
+    /// 纯坐标判定不会进入起手分支。也正因为如此，<c>PointerPressed</c> 与它是天然一致的 ——
+    /// 元素收不到指针事件，就不会有报告，被遮挡时也就不会误起手。</para>
     /// </summary>
     /// <param name="grip">按下的是哪条边/哪个角。</param>
     public void NotePressedGrip(ResizeGrip grip) => _pressedGrip = grip;
@@ -104,10 +115,21 @@ internal sealed class WindowEdgeResize
     {
         if (!NativeMethods.GetCursorPos(out var cursor)) return;
 
+        var down = IsLeftButtonDown();
+
         if (!_resizing)
         {
+            // 左键没按下时作废"渲染层报来的方向"：否则在边缘点一下的残留值会在
+            // 下一次"按在窗口中间"时被当成边缘方向，凭空起缩放。
+            if (!down) _pressedGrip = ResizeGrip.None;
+
             var grip = _resolve(cursor.X, cursor.Y);
-            if (grip == _grip) return;
+            var pressed = _pressedGrip;
+
+            // 方向没变、也没有"按下那一刻报来的方向"→ 无事可做。
+            // 后半条不可少：用户最常见的动作是**先移到边缘、再按下**，那一拍 grip 与上一拍
+            // 完全相同，只看 grip 变化就永远起不了手（`NotePressedGrip` 就是为这条路存在的）。
+            if (grip == _grip && pressed == ResizeGrip.None) return;
 
             _grip = grip;
 
@@ -123,10 +145,25 @@ internal sealed class WindowEdgeResize
 
             // 用户可能"快速移到边上立刻按下"——那时轮询还没把 _grip 更新到新的区域，
             // 但渲染层已经报来了真实方向，用它补齐（并顺手把 _grip 纠正过来）。
-            var pressed = _pressedGrip;
             var effective = pressed != ResizeGrip.None ? pressed : grip;
-            if (effective != ResizeGrip.None && IsLeftButtonDown())
+            if (effective != ResizeGrip.None && down)
             {
+                // 起手前必须确认这次左键真的按在挂件身上：抓取带只看坐标，看不见窗口上面
+                // 压着谁 —— 挂件被别的窗口遮挡时，用户在那个窗口上按住拖动、光标扫过边缘带
+                // 也会走到这里（真机 bug"被遮挡时拖动仍然生效"）。判据见 PointerTarget。
+                if (!PointerTarget.CursorIsOurs(_hwnd, out var who))
+                {
+                    if (!_blockedLogged)
+                    {
+                        _blockedLogged = true;
+                        AppLog.Line($"[resize] 忽略起手：指针不在挂件上（{who}，光标 {cursor.X},{cursor.Y}）");
+                    }
+
+                    _pressedGrip = ResizeGrip.None;
+                    return;
+                }
+
+                _blockedLogged = false;
                 _grip = effective;
                 Begin(cursor, effective);
             }
@@ -136,11 +173,11 @@ internal sealed class WindowEdgeResize
         _ticks++;
         if (_ticks % 120 == 0)
         {
-            AppLog.Line($"[resize] poll#{_ticks} lbutton={IsLeftButtonDown()} grip={_grip} cursor=({cursor.X},{cursor.Y})");
+            AppLog.Line($"[resize] poll#{_ticks} lbutton={down} grip={_grip} cursor=({cursor.X},{cursor.Y})");
         }
 
         // 左键松开 = 缩放结束。必须用按键状态：指针可能早就移出窗口，收不到 PointerReleased。
-        if (!IsLeftButtonDown())
+        if (!down)
         {
             End("left-button-up");
             return;
@@ -187,6 +224,7 @@ internal sealed class WindowEdgeResize
         _resizing = false;
         _grip = ResizeGrip.None;
         _loggedHover = ResizeGrip.None;
+        _blockedLogged = false;
         AppLog.Line($"[resize] 结束 reason={reason}");
         _onEnd();
     }
