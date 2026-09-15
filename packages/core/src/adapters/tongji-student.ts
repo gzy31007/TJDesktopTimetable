@@ -44,7 +44,7 @@ import {
  */
 
 export const TONGJI_STUDENT_ADAPTER_ID = 'tongji-student';
-export const TONGJI_STUDENT_ADAPTER_VERSION = '3.0.0';
+export const TONGJI_STUDENT_ADAPTER_VERSION = '3.1.0';
 
 export const TONGJI_ORIGIN = 'https://1.tongji.edu.cn';
 
@@ -93,6 +93,30 @@ interface RawSelectedCourse {
   };
 }
 
+/** 报表服务格式：`data[].timeTableList[]`（课表页真正调的那条接口，见 classify 注释）。 */
+interface RawReportTime {
+  dayOfWeek?: unknown;
+  timeStart?: unknown;
+  timeEnd?: unknown;
+  weeks?: unknown;
+  roomIdI18n?: unknown;
+  roomLable?: unknown;
+  classRoomName?: unknown;
+  teacherName?: unknown;
+  teacherCode?: unknown;
+}
+
+interface RawReportCourse {
+  teachingClassId?: unknown;
+  classCode?: unknown;
+  courseCode?: unknown;
+  courseName?: unknown;
+  teacherName?: unknown;
+  campus?: unknown;
+  campusI18n?: unknown;
+  timeTableList?: unknown;
+}
+
 interface RawCalendarTerm {
   id?: unknown;
   year?: unknown;
@@ -110,6 +134,8 @@ interface RawCalendarTerm {
 
 interface Classified {
   selected: RawSelectedCourse[];
+  /** 报表服务（findStudentTimetab / findSchoolTimetab2）返回的课程数组。 */
+  report: RawReportCourse[];
   flat: RawScheduleItem[];
   calendar: RawCalendarTerm[];
   calendarId: string | undefined;
@@ -146,7 +172,7 @@ function toStr(value: unknown): string | undefined {
 }
 
 function classify(input: ImportInput): Classified {
-  const result: Classified = { selected: [], flat: [], calendar: [], calendarId: undefined, calendarName: undefined, sources: [] };
+  const result: Classified = { selected: [], report: [], flat: [], calendar: [], calendarId: undefined, calendarName: undefined, sources: [] };
 
   for (const { label, text } of inputTexts(input)) {
     const parsed = tryParseJson(text);
@@ -165,6 +191,17 @@ function classify(input: ImportInput): Classified {
         result.calendarName ??= toStr(course?.calendarName);
       }
       result.sources.push(`${label}:已选课程 ${selected.length} 门`);
+      continue;
+    }
+
+    // 2) 报表服务：课表页真正调的那条接口。本科生
+    //    `GET /api/electionservice/reportManagement/findStudentTimetab?calendarId=…&studentCode=…`
+    //    返回 `data: [课程…]`，每门课带 `timeTableList[]`（与选课服务的 `times[]` 同义）；
+    //    研究生 `findSchoolTimetab2` 按前端源码是 `data.list`，同一套字段，这里一并认。
+    const reportItems = collectReportItems(raw);
+    if (reportItems.length) {
+      result.report.push(...reportItems);
+      result.sources.push(`${label}:报表课表 ${reportItems.length} 门`);
       continue;
     }
 
@@ -187,6 +224,22 @@ function classify(input: ImportInput): Classified {
   }
 
   return result;
+}
+
+/**
+ * 从报表服务的响应里挑出"带排课时段的课程项"。
+ *
+ * 认两种容器：`data` 直接是数组（本科 `findStudentTimetab`，已实测），或 `data.list`
+ * （研究生 `findSchoolTimetab2`，按前端源码推断，未实测）。判据是元素里有没有
+ * `timeTableList` 数组 —— 它把报表格式与排课服务的扁平表区分开。
+ */
+function collectReportItems(raw: unknown): RawReportCourse[] {
+  const list = asArray(raw) ?? asArray(asRecord(raw)?.list);
+  if (!list) return [];
+  return list.filter(
+    (item): item is RawReportCourse =>
+      asRecord(item) !== null && asArray((item as RawReportCourse).timeTableList) !== null,
+  );
 }
 
 function toSlotList(term: RawCalendarTerm): Slot[] {
@@ -360,6 +413,114 @@ export function buildCoursesFromSelected(
   return courses.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN') || a.id.localeCompare(b.id));
 }
 
+/**
+ * 报表服务格式（`data[].timeTableList[]`，课表页真正调的那条接口）→ 课程列表。
+ *
+ * 与 `buildCoursesFromSelected` 的差异只有"包法"：课程在数组顶层而不是
+ * `selectedCourses[].course`，排课数组叫 `timeTableList` 而不是 `times`；
+ * `dayOfWeek` / `timeStart` / `timeEnd` / `weeks` 数组的语义完全一致。
+ * 教室优先 `roomIdI18n`（如"北301"），空则退 `roomLable`（线上课堂 / 操场这类没有教室编号的场地）。
+ */
+export function buildCoursesFromReport(items: RawReportCourse[], diagnostics: Diagnostic[]): Course[] {
+  const courses: Course[] = [];
+  let skipped = 0;
+
+  for (const item of items) {
+    const times = (asArray(item.timeTableList) ?? []).filter((x): x is RawReportTime => asRecord(x) !== null);
+    if (!times.length) {
+      skipped += 1; // 军训等没有排课时段的课程不进课表
+      continue;
+    }
+
+    const courseCode = toStr(item.courseCode);
+    const classCode = toStr(item.classCode);
+    const id = toStr(item.teachingClassId) ?? classCode ?? courseCode ?? `course-${courses.length}`;
+    const name = toStr(item.courseName) ?? '(未知课程)';
+
+    const teacherOrder: string[] = [];
+    const teacherSeen = new Set<string>();
+    const addTeacher = (text: string | undefined, code: string | undefined): void => {
+      if (!text) return;
+      // 文本里已经带工号就原样收下（不能无条件拼，否则会得到「张三(123)(123)」）
+      const formatted = /\([0-9]{3,6}\)$/.test(text) || !code ? text : `${text}(${code})`;
+      if (!teacherSeen.has(formatted)) {
+        teacherSeen.add(formatted);
+        teacherOrder.push(formatted);
+      }
+    };
+
+    // 同一格（同天 + 同起止节次 + 同教室）合并、周次取并集 —— 与选课服务那条路同规则
+    const bySlot = new Map<string, Session>();
+    for (const time of times) {
+      const day = toInt(time.dayOfWeek);
+      const startSlot = toInt(time.timeStart);
+      const endSlot = toInt(time.timeEnd);
+      if (day === null || startSlot === null || endSlot === null) continue;
+      if (day < 1 || day > 7) continue;
+
+      addTeacher(toStr(time.teacherName), toStr(time.teacherCode));
+
+      const weekList = asArray(time.weeks);
+      const weeks = weekList?.length ? weeksToMask(weekList.map((w) => toInt(w) ?? 0)) : fullWeekMask(16);
+      const room = toStr(time.roomIdI18n) ?? toStr(time.roomLable) ?? toStr(time.classRoomName);
+      const key = `${day}-${startSlot}-${endSlot}-${room ?? ''}`;
+
+      const existing = bySlot.get(key);
+      if (existing) {
+        existing.weeks = (existing.weeks | weeks) >>> 0;
+        continue;
+      }
+      bySlot.set(key, {
+        id: `${id}-${key}`,
+        day: day as Weekday,
+        startSlot,
+        endSlot,
+        weeks,
+        ...(room ? { room } : {}),
+      });
+    }
+
+    const sessions = [...bySlot.values()];
+    if (!sessions.length) {
+      skipped += 1;
+      continue;
+    }
+
+    // 兜底教师：课程级 teacherName 是「张三,李四」这种纯名字列表（通常不带工号）
+    if (!teacherOrder.length) {
+      for (const teacher of (toStr(item.teacherName) ?? '').split(/[,，\s、;；]+/).filter(Boolean)) {
+        if (!teacherSeen.has(teacher)) {
+          teacherSeen.add(teacher);
+          teacherOrder.push(teacher);
+        }
+      }
+    }
+
+    sessions.sort((a, b) => a.day - b.day || a.startSlot - b.startSlot);
+    const campus = toStr(item.campusI18n) ?? toStr(item.campus);
+    courses.push({
+      id,
+      name,
+      ...(courseCode ? { courseCode } : {}),
+      ...(classCode ? { teachingClassCode: classCode } : {}),
+      teachers: teacherOrder,
+      ...(campus ? { campus } : {}),
+      sessions,
+    });
+  }
+
+  if (skipped > 0) {
+    diagnostics.push({
+      level: 'info',
+      code: 'tongji.noSchedule',
+      message: `有 ${skipped} 门课没有排课时段（如军训），已跳过。`,
+    });
+  }
+
+  // 排序规则与选课服务那条路一致（课程名 → id），两处不能走样
+  return courses.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN') || a.id.localeCompare(b.id));
+}
+
 /** 排课服务扁平格式 → 课程列表（兼容保留）。 */
 export function buildCoursesFromFlat(items: RawScheduleItem[]): Course[] {
   const byId = new Map<string, Course>();
@@ -414,7 +575,7 @@ export function buildCoursesFromFlat(items: RawScheduleItem[]): Course[] {
 /** 自动探测：像不像可识别的同济课表数据。 */
 function detectScore(input: ImportInput): number {
   for (const { text } of inputTexts(input)) {
-    if (!text.includes('selectedCourses') && !text.includes('weekState')) continue;
+    if (!text.includes('selectedCourses') && !text.includes('weekState') && !text.includes('timeTableList')) continue;
     const parsed = tryParseJson(text);
     if (parsed === null) continue;
     const raw = unwrapData(parsed);
@@ -422,6 +583,7 @@ function detectScore(input: ImportInput): number {
     // 注意：用 Array.isArray 而不是 length —— 空数组也算"识别成功"，
     // 好让解析器给出"已识别但没有课表数据"这类更有用的诊断，而不是"无法识别格式"。
     if (Array.isArray(container?.selectedCourses)) return 0.98;
+    if (collectReportItems(raw).length) return 0.97;
     const list = asArray(raw);
     if (
       list?.some((x) => {
@@ -440,7 +602,8 @@ export const tongjiStudentAdapter: SchoolAdapter = {
   displayName: '同济大学 · 1 系统个人课表',
   version: TONGJI_STUDENT_ADAPTER_VERSION,
   description:
-    '解析选课服务返回的个人课表（`data.selectedCourses[].course.times[]`），导入即用；也兼容排课服务的扁平格式。',
+    '解析 1 系统课表：个人课表（`data.selectedCourses[].course.times[]`）与课表页报表接口'
+    + '（`data[].timeTableList[]`，如 `reportManagement/findStudentTimetab`），也兼容排课服务的扁平格式。',
   canFetch: true,
 
   detect(input: ImportInput): number {
@@ -451,9 +614,13 @@ export const tongjiStudentAdapter: SchoolAdapter = {
     const diagnostics: Diagnostic[] = [];
     const classified = classify(input);
 
+    // 学期 id：显式指定（抓取时从请求 URL 的 calendarId 取）优先于响应体里的 calendarId。
+    // 报表格式的响应体里没有 calendarId（它只在 URL 上），所以这一条是它能拿到开学日期的前提。
+    const termId = input.termId === undefined ? classified.calendarId : String(input.termId);
+
     const term = buildTerm(
-      pickTerm(classified.calendar, input.termId ?? classified.calendarId),
-      classified.calendarId,
+      pickTerm(classified.calendar, termId),
+      termId,
       classified.calendarName,
       diagnostics,
     );
@@ -463,6 +630,11 @@ export const tongjiStudentAdapter: SchoolAdapter = {
       courses = buildCoursesFromSelected(classified.selected, diagnostics);
       diagnostics.push(
         makeDiagnostic('info', 'tongji.personal', `识别为个人课表：已选 ${classified.selected.length} 门课。`),
+      );
+    } else if (classified.report.length) {
+      courses = buildCoursesFromReport(classified.report, diagnostics);
+      diagnostics.push(
+        makeDiagnostic('info', 'tongji.report', `识别为 1 系统课表（报表接口格式）：共 ${classified.report.length} 门课。`),
       );
     } else if (classified.flat.length) {
       courses = buildCoursesFromFlat(classified.flat);
