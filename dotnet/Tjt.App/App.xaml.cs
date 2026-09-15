@@ -47,7 +47,8 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         var options = Startup;
-        AppLog.Line($"[start] smoke={options.Smoke} desktopLayer={options.DesktopLayer} noBackdrop={options.NoBackdrop} size={options.Width}x{options.Height}");
+        var sizeText = options is { Width: { } w, Height: { } h } ? $"{w}x{h}" : "default";
+        AppLog.Line($"[start] smoke={options.Smoke} desktopLayer={options.DesktopLayer} noBackdrop={options.NoBackdrop} size={sizeText}");
 
         // 自检看门狗：无 GPU 的 runner 上曾卡到 CI 只能看到"90 秒超时"，不知道卡在哪一步。
         // 有它就能看到最后到达的阶段标记；同时给自检一个硬上限，绝不让 CI 悬着。

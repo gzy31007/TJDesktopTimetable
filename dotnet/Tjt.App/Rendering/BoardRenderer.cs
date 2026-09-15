@@ -10,38 +10,150 @@ using Windows.UI;
 namespace Tjt.App.Rendering;
 
 /// <summary>
-/// 把 <see cref="BoardVisual"/> 摆到 XAML <see cref="Canvas"/> 上。
+/// 把 <see cref="BoardVisual"/> 摆到 XAML 上。
 ///
 /// 这一层刻意"没有脑子"：坐标、字号、文案、染色全部由 <c>Tjt.Widget</c> 算好
 /// （那部分能在 Linux 上单测），这里只做"照着数字放控件"。
-/// 画布尺寸用 DIP，由调用方按窗口 DPI 换算，避免 150% 缩放下像素与 DIP 混用。
+///
+/// 结构对应渲染层 WidgetApp.vue 的三段式：**顶部信息条**（学期 / 周次 / 今日节数）+
+/// **网格**（可能横向或纵向滚动）。窗口尺寸变化时整棵树重建 —— 与渲染层重新计算
+/// 布局是同一个语义，而重建 100 来个控件对几 Hz 的 resize 完全够用。
 /// </summary>
 internal static class BoardRenderer
 {
-    /// <summary>浅色主题下网格外的字号基准（课程名 / 节次标签共用）。</summary>
-    private const double CaptionSize = 11;
+    /// <summary>顶部条里的字号（比网格文字略大，作为层级提示）。</summary>
+    private const double HeaderFontSize = 13;
+
+    /// <summary>顶部条下方的分隔线高度。</summary>
+    private const double HeaderRuleHeight = 1;
 
     /// <summary>
-    /// 渲染整块课表，返回画布（调用方负责放进窗口）。
+    /// 渲染整块课表：返回可直接塞进窗口的根元素。
     /// </summary>
     /// <param name="visual">呈现模型。</param>
     /// <param name="dark">是否深色主题。</param>
-    public static Canvas Render(BoardVisual visual, bool dark)
+    public static FrameworkElement Render(BoardVisual visual, bool dark)
     {
         ArgumentNullException.ThrowIfNull(visual);
 
+        var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        var header = BuildHeaderBar(visual.Header, dark);
+        Grid.SetRow(header, 0);
+        root.Children.Add(header);
+
+        var canvas = BuildCanvas(visual, dark);
+        // 网格可能比可用空间大（列宽或行高到了下限）—— 用 ScrollViewer 兜住，
+        // 与渲染层 `.f-scroll` 的表现一致；装得下时滚动条不会出现。
+        var scroller = new ScrollViewer
+        {
+            Content = canvas,
+            HorizontalScrollBarVisibility = visual.NeedsHorizontalScroll
+                ? ScrollBarVisibility.Auto
+                : ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = visual.NeedsVerticalScroll
+                ? ScrollBarVisibility.Auto
+                : ScrollBarVisibility.Disabled,
+            HorizontalScrollMode = ScrollMode.Auto,
+            VerticalScrollMode = ScrollMode.Auto,
+            Padding = new Thickness(0),
+        };
+        Grid.SetRow(scroller, 1);
+        root.Children.Add(scroller);
+
+        return root;
+    }
+
+    /// <summary>顶部信息条：左侧学期名，右侧"周次 · 今日 N 节"（对应 <c>.widget-bar</c>）。</summary>
+    private static FrameworkElement BuildHeaderBar(BoardHeader header, bool dark)
+    {
+        var accent = new SolidColorBrush(Parse(TintPalette.Accent(dark)));
+        var text = TintPalette.Text(dark);
+        var soft = TintPalette.TextSoft(dark);
+
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(12, 0, 12, 0),
+        };
+
+        // 品牌点（渲染层 .brand 的等价物）：一小块强调色，让标题条不显得空
+        row.Children.Add(new Ellipse
+        {
+            Width = 8,
+            Height = 8,
+            Fill = accent,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        row.Children.Add(new TextBlock
+        {
+            Text = header.Title,
+            FontSize = HeaderFontSize,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = new SolidColorBrush(Parse(header.IsHoliday ? soft : text)),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        row.Children.Add(new TextBlock
+        {
+            Text = header.WeekText,
+            FontSize = HeaderFontSize - 1,
+            Foreground = new SolidColorBrush(Parse(soft)),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        if (header.TodayText is { Length: > 0 } today)
+        {
+            row.Children.Add(new TextBlock
+            {
+                Text = "·",
+                FontSize = HeaderFontSize - 1,
+                Foreground = new SolidColorBrush(Parse(soft)),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            row.Children.Add(new TextBlock
+            {
+                Text = today,
+                FontSize = HeaderFontSize - 1,
+                Foreground = new SolidColorBrush(Parse(soft)),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+        }
+
+        var host = new Grid { Height = BoardVisualBuilder.HeaderHeight };
+        host.Children.Add(row);
+        host.Children.Add(new Rectangle
+        {
+            Height = HeaderRuleHeight,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Fill = new SolidColorBrush(Parse(TintPalette.GridLine(dark))),
+        });
+        return host;
+    }
+
+    /// <summary>网格画布（尺寸已由呈现模型算好，单位 DIP）。</summary>
+    private static Canvas BuildCanvas(BoardVisual visual, bool dark)
+    {
         var canvas = new Canvas
         {
-            Width = visual.Grid.Left + visual.Grid.Width,
-            Height = visual.Grid.Top + visual.Grid.Height,
+            Width = visual.CanvasWidth,
+            Height = visual.CanvasHeight,
             Background = new SolidColorBrush(Colors.Transparent),
         };
 
         DrawHeaders(canvas, visual, dark);
         DrawSlotLabels(canvas, visual, dark);
         DrawGrid(canvas, visual, dark);
-        DrawNowLine(canvas, visual, dark);
         DrawBlocks(canvas, visual);
+        // 时间线最后画：它压在课程块之上一点点才看得见（渲染层把它放在块下面，
+        // 但桌面挂件的信息密度下，一条细线穿过色块更实用；这是有意的差异）。
+        DrawNowLine(canvas, visual, dark);
 
         return canvas;
     }
@@ -91,7 +203,7 @@ internal static class BoardRenderer
             var text = new TextBlock
             {
                 Text = slot.Text,
-                FontSize = CaptionSize,
+                FontSize = Math.Max(9, visual.Geometry.RowHeight * 0.24),
                 Width = visual.Geometry.GutterWidth - 9,
                 TextAlignment = TextAlignment.Right,
                 Foreground = new SolidColorBrush(Parse(slot.IsCurrent ? accent : TintPalette.TextSoft(dark))),
@@ -102,7 +214,6 @@ internal static class BoardRenderer
             canvas.Children.Add(text);
 
             if (!slot.IsCurrent) continue;
-            // 当前节次的右侧竖条（渲染层 .slot-labels div.current::before）
             var marker = new Rectangle
             {
                 Width = 3,
@@ -117,16 +228,13 @@ internal static class BoardRenderer
         }
     }
 
-    /// <summary>
-    /// 网格：底色只由 1px 分隔线表达（对齐渲染层 <c>.grid-bg</c>），周末列额外淡染，
-    /// 今日列整列淡染。
-    /// </summary>
+    /// <summary>网格：底色只由 1px 分隔线表达，周末列与今日列淡染。</summary>
     private static void DrawGrid(Canvas canvas, BoardVisual visual, bool dark)
     {
         var line = Parse(TintPalette.GridLine(dark));
         var stroke = Parse(TintPalette.Stroke(dark));
-
         var weekend = new SolidColorBrush(Parse(TintPalette.WeekendCell(dark)));
+        var today = new SolidColorBrush(Parse(TintPalette.TodayCell(dark)));
 
         for (var row = 0; row < visual.Slots.Count; row += 1)
         {
@@ -137,9 +245,7 @@ internal static class BoardRenderer
                 {
                     Width = day.Width,
                     Height = visual.Geometry.RowHeight,
-                    Fill = day.IsToday
-                        ? new SolidColorBrush(Parse(TintPalette.TodayCell(dark)))
-                        : day.IsWeekend ? weekend : null,
+                    Fill = day.IsToday ? today : day.IsWeekend ? weekend : null,
                     Stroke = new SolidColorBrush(line),
                     StrokeThickness = 1,
                 };
@@ -149,7 +255,6 @@ internal static class BoardRenderer
             }
         }
 
-        // 外框：贴在网格整体边界上，比逐格描边更"卡片"
         var frame = new Rectangle
         {
             Width = visual.Grid.Width,
@@ -164,28 +269,38 @@ internal static class BoardRenderer
         canvas.Children.Add(frame);
     }
 
-    /// <summary>当前时间指示线（压在色块之下，只作背景刻度）。</summary>
+    /// <summary>当前时间指示线（横穿网格 + 左侧圆点）。</summary>
     private static void DrawNowLine(Canvas canvas, BoardVisual visual, bool dark)
     {
         if (visual.NowLineTop is not { } top) return;
+        var accent = Parse(TintPalette.Accent(dark));
+
         var line = new Rectangle
         {
-            Width = visual.Grid.Width + 4,
+            Width = visual.Grid.Width,
             Height = 2,
-            RadiusX = 2,
-            RadiusY = 2,
-            Fill = new SolidColorBrush(Parse(TintPalette.Accent(dark))),
-            Opacity = 0.85,
+            RadiusX = 1,
+            RadiusY = 1,
+            Fill = new SolidColorBrush(accent),
+            Opacity = 0.8,
         };
-        Canvas.SetLeft(line, visual.Grid.Left - 4);
+        Canvas.SetLeft(line, visual.Grid.Left);
         Canvas.SetTop(line, top);
         canvas.Children.Add(line);
+
+        var dot = new Ellipse
+        {
+            Width = 7,
+            Height = 7,
+            Fill = new SolidColorBrush(accent),
+        };
+        Canvas.SetLeft(dot, visual.Grid.Left - 5);
+        Canvas.SetTop(dot, top - 2.5);
+        canvas.Children.Add(dot);
     }
 
     /// <summary>
-    /// 课程色块：按 <see cref="BlockVisual.Frame"/> 摆放，色值走染色结果，
-    /// 非全周课用虚线上边（XAML 的 <see cref="Rectangle"/> 没有 dashed border，
-    /// 用边框粗细 + 透明度表达"特殊但克制"，与渲染层的意图一致）。
+    /// 课程色块：按 <see cref="BlockVisual.Frame"/> 摆放；非全周课用更实的描边表达"特殊"。
     /// </summary>
     private static void DrawBlocks(Canvas canvas, BoardVisual visual)
     {
@@ -201,7 +316,6 @@ internal static class BoardRenderer
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(6, 3, 6, 3),
-                // 完整信息在 ToolTip 里，块内只放能放得下的部分
                 Opacity = block.IsStacked ? 1.0 : 0.98,
             };
 
@@ -220,7 +334,7 @@ internal static class BoardRenderer
                 stack.Children.Add(new TextBlock
                 {
                     Text = room,
-                    FontSize = block.FontSize - 0.5,
+                    FontSize = Math.Max(9, block.FontSize - 0.5),
                     Foreground = new SolidColorBrush(Parse(tint.InkSoft)),
                     TextTrimming = TextTrimming.CharacterEllipsis,
                     TextWrapping = TextWrapping.NoWrap,

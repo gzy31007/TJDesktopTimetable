@@ -72,6 +72,13 @@ public sealed record BlockVisual(
     bool IsStacked,
     BlockTint Tint);
 
+/// <summary>顶部信息条（对应渲染层 WidgetApp.vue 的 <c>.widget-bar</c>）。</summary>
+/// <param name="Title">学期名（如 <c>2026-2027学年第1学期</c>）。</param>
+/// <param name="WeekText">周次文案（<c>第 3 周</c> / <c>假期</c>）。</param>
+/// <param name="TodayText">今日节数文案（如 <c>今日 4 节</c>；今天没课时为 <c>null</c>）。</param>
+/// <param name="IsHoliday">是否处于假期（周次为 null）——标题会用弱化色。</param>
+public sealed record BoardHeader(string Title, string WeekText, string? TodayText, bool IsHoliday);
+
 /// <summary>
 /// 一整块课表的**呈现模型**：从核心库的 <see cref="BoardState"/> 再走一步，算出画布需要的全部
 /// 坐标、文案与染色。
@@ -82,19 +89,33 @@ public sealed record BlockVisual(
 /// </summary>
 public sealed record BoardVisual(
     string Title,
+    BoardHeader Header,
     IReadOnlyList<DayHeader> Days,
     IReadOnlyList<SlotLabel> Slots,
     IReadOnlyList<BlockVisual> Blocks,
     BoardFrame Grid,
     BoardGeometry Geometry,
     bool HasToday,
-    double? NowLineTop);
+    double? NowLineTop,
+    double CanvasWidth,
+    double CanvasHeight,
+    bool NeedsHorizontalScroll,
+    bool NeedsVerticalScroll);
 
 /// <summary>把 <see cref="BoardState"/> 编译成 <see cref="BoardVisual"/>。</summary>
 public static class BoardVisualBuilder
 {
     /// <summary>节次标签在行内的下移比例（渲染层 <c>slotTop()</c> 用的 0.32）。</summary>
     private const double SlotLabelTopRatio = 0.32;
+
+    /// <summary>网格下方留白（边框 + 呼吸位，渲染层 canvasHeight 里的 +2）。</summary>
+    private const double GridBottomPadding = 6;
+
+    /// <summary>顶部信息条高度（对应渲染层 <c>.widget-bar</c> 的高度）。</summary>
+    public const double HeaderHeight = 34;
+
+    /// <summary>行高下限：再小就没法读课程名，宁可让外层滚动。</summary>
+    public const double MinRowHeight = 34;
 
     /// <summary>
     /// 构造呈现模型。
@@ -104,16 +125,21 @@ public static class BoardVisualBuilder
     /// <param name="dark">是否深色主题。</param>
     /// <param name="nowMinutes">当前分钟数；给了且落在节次范围内才画"当前时间线"。</param>
     /// <param name="minCellWidth">列宽下限（与核心库一致）。</param>
+    /// <param name="availableHeight">
+    /// 可用总高（含顶部条）；<c>null</c> 表示"不限高"（按列宽算出的行高为准）。
+    /// 给了就按它压缩行高，把课表铺满窗口高度。
+    /// </param>
     public static BoardVisual Build(
         BoardState state,
         double availableWidth,
         bool dark,
         int? nowMinutes = null,
-        double minCellWidth = 64)
+        double minCellWidth = 72,
+        double? availableHeight = null)
     {
         ArgumentNullException.ThrowIfNull(state);
 
-        var geometry = FitGeometry(availableWidth, state.Rows.Count, state.Days.Count, minCellWidth);
+        var geometry = FitGeometry(availableWidth, state.Rows.Count, state.Days.Count, minCellWidth, availableHeight);
         var gridHeight = geometry.RowHeight * state.Rows.Count;
 
         var days = new List<DayHeader>(state.Days.Count);
@@ -159,26 +185,88 @@ public static class BoardVisualBuilder
         }
 
         var today = state.Days.FirstOrDefault(day => day.IsToday);
+        var canvasWidth = geometry.GutterWidth + (geometry.CellWidth * state.Days.Count);
+        var canvasHeight = geometry.HeaderHeight + gridHeight + GridBottomPadding;
+
         return new BoardVisual(
             Title: state.Title,
+            Header: BuildHeader(state, nowMinutes),
             Days: days,
             Slots: slots,
             Blocks: blocks,
             Grid: new BoardFrame(geometry.GutterWidth, geometry.HeaderHeight, geometry.CellWidth * state.Days.Count, gridHeight),
             Geometry: geometry,
             HasToday: today is not null,
-            NowLineTop: NowLineTop(state, geometry.Core, nowMinutes));
+            NowLineTop: NowLineTop(state, geometry.Core, nowMinutes),
+            CanvasWidth: canvasWidth,
+            CanvasHeight: canvasHeight,
+            // 横向：可用宽度装不下最小列宽时才滚（与渲染层的 minCellWidth=72 语义一致）；
+            // 纵向：行高已经压到下限、还是装不下才滚。
+            NeedsHorizontalScroll: canvasWidth > availableWidth + 0.5,
+            NeedsVerticalScroll: availableHeight is { } h && canvasHeight + HeaderHeight > h + 0.5);
+    }
+
+    /// <summary>
+    /// 顶部信息条：学期名 + 周次 + 今日节数（对应渲染层 <c>.widget-bar</c> 的
+    /// <c>termName</c> / <c>第 N 周</c> / <c>今日 N 节</c> 三段）。
+    /// </summary>
+    /// <param name="state">布局结果。</param>
+    /// <param name="nowMinutes">当前分钟数；给了才算"今日还剩几节"。</param>
+    public static BoardHeader BuildHeader(BoardState state, int? nowMinutes = null)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        var week = state.CurrentWeek;
+        var weekText = week is null ? "假期" : $"第 {week} 周";
+
+        // 今日节数 = 今天开始的课（与渲染层 todaysSessions(...).length 同义：只看有没有课）
+        var today = state.Blocks.Count(block => block.Day == (Weekday)WeekdayOf(state.Today));
+        var todayText = today > 0 ? $"今日 {today} 节" : null;
+        _ = nowMinutes; // 保留参数：将来要做"还剩 N 节"时用，当前文案与渲染层一致，不依赖当前时刻
+        return new BoardHeader(state.Title, weekText, todayText, week is null);
+    }
+
+    /// <summary><c>YYYY-MM-DD</c> → 星期（1 = 周一 … 7 = 周日）；解析失败返回 0（不会命中任何天）。</summary>
+    private static int WeekdayOf(string iso)
+    {
+        var weekday = Time.IsoToWeekday(iso);
+        return weekday is null ? 0 : (int)weekday.Value;
     }
 
     /// <summary>
     /// 按可用宽度自适应列宽 —— 与核心库 <see cref="Tjt.Core.Layout.FitGeometry"/> 同一套算式，
     /// 基座几何直接取核心库的 <see cref="Tjt.Core.Layout.DefaultGeometry"/>（与渲染层 <c>DEFAULT_GEOMETRY</c> 同值），
     /// 因此 widget 侧不另立一份几何常量，避免两边悄悄漂移。
+    ///
+    /// <para><b>纵向自适应是 C# 侧新增的</b>（渲染层只做横向 fit、纵向交给滚动）：窗口高度给了
+    /// <paramref name="availableHeight"/> 时，把行高压到刚好铺满可用高度，下限 <see cref="MinRowHeight"/>
+    /// —— 行高再小就没法读课程名了，那种情况交给外层滚动。</para>
     /// </summary>
-    public static BoardGeometry FitGeometry(double availableWidth, int rows, int cols, double minCellWidth = 64)
+    /// <param name="availableWidth">可用总宽。</param>
+    /// <param name="rows">行数（节次数）。</param>
+    /// <param name="cols">列数（天数）。</param>
+    /// <param name="minCellWidth">列宽下限。</param>
+    /// <param name="availableHeight">可用总高（含顶部条）；<c>null</c> = 不限高。</param>
+    public static BoardGeometry FitGeometry(
+        double availableWidth,
+        int rows,
+        int cols,
+        double minCellWidth = 72,
+        double? availableHeight = null)
     {
         var basis = Layout.FitGeometry(availableWidth, rows, cols, baseGeometry: null, minCellWidth: minCellWidth);
-        return new BoardGeometry(basis.GutterWidth, basis.CellWidth, basis.RowHeight, basis.HeaderHeight, basis.Rows, basis.Cols);
+        var rowHeight = basis.RowHeight;
+
+        if (availableHeight is { } height && rows > 0)
+        {
+            var usable = height - HeaderHeight - GridBottomPadding;
+            var fitted = Math.Floor(usable / rows);
+            if (fitted > 0 && fitted < rowHeight)
+            {
+                rowHeight = Math.Max(MinRowHeight, fitted);
+            }
+        }
+
+        return new BoardGeometry(basis.GutterWidth, basis.CellWidth, rowHeight, basis.HeaderHeight, basis.Rows, basis.Cols);
     }
 
     /// <summary>

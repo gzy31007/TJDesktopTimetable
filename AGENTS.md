@@ -161,6 +161,14 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
   `--no-backdrop`、换过日志通道，三次实验都停在同一处）。
   所以 CI 的 `winui-shell` job 只做**编译门禁**（真实 Windows SDK + XAML 编译器），
   运行时验证一律走本机 `.tools/build-winui.ps1 -RunSmoke`。
+- **外壳已经有的能力（2026-09-15）**：默认摆在**工作区右下角**（留 24px，用 `DisplayArea.WorkArea`
+  而不是屏幕尺寸，免得压到任务栏）；顶部信息条显示「学期 · 第 N 周 · 今日 N 节」（对应渲染层
+  `.widget-bar` 的三段）；窗口尺寸变化即重排。
+  - 自适应规则：**横向**保持最小列宽 72（沿用渲染层 `minCellWidth`），装不下就横向滚动；
+    **纵向**把行高压到刚好铺满（下限 34），再装不下才纵向滚动 —— 也就是缩窗口先压行高、再出滚动条，
+    不会把格子压成一条缝。实测：`--size 820x640 → rowH=52 无滚动`、`--size 760x420 → rowH=37 + 纵向滚动`。
+  - `--size WxH` 会真的改窗口尺寸（专门为验证自适应加的）；`--fixture/--log/--no-backdrop/--desktop-layer`
+    见 `AppStartupOptions`。
 - **本机的两个冒烟组合（都实测通过）**：
   - `-RunSmoke`：带材质 → `[backdrop] mode=mica-controller`；
   - `-RunSmoke -NoBackdrop`：跳过材质 → `[backdrop] skipped`；

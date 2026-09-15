@@ -79,10 +79,12 @@ public class BoardVisualTests
     [Fact]
     public void 列宽有下限_窗口极窄时不塌成零()
     {
-        // usable = 100 - 74 = 26 → 26/7 = 3 < 64，取 64
-        Assert.Equal(64d, BoardVisualBuilder.FitGeometry(100, 11, 7).CellWidth);
+        // usable = 100 - 74 = 26 → 26/7 = 3 < 72（默认下限，与渲染层 minCellWidth 同值），取 72
+        Assert.Equal(72d, BoardVisualBuilder.FitGeometry(100, 11, 7).CellWidth);
         // 可用宽度小于 gutter 时 usable 被夹到 0，仍走下限
-        Assert.Equal(64d, BoardVisualBuilder.FitGeometry(10, 11, 7).CellWidth);
+        Assert.Equal(72d, BoardVisualBuilder.FitGeometry(10, 11, 7).CellWidth);
+        // 显式给更小的下限时按参数走
+        Assert.Equal(64d, BoardVisualBuilder.FitGeometry(100, 11, 7, minCellWidth: 64).CellWidth);
         // cols = 0 时不做除法，直接用核心库基座的列宽
         Assert.Equal(
             Tjt.Core.Layout.DefaultGeometry.CellWidth,
@@ -301,5 +303,117 @@ public class BoardVisualTests
         var physics = visual.Blocks.Single(b => b.CourseId == "p1");
         Assert.Equal("1, 3, 5, 7, 9, 11, 13, 15", physics.WeeksLabel);
         Assert.True(physics.IsSpecial);
+    }
+    // ── 顶部信息条与自适应（2026-09-15 新增）────────────────────────────────────
+
+    [Fact]
+    public void 顶部条给出学期周次与今日节数()
+    {
+        // 2026-09-14 是第 1 周周一：三块课都在周一（1-2 节同格三块）
+        var visual = BoardVisualBuilder.Build(
+            Layout.BuildBoard([Maths, Physics, English], TestTerm, new BoardOptions { Today = "2026-09-14" }),
+            1000,
+            dark: false);
+
+        Assert.Equal("2026-2027学年第1学期", visual.Header.Title);
+        Assert.Equal("第 1 周", visual.Header.WeekText);
+        Assert.Equal("今日 3 节", visual.Header.TodayText);
+        Assert.False(visual.Header.IsHoliday);
+    }
+
+    [Fact]
+    public void 顶部条_假期与没课的今天()
+    {
+        // 开学前 → 假期
+        var holiday = BoardVisualBuilder.Build(
+            Layout.BuildBoard([Maths], TestTerm, new BoardOptions { Today = "2026-08-31" }),
+            1000,
+            dark: false);
+        Assert.Equal("假期", holiday.Header.WeekText);
+        Assert.True(holiday.Header.IsHoliday);
+
+        // 周六没课 → 不显示"今日 N 节"，但仍然是第 1 周
+        var saturday = BoardVisualBuilder.Build(
+            Layout.BuildBoard([Maths], TestTerm, new BoardOptions { Today = "2026-09-19" }),
+            1000,
+            dark: false);
+        Assert.Equal("第 1 周", saturday.Header.WeekText);
+        Assert.Null(saturday.Header.TodayText);
+        Assert.False(saturday.Header.IsHoliday);
+    }
+
+    [Fact]
+    public void 给了可用高度就把行高压到刚好铺满()
+    {
+        var board = Layout.BuildBoard([Maths, Physics, English], TestTerm, new BoardOptions { Today = "2026-09-14" });
+        // 11 行 + 顶部条 34 + 底部留白 6 = 可用高度 590 → 每行 (590-34-6)/11 = 50
+        var geometry = BoardVisualBuilder.FitGeometry(1000, board.Rows.Count, board.Days.Count, availableHeight: 590);
+        Assert.Equal(50d, geometry.RowHeight);
+
+        // 行高只受高度约束影响，列宽不受影响
+        Assert.Equal(132d, geometry.CellWidth);
+    }
+
+    [Fact]
+    public void 行高被压到下限后不再变窄()
+    {
+        var board = Layout.BuildBoard([Maths], TestTerm, new BoardOptions { Today = "2026-09-14" });
+        // 可用高度 200：算出 (200-34-6)/11 = 14 < 下限 34 → 取 34，超出的部分交给外层滚动
+        var geometry = BoardVisualBuilder.FitGeometry(1000, board.Rows.Count, board.Days.Count, availableHeight: 200);
+        Assert.Equal(BoardVisualBuilder.MinRowHeight, geometry.RowHeight);
+
+        var visual = BoardVisualBuilder.Build(board, 1000, dark: false, availableHeight: 200);
+        Assert.True(visual.NeedsVerticalScroll);
+        Assert.Equal(34 * 11, visual.Grid.Height);
+    }
+
+    [Fact]
+    public void 不给可用高度时行高保持基座值()
+    {
+        var board = Layout.BuildBoard([Maths], TestTerm, new BoardOptions { Today = "2026-09-14" });
+        Assert.Equal(
+            Tjt.Core.Layout.DefaultGeometry.RowHeight,
+            BoardVisualBuilder.FitGeometry(1000, board.Rows.Count, board.Days.Count).RowHeight);
+        Assert.False(BoardVisualBuilder.Build(board, 1000, dark: false).NeedsVerticalScroll);
+    }
+
+    [Fact]
+    public void 高度充裕时不回弹超过基座行高()
+    {
+        var board = Layout.BuildBoard([Maths], TestTerm, new BoardOptions { Today = "2026-09-14" });
+        // 可用高度很高：只压缩、不拉伸 —— 拉伸会让色块变成大色板，与渲染层观感不一致
+        var geometry = BoardVisualBuilder.FitGeometry(1000, board.Rows.Count, board.Days.Count, availableHeight: 4000);
+        Assert.Equal(Tjt.Core.Layout.DefaultGeometry.RowHeight, geometry.RowHeight);
+    }
+
+    [Fact]
+    public void 画布尺寸与滚动标记()
+    {
+        var board = Layout.BuildBoard([Maths, Physics, English], TestTerm, new BoardOptions { Today = "2026-09-14" });
+
+        // 宽 1000 → 列宽 132，画布宽 74 + 132*7 = 998 ≤ 1000 → 不需要横向滚动
+        var wide = BoardVisualBuilder.Build(board, 1000, dark: false, availableHeight: 760);
+        Assert.Equal(74d + (132d * 7), wide.CanvasWidth);
+        Assert.Equal(28d + (52d * 11) + 6, wide.CanvasHeight);
+        Assert.False(wide.NeedsHorizontalScroll);
+        Assert.False(wide.NeedsVerticalScroll);
+
+        // 窗口被拖窄：列宽撞到下限 72，画布 74 + 72*7 = 578 > 400 → 需要横向滚动
+        var narrow = BoardVisualBuilder.Build(board, 400, dark: false, availableHeight: 760);
+        Assert.Equal(72d, narrow.Geometry.CellWidth);
+        Assert.True(narrow.NeedsHorizontalScroll);
+    }
+
+    [Fact]
+    public void 窗口变矮时行高随之下调且画布高度同步()
+    {
+        var board = Layout.BuildBoard([Maths], TestTerm, new BoardOptions { Today = "2026-09-14" });
+        var tall = BoardVisualBuilder.Build(board, 1000, dark: false, availableHeight: 700);
+        var compact = BoardVisualBuilder.Build(board, 1000, dark: false, availableHeight: 500);
+
+        Assert.True(compact.Geometry.RowHeight < tall.Geometry.RowHeight);
+        Assert.True(compact.CanvasHeight < tall.CanvasHeight);
+        // 色块高度也跟着行高走（2 行 - 2px）
+        Assert.True(compact.Blocks[0].Frame.Height < tall.Blocks[0].Frame.Height);
     }
 }

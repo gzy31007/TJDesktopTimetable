@@ -7,8 +7,8 @@ namespace Tjt.App;
 /// <param name="LogPath">日志文件路径（WinExe 不附加控制台，CI 只能靠文件拿输出）。</param>
 /// <param name="FixturePath">显式指定要导入的课表 JSON；为空时按约定位置探测。</param>
 /// <param name="Dark">强制深色主题；<c>null</c> 表示跟随系统。</param>
-/// <param name="Width">窗口宽度（DIP），默认 980。</param>
-/// <param name="Height">窗口高度（DIP），默认 640。</param>
+/// <param name="Width">显式指定的窗口宽度（DIP）；<c>null</c> = 用系统默认尺寸。</param>
+/// <param name="Height">显式指定的窗口高度（DIP）；<c>null</c> = 用系统默认尺寸。</param>
 internal sealed record AppStartupOptions(
     bool Smoke = false,
     bool DesktopLayer = false,
@@ -16,14 +16,15 @@ internal sealed record AppStartupOptions(
     string? LogPath = null,
     string? FixturePath = null,
     bool? Dark = null,
-    int Width = 980,
-    int Height = 640)
+    int? Width = null,
+    int? Height = null)
 {
     /// <summary>
     /// 解析命令行。
     ///
     /// 支持的形态：<c>--smoke</c>、<c>--desktop-layer</c>、<c>--no-backdrop</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
-    /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>。未知参数被忽略（不崩在 CLI 上）。
+    /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>（不传就用窗口系统给的默认尺寸，传了就精确设成它，
+    /// 便于验证自适应）。未知参数被忽略（不崩在 CLI 上）。
     /// </summary>
     public static AppStartupOptions Parse(string[] args)
     {
@@ -33,8 +34,8 @@ internal sealed record AppStartupOptions(
         string? logPath = null;
         var dark = (bool?)null;
         string? fixture = null;
-        var width = 980;
-        var height = 640;
+        int? width = null;
+        int? height = null;
 
         for (var i = 0; i < args.Length; i += 1)
         {
