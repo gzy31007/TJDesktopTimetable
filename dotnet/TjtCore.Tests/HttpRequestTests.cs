@@ -113,13 +113,38 @@ curl 'https://1.tongji.edu.cn/api/electionservice/student/5582/getDataBk' \
     }
 
     [Fact]
-    public void PowerShell的Body会被取到且保留引号内的换行()
-    {
+    public void PowerShell的Body会被取到且保留引号内的换行()    {
         var spec = HttpRequestParser.Parse("""
 Invoke-RestMethod -Uri "https://1.tongji.edu.cn/api/y" -Method POST -Body '{"a": 1}'
 """);
         Assert.NotNull(spec);
         Assert.Equal("POST", spec!.Method);
         Assert.Equal("""{"a": 1}""", spec.Body);
+    }
+
+    [Fact]
+    public void 能取到URL上的查询参数()
+    {
+        var spec = HttpRequestParser.Parse(
+            "curl 'https://1.tongji.edu.cn/api/electionservice/reportManagement/findStudentTimetab?calendarId=122&studentCode=pSrBT1y4uQHmMPbIVfsIsQ%3D%3D&_t=1789442179365' -H 'cookie: a=1'");
+
+        Assert.NotNull(spec);
+        Assert.Equal("122", HttpRequestParser.QueryValue(spec!, "calendarId"));
+        // %3D%3D 要解码回 ==（它可能是加密后的学号）
+        Assert.Equal("pSrBT1y4uQHmMPbIVfsIsQ==", HttpRequestParser.QueryValue(spec, "studentCode"));
+        Assert.Equal("1789442179365", HttpRequestParser.QueryValue(spec, "_t"));
+        // 名字大小写不敏感；不存在的键给 null
+        Assert.Equal("122", HttpRequestParser.QueryValue(spec, "CalendarId"));
+        Assert.Null(HttpRequestParser.QueryValue(spec, "nope"));
+    }
+
+    [Fact]
+    public void 没有查询串时取参数给null()
+    {
+        var spec = HttpRequestParser.Parse("https://1.tongji.edu.cn/api/x?a=1");
+        Assert.NotNull(spec);
+        Assert.Null(HttpRequestParser.QueryValue(spec!, "b"));
+        Assert.Null(HttpRequestParser.QueryValue(HttpRequestParser.Parse("https://1.tongji.edu.cn/api/x")!, "a"));
+        Assert.Null(HttpRequestParser.QueryValue(spec, ""));
     }
 }

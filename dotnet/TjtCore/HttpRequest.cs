@@ -68,6 +68,48 @@ public static partial class HttpRequestParser
         return spec.Headers.TryGetValue("cookie", out var cookie) ? cookie : string.Empty;
     }
 
+    /// <summary>
+    /// 取查询参数（URL 解码后）。
+    ///
+    /// <para>用途之一是<b>学期 id</b>：同济课表页那条报表接口把 <c>calendarId</c> 放在 URL 上
+    /// （响应体里没有），而"当前第几周"要靠它命中内置学期表 —— 所以抓取时得从请求里把它捞出来。</para>
+    /// </summary>
+    /// <returns>参数不存在或值为空时返回 <c>null</c>。</returns>
+    public static string? QueryValue(HttpRequestSpec spec, string name)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        if (string.IsNullOrEmpty(name)) return null;
+
+        var queryIndex = spec.Url.IndexOf('?', StringComparison.Ordinal);
+        if (queryIndex < 0 || queryIndex == spec.Url.Length - 1) return null;
+
+        var query = spec.Url[(queryIndex + 1)..];
+        var hashIndex = query.IndexOf('#', StringComparison.Ordinal);
+        if (hashIndex >= 0) query = query[..hashIndex];
+
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=', StringComparison.Ordinal);
+            if (separator <= 0) continue;
+
+            var key = pair[..separator];
+            if (!string.Equals(key, name, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var value = pair[(separator + 1)..];
+            if (value.Length == 0) return null;
+            try
+            {
+                return Uri.UnescapeDataString(value.Replace('+', ' '));
+            }
+            catch (UriFormatException)
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>续行符（bash <c>\</c>、PowerShell 反引号、cmd <c>^</c>）统一成空格。</summary>
     private static string Normalize(string text) => text
         .Replace("\\\r\n", " ", StringComparison.Ordinal)

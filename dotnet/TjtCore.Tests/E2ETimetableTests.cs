@@ -127,7 +127,7 @@ public class E2ETimetableTests
         var timetable = ImportPipeline.MaterializeTimetable(Personal);
         Assert.Equal(14, timetable.Courses.Count);
         Assert.Equal("tongji-student", timetable.Source.AdapterId);
-        Assert.Equal("3.0.0", timetable.Source.AdapterVersion);
+        Assert.Equal("3.1.0", timetable.Source.AdapterVersion);
         Assert.Equal(Personal.Term.Id, timetable.Term.Id);
         Assert.Equal(TimetableModel.SchemaVersion, timetable.SchemaVersion);
     }
