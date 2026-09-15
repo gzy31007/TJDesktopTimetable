@@ -70,9 +70,13 @@
     找不到时退回内置样例（见 DemoData.cs）。`Link` + CopyToOutputDirectory 的用法与
     TjtCore.Tests 一致，避免依赖运行时的工作目录。
   -->
-  <!-- 托盘图标：运行时用 LoadImage 从输出目录加载（不嵌资源，改图标不用改代码） -->
+  <!-- 图标：都从输出目录**运行时**加载（不嵌资源，改图标不用改代码）
+       - app.ico      白色版：托盘菜单与 SendTo/资源管理器看到的 exe 图标（ApplicationIcon）
+       - app-blue.ico 课表同款蓝（#4CC2FF）：**窗口**图标（标题栏 / 任务栏 / Alt-Tab），
+                      白色版在浅色系统标题栏上看不清，见 Rendering/WindowIcon.cs -->
   <ItemGroup>
     <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\app-blue.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

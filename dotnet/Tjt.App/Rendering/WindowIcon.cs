@@ -17,14 +17,25 @@ namespace Tjt.App.Rendering;
 /// 看到的图标），窗口自身仍会回落到 <c>IDI_APPLICATION</c>，所以两件都要做 ——
 /// exe 那份在 <c>Tjt.App.csproj</c>，窗口这份在这里。</para>
 ///
-/// <para>图标是**运行时**从输出目录读的（与托盘共用一份 <c>Assets/app.ico</c>，csproj 里是
-/// <c>Content</c> 复制，不进资源索引）：所以 exe 旁边缺这个文件时只是"没有图标"，
-/// 绝不能让窗口起不来 —— <see cref="Apply"/> 一律不抛，失败只记一行日志。</para>
+/// <para>图标是**运行时**从输出目录读的（csproj 里是 <c>Content</c> 复制，不进资源索引）：
+/// 所以 exe 旁边缺这个文件时只是"没有图标"，绝不能让窗口起不来 ——
+/// <see cref="Apply"/> 一律不抛，失败只记一行日志。</para>
 /// </summary>
 internal static class WindowIcon
 {
-    /// <summary>图标文件路径（<c>Assets/app.ico</c>，与托盘图标同一份）。</summary>
-    internal static string FilePath => Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+    /// <summary>
+    /// 图标文件路径（<c>Assets/app-blue.ico</c>）。
+    ///
+    /// <para><b>为什么用蓝色那版</b>：窗口图标会出现在**系统标题栏**（三个窗口里只有登录窗口有，
+    /// 另两个是自绘标题栏）与任务栏上。原版 <c>app.ico</c> 是**纯白**的 —— 深色任务栏上没问题，
+    /// 浅色标题栏上几乎看不见（用户实测报的就是登录窗口那一个）。蓝色取的是挂件头部那个日历图标
+    /// 用的 <c>TintPalette.DarkAccent</c>（<c>#4CC2FF</c>），形状与原版**逐像素同源**
+    /// （只换 RGB、保留 alpha；生成脚本 <c>.tools/make-blue-icon.py</c>）。</para>
+    ///
+    /// <para>托盘图标仍用 <c>Assets/app.ico</c>（见 <c>App.BuildTray</c>）—— 托盘画在任务栏上、
+    /// 本就是深色底，那版白色是对的；这里只换**窗口**的图标。</para>
+    /// </summary>
+    internal static string FilePath => Path.Combine(AppContext.BaseDirectory, "Assets", "app-blue.ico");
 
     /// <summary>
     /// 把应用图标挂到窗口上；返回是否成功。**任何失败都只记日志、不抛异常** ——
