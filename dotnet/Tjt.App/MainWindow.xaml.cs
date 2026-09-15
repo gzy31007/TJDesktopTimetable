@@ -145,8 +145,33 @@ public sealed partial class MainWindow : Window
             sizeof(uint));
 
         AppLog.Line(hr == 0
-            ? $"[window] DWM 装饰主题 = {(dark ? "深色" : "浅色")}（消掉客户区外那圈白边）"
-            : $"[window] DWM 装饰主题设置失败 hr=0x{hr:X8}（该系统可能不支持，白边可能残留）");
+            ? $"[window] DWM 装饰主题 = {(dark ? "深色" : "浅色")}"
+            : $"[window] DWM 装饰主题设置失败 hr=0x{hr:X8}");
+
+        ApplyFullWindowFrame(hwnd);
+    }
+
+    /// <summary>
+    /// 把系统框整体扩进客户区（<c>DwmExtendFrameIntoClientArea(-1,-1,-1,-1)</c>）。
+    ///
+    /// <para><b>这是消掉那圈白边的正解</b>（参照 DeskBox 的
+    /// <c>Win32Helper.ApplyFullWindowFrame</c>，它每次主题变化都跟着
+    /// <c>SetWindowTheme</c> 重发一次）：客户区从此覆盖整个窗口矩形，
+    /// <c>GetClientRect</c> == 外框，**非客户区没有地方可画**，DWM 那圈
+    /// 用主题色画的边框自然不存在。真机实测：外框 1112x802 时客户区从
+    /// 1092x782@(+10,+10) 变成 1112x802@(+0,+0)。</para>
+    ///
+    /// <para>注意别和 <c>(0,0,0,0)</c> 搞混 —— 那是"不扩展"，等于什么都没做
+    /// （上一轮就是这么误判"这个 API 没用"的）。</para>
+    /// </summary>
+    /// <param name="hwnd">窗口句柄。</param>
+    private void ApplyFullWindowFrame(nint hwnd)
+    {
+        var margins = new NativeMethods.Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        var hr = NativeMethods.DwmExtendFrameIntoClientArea(hwnd, ref margins);
+        AppLog.Line(hr == 0
+            ? "[window] 已把系统框扩进客户区（DwmExtendFrameIntoClientArea -1）：非客户区不再有白边可画"
+            : $"[window] DwmExtendFrameIntoClientArea 失败 hr=0x{hr:X8}");
     }
 
     /// <summary>

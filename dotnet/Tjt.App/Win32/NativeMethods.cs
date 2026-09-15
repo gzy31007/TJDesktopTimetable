@@ -258,6 +258,35 @@ internal static partial class NativeMethods
     [LibraryImport("dwmapi.dll")]
     internal static partial int DwmSetWindowAttribute(nint hwnd, uint attribute, ref uint value, int size);
 
+    /// <summary>
+    /// 把系统框整体扩进客户区（<c>DwmExtendFrameIntoClientArea</c>）。
+    ///
+    /// 传 <c>-1</c>（"sheet of glass"）时，客户区覆盖整个窗口矩形 —— 于是
+    /// <c>GetClientRect</c> == 窗口外框，客户区之外**不再有非客户区可画**，
+    /// 那圈由 DWM 用主题色画的边框自然消失。见 <c>MainWindow.ApplyFullWindowFrame</c>。
+    ///
+    /// 用 <c>DllImport</c> 而不是 <c>LibraryImport</c>：源生成器不支持结构体参数（SYSLIB1051）。
+    /// </summary>
+    [DllImport("dwmapi.dll")]
+    internal static extern int DwmExtendFrameIntoClientArea(nint hwnd, ref Margins margins);
+
+    /// <summary>扩展框边距结构（<c>MARGINS</c>）。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Margins
+    {
+        /// <summary>左边距。</summary>
+        public int Left;
+
+        /// <summary>右边距。</summary>
+        public int Right;
+
+        /// <summary>上边距。</summary>
+        public int Top;
+
+        /// <summary>下边距。</summary>
+        public int Bottom;
+    }
+
     /// <summary>调用原始窗口过程（子类化后必须转发，见 <c>MessageHook</c>）。</summary>
     [LibraryImport("user32.dll", EntryPoint = "CallWindowProcW")]
     internal static partial nint CallWindowProc(nint previous, nint hwnd, uint message, nint wParam, nint lParam);

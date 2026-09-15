@@ -226,26 +226,28 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     （可见边缘出缩放光标、窗口跟手、松手后位置尺寸落盘）。也就是"按住边缘拖"这一步
     **不再需要每轮重验** —— 遇到"边缘抓不住"的回归时，先跑 `verify-resize.ps1` 定位是
     命中测试断了还是原生循环没起来，别一上来就改代码。
-- **客户区外那圈白边 = DWM 的浅色装饰集（2026-09-15 结案）**：
-  - **症状**：挂件四周（含顶部）有一圈约 1~2px 的亮边，深色卡片压在暗壁纸上很明显。
-  - **真相**：清掉 `WS_THICKFRAME` 之后窗口仍保留一圈**非客户区边框**（本机 150% 缩放
-    实测 10px：外框 1112x802@(1262,690)，客户区 1092x782@(1272,700)），DWM 默认用
-    **浅色装饰集**画它 → 客户区之外实测 `#F3F3F3`。放大截图看得很清楚：白色是**圆角形状**的
-    一块（DWM 的圆角框），挂件本体（`#281D1B`）是它里面的圆角矩形。
-  - **修法**：`ApplyWindowDecorationTheme(hwnd, IsDark())`（见 `MainWindow`）设
-    `DWMWA_USE_IMMERSIVE_DARK_MODE`，让 DWM 用它自己的**深色装饰**画那圈边框。
-    `ApplySettings` 里主题变化时同步（否则深挂件配浅装饰又会亮边）。
-  - **已验证排除的三条路（别重试）**：`DWMWA_BORDER_COLOR = NONE` 只影响最外 1~2px
-    描边（对照实验：设 `00FF0000` 时只有 `dx=-2,-1` 两个像素变蓝），那圈白边照旧；
-    `DwmExtendFrameIntoClientArea(0,0,0,0)` 无影响；`DWMWA_NCRENDERING_POLICY = DISABLED`
-    无影响。**只有装饰主题能改它**，而且实测挂件本体像素完全不变（XAML 内容不跟着变）。
-  - **验收方法（别再靠肉眼）**：写个一次性的"变体矩阵 + 逐像素扫描"脚本最省事（本轮用完已删）——
-    启动应用、用 `GetClientRect` + `ClientToScreen` 定位客户区，再按 `dx=-6..5` 打印像素。
-    修好后的判据：框带里白色像素占比从"整条"降到 ≈0.3%（只剩壁纸碎点的噪声）。
-  - **两个诊断期的坑**：① 应用日志里的 `[start] argv=[...]` 是确认"参数到底有没有到进程"的唯一手段
-    （`Start-Process -ArgumentList` 里若用了 `$args` 这个 PowerShell 自动变量，参数会被悄悄吃掉）；
-    ② DWM 属性必须在 `Initialize()` 里设，**不能放构造函数** —— 构造函数执行时命令行还没解析进
-    `_options`，会静默用默认值、让人误判"这个属性没用"。
+- **客户区外那圈白边 = 非客户区框；根因是没做 `DwmExtendFrameIntoClientArea(-1)`（2026-09-15 结案）**：
+  - **症状**：挂件四周（含顶部）有一圈 1~2px 亮边，深色卡片压在暗壁纸上很明显。
+  - **真相**：清掉 `WS_THICKFRAME` 之后窗口仍保留一圈**非客户区边框**（本机 150% 缩放实测
+    10px：外框 1112x802@(1262,690)、客户区 1092x782@(1272,700)），DWM 会**用主题色画它** ——
+    浅色主题下就是一条 `#F3F3F3` 的白边。放大截图里那块白是 DWM 的圆角框形状，
+    挂件本体（`#281D1B`）是它内部的圆角矩形。
+  - **正解**：`ApplyFullWindowFrame(hwnd)` 调
+    **`DwmExtendFrameIntoClientArea(hwnd, (-1,-1,-1,-1))`** —— "sheet of glass"，把系统框整体
+    扩进客户区，那圈非客户区变成玻璃、由挂件内容与壁纸合成，白边消失（真机实测：边缘 3px
+    环带内白色像素 **0.0%**）。
+  - **⚠️ 别把 `-1` 和 `(0,0,0,0)` 搞混**：`(0,0,0,0)` 是"**不扩展**"，等于什么都没做 ——
+    上一轮就是这么误判"这个 API 没用"的（真凶是自己发错了参数）。
+  - **DeskBox 为什么没有这层边**：它**每个窗口**都调这个（`Win32Helper.ApplyFullWindowFrame`，
+    全文唯一的 `DwmExtendFrameIntoClientArea` 调用点，传的就是 `-1`），并且在
+    `WidgetWindowBase.Backdrop` 里跟 `SetWindowTheme` 一起、在主题真正变化时重发。
+    它是在 Win10 上跑的产品，`-1` 这条路径比 Win11 的 DWM 属性更兼容 —— 这正是它稳的原因。
+  - **它另外还做了两件**（我们已对齐）：`SetWindowTheme(hwnd, isDark)` →
+    `DWMWA_USE_IMMERSIVE_DARK_MODE`（让 DWM 用深色装饰，和我们的
+    `ApplyWindowDecorationTheme` 等价）；`DWMWA_BORDER_COLOR = 0xFFFFFFFE`（透明描边，
+    因为它自己用 XAML 画边框）。这三件都在主题变化时重发。
+  - **别用半透明色块去"盖"这圈边**：透视壁纸效果是刻意为之（真实投影），
+    而且盖不住非客户区。
 - **贴桌面常驻（2026-09-15 完成）**：默认就是贴桌面层（`settings.DesktopLayer` 默认 true，
   CLI 用 `--desktop-layer` / `--no-desktop-layer` 覆盖）。移植自 Electron 那套已验收的编排，
   文件与职责一一对应：`Win32/Layer.cs`（编排）、`Win32/Resting.cs`（z-order 原语）、
