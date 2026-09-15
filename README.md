@@ -3,8 +3,8 @@
 把同济大学课表以半透明色块网格**固定在桌面上**的 Windows 小组件。贴桌面层、不抢焦点、可拖动缩放；课表手动获取一次即可；架构上把"学校适配器"与"窗口 / 渲染"解耦，新增一所学校只需加一个适配器文件。
 
 > **主线 = WinUI 3（C#，`dotnet/`）**，自 v1.0.0 起正式发布，见 [Releases](../../releases)。
-> 早期的 Electron + Vue 实现（`apps/desktop/`）**已弃用并冻结**：代码保留作参考实现，
-> 其余测试仍在 CI 里跑（黄金 fixture 与适配器语义以它为准），但不再开发、不再出安装包。
+> 早期的 Electron + Vue 实现（`apps/desktop/` + `packages/core/`）**已于 2026-09-16 删除** ——
+> 它的黄金 fixture 搬到了 `dotnet/fixtures/`，历史代码见 git 历史（`git log --diff-filter=D -- '*apps/desktop*'`）。
 
 ## 特性
 
@@ -35,9 +35,8 @@ dotnet/Tjt.App/         WinUI 3 外壳：窗口、材质、Win32 层级、托盘
   Data/                 设置 / 课表 / 凭据落盘、抓取、导入编排
   Rendering/            可视树搭建（不含业务逻辑）
   Win32/                层级层、拖动、缩放、托盘、消息钩子
-packages/core/          @tjt/core —— TS 参考实现与**黄金 fixture 真源**（冻结，测试仍在 CI 跑）
-apps/desktop/           Electron + Vue 外壳（已弃用，保留作参考）
-docs/                   architecture.md · data-model.md · adapter-guide.md · desktop-layer.md
+dotnet/fixtures/        脱敏后的真实抓包数据（黄金测试基准，禁止放入学号/姓名等个人信息）
+docs/                   desktop-layer.md · winui-build.md · winui-lessons.md · import.md
 ```
 
 ## 安装
@@ -76,8 +75,7 @@ docs/                   architecture.md · data-model.md · adapter-guide.md · 
 1. 同上抓包，把课表接口响应另存为 JSON（可选再存一份校历响应）。
 2. "导入课表"页 → 选择 JSON 文件（或直接粘贴 JSON）→ **导入并应用**。
 
-> 导入结果落盘在 `%APPDATA%\TJDesktopTimetable\timetable.json`（camelCase，逐字段对齐 TS 的 `Timetable`），
-> 可直接手工替换 / 备份。
+> 导入结果落盘在 `%APPDATA%\TJDesktopTimetable\timetable.json`（camelCase），可直接手工替换 / 备份。
 
 ## 已知限制
 
@@ -102,21 +100,15 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
 > ⚠️ 开关（`-RunSmoke` / `-NoBackdrop` / `-DesktopLayer`）**必须**配合 `-File` 用；
 > `-EncodedCommand "$B64"` 那种形式后面再跟开关会被 PowerShell 当成非法参数（实测）。
 
-```bash
-# TS 参考实现（冻结，但 CI 仍在跑：黄金 fixture + 适配器语义）
-pnpm test            # core 77 + desktop 21
-pnpm typecheck
-```
-
 改代码前请先读 [`AGENTS.md`](AGENTS.md)：那里有分层硬约束、以及这几年踩过的坑（层级层、材质、DPI、Win32 层级、验证脚本）。
 
 ## 扩展其他学校
 
-见 [`docs/adapter-guide.md`](docs/adapter-guide.md)：实现一个适配器（`Detect` + `Parse`）→ 在注册表里登记 → 放一份脱敏 fixture → 写测试。核心算法与全部 UI 都不用改。
+适配器契约在 `dotnet/TjtCore/Adapters/AdapterTypes.cs`（`Detect` + `Parse`）：实现一个适配器 → 在 `Registry.cs` 里登记 → 往 `dotnet/fixtures/` 放一份脱敏 fixture → 写测试。核心算法与全部 UI 都不用改（`dotnet/TjtCore.Tests/` 里有现成的移植验收用例可照抄）。
 
 ## 路线图
 
-- [x] v0.x · 核心库、两条客户端外壳、贴桌面层级、材质、拖动缩放、托盘与设置窗口
+- [x] v0.x · 核心库、客户端外壳、贴桌面层级、材质、拖动缩放、托盘与设置窗口
 - [x] **v1.0.0** · WinUI 3 主线正式发布（真实课表导入 / 四种材质 / 无边框缩放 / 托盘与设置 / 自包含发布）
 - [ ] 新学期自动取校历（不再依赖内置学期表）
 - [ ] 「显示周末」与周次过滤

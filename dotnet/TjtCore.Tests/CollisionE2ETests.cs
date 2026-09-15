@@ -7,8 +7,9 @@ namespace Tjt.Core.Tests;
 /// <summary>
 /// 端到端黄金验收：**同格撞车**（构造 fixture，非真实抓包）。
 ///
-/// 与 TS 侧 <c>packages/core/test/e2e-timetable.spec.ts</c> 的「同格撞车」describe 逐条对齐，
-/// 两侧共用 <c>fixtures/tongji-2026-1-collision.json</c>（由 csproj 的 <c>Content Link</c> 复制）。
+/// 期望值沿袭已删除的 TS 用例 <c>packages/core/test/e2e-timetable.spec.ts</c> 的「同格撞车」describe。
+/// fixture 是 <c>dotnet/fixtures/tongji-2026-1-collision.json</c>（**唯一真源**，由 csproj 的
+/// <c>Content Link</c> 复制到测试输出目录）。
 ///
 /// 覆盖布局里唯一无法从真实个人课表稳定复现的路径——同一格真的挤了多门不同的课：
 /// <list type="bullet">

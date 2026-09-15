@@ -2,7 +2,7 @@
 
 > 评估对象：`/root/TJDesktopTimetable/.refs/DeskBox`（只读，未做任何修改与 git 操作），工作副本自述版本 **1.5.1**。
 > 统计口径：`find` + `awk` 自算（非 cloc）。`code` = 非空且非整行注释（行首 `//` `/*` `*` `#` `--` `<!--`）；**偏差说明**：C# 的 `#if` 预处理器行也被计入"注释"，故 C# 注释数略偏高、代码行略偏低。
-> 参照项目：`/root/TJDesktopTimetable`（Electron 44 + TS + Vue 3，MIT）。
+> 参照项目：`/root/TJDesktopTimetable`（当时是 Electron 44 + TS + Vue 3，MIT；该线已于 2026-09-16 删除，本文保持评估当时的快照不变）。
 
 > **来源声明**：本文是为 MIT 项目 `TJDesktopTimetable` 独立整理的工程规模、构建事实与许可约束评估，结论与数字均由本项目自行统计归纳。
 > 上游 DeskBox 以 **GPL-3.0-only** 授权，**本文不包含其代码、注释或文档正文**（含译文），仅描述事实。

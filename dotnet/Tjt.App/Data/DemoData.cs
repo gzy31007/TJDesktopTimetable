@@ -1,7 +1,7 @@
 namespace Tjt.App.Data;
 
 /// <summary>
-/// 内置样例课表：与 <c>packages/core/fixtures/tongji-2026-1-collision.json</c> 同构（同一套字段、
+/// 内置样例课表：与 <c>dotnet/fixtures/tongji-2026-1-collision.json</c> 同构（同一套字段、
 /// 同一组"同格撞车"场景），但只有 5 门课，方便肉眼核对并排 / 单双周 / 跨节重叠三种情况。
 ///
 /// 只在读不到 fixtures 时兜底（例如直接把 exe 拷到别处运行）。刻意**不**含任何个人信息。

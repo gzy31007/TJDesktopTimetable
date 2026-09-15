@@ -9,36 +9,47 @@ Windows 桌面小组件：把同济大学课表以半透明色块网格固定在
 - 本地目录：`/root/TJDesktopTimetable`（仓库根）
 - 远程仓库：https://github.com/gzy31007/TJDesktopTimetable （Public / MIT）
 - 技术栈：**WinUI 3（C#，`dotnet/`）是唯一开发主线**；`TjtCore` 平台无关（Linux 可测）、`Tjt.Widget` 纯计算、`Tjt.App` 是 WinUI 外壳，Win32 直接 P/Invoke
-- **状态（2026-09-16，v1.0.0 已发布）**：Electron 线（`apps/desktop/` + `packages/core/`）**已弃用并冻结** ——
-  代码留作参考实现与**黄金 fixture 真源**，CI 仍跑它的单测（77 + 21），但**不再开发、不再出安装包**；
-  新功能一律进 `dotnet/` 线。发版：打了 `v*` tag 就走 `.github/workflows/release-winui.yml`
-  （自包含 publish → zip → 挂到 Release），版本号只在 `dotnet/Directory.Build.props` 改一处。
+- **状态（2026-09-16，v1.0.0 已发布）**：Electron 线（`apps/desktop/` + `packages/core/`，含 TS 工具链与它的 CI）
+  **已于 2026-09-16 删除**（先冻结、后按用户决定砍掉）：黄金 fixture 搬到 `dotnet/fixtures/`，
+  其余历史见 git（`git log --diff-filter=D -- '*apps/desktop*' '*packages/*'`）。
+  **仓库里只有 `dotnet/` 一条线**，新功能一律进它。发版：打了 `v*` tag 就走
+  `.github/workflows/release-winui.yml`（自包含 publish → zip → 挂到 Release），
+  版本号只在 `dotnet/Directory.Build.props` 改一处。
 
 ## 工作目录约定
 
 ```
-packages/core/        @tjt/core —— 纯 TS，零平台依赖（模型/周次/冲突/布局/时间/适配器）+ vitest
-packages/core/fixtures/  脱敏后的真实抓包数据（黄金测试基准，禁止放入学号、姓名等个人信息）
-apps/desktop/         Electron 应用（main / preload / renderer）
-docs/                 架构、数据模型、适配器指南 · desktop-layer · deskbox-refactor-assessment
-                      + 2026-09-16 结构拆分出来的四份：electron-legacy（冻结线）/ winui-lessons（返工史）
-                        / winui-build（DeskBox 参考事实 + 构建环境清单）/ import（课表导入细节）
+dotnet/TjtCore/       平台无关核心（net10.0）：模型/周次/冲突/布局/时间/适配器
+dotnet/Tjt.Widget/    挂件视觉层（net10.0，纯计算，不引 WinUI/Win32）
+dotnet/Tjt.App/       WinUI 外壳（net10.0-windows）：窗口/材质/Win32/托盘/设置
+dotnet/TjtCore.Tests/ 平台无关单测（TjtCore + Tjt.Widget 都测这里）
+dotnet/fixtures/      脱敏后的真实抓包数据（黄金测试基准，禁止放入学号、姓名等个人信息）
+docs/                 desktop-layer（层级层结论）· winui-build（DeskBox 参考事实 + 构建环境）
+                      · winui-lessons（返工史）· import（课表导入细节）· deskbox-refactor-assessment
+.tools/               本机构建/验收脚本（**gitignore**，不入库）：build-winui.ps1 / test-dotnet.ps1 / verify-*.ps1
 ```
 
 分层硬约束（改代码时必须遵守）：
 
-1. `packages/core` **不得** import `electron` / `vue` / DOM API，保持可在 Node、浏览器、测试中直接运行。
-2. `apps/desktop/src/renderer` **不得** import `electron`，只通过 preload 暴露的 `window.api` 通信。
-3. `apps/desktop/src/main` 只做窗口、托盘、IO、Win32 调用，不写课表业务逻辑（业务逻辑一律进 core）。
+1. `TjtCore` / `Tjt.Widget` **不得**引用 WinUI / Win32 / `Tjt.App` —— 它们必须是 `net10.0` 平台无关，
+   在 Linux（CI 的 ubuntu job）上就能 `dotnet test`。需要 P/Invoke 的东西一律下沉不了，留在 `Tjt.App`。
+2. `Tjt.App` 只做"必须在 Windows 上跑"的事：窗口、材质、Win32、托盘、设置界面与文件/网络 IO；
+   业务逻辑一律进 `TjtCore`，视觉计算一律进 `Tjt.Widget`。
+3. 新逻辑优先写进 `Tjt.Widget`（能在本机快速单测），只有"必须真实窗口/句柄"的才落 `Tjt.App`。
+4. `dotnet/fixtures/` 是黄金数据的**唯一真源**（csproj 用 `Content Link` 复制到测试输出目录），
+   改 fixture 等于改验收基准 —— 必须两边（`Tjt.App` 的 `--fixture`、`TjtCore.Tests`）都能跑通。
 
 ## 任务规范
 
-- 提交：Conventional Commits（英文类型 + 中文简述），例：`feat(core): 增加同济专业课表适配器`；推送前必须 `pnpm test && pnpm typecheck`。
-- 测试：core 的每个公开函数都要有单测；同济个人课表适配器由 `test/e2e-timetable.spec.ts` 端到端覆盖（导入 → 布局 → 时间 → 单双周过滤）；**同格撞车**由 `fixtures/tongji-2026-1-collision.json`（构造数据，非抓包）覆盖，TS 与 C# 两侧共用这一份（C# 侧 `CollisionE2ETests.cs`）。
-- **Electron 线（冻结）的视觉规范、材质、底板/grid-bg/染色、渲染层预览与打包**：见 [`docs/electron-legacy.md`](docs/electron-legacy.md)（原文逐字搬过去）。
-- 代理：WSL 内装依赖优先用国内镜像直连（快 30 倍，CI 也适用）：
-  `pnpm install --registry=https://registry.npmmirror.com`
-  只有推送到 GitHub / 拉 GitHub 资源时才用代理：`export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`
+- 提交：Conventional Commits（英文类型 + 中文简述），例：`fix(widget): 遮挡时不再误起缩放`；推送前必须跑测试：
+  `dotnet test dotnet/TjtTimetable.slnx`（Linux/CI 原生命令）或本机 `.tools/test-dotnet.ps1`（见下节）。
+- 测试：`TjtCore` / `Tjt.Widget` 的每个公开函数都要有单测；同济个人课表适配器由
+  `TjtCore.Tests/E2ETimetableTests.cs` 端到端覆盖（导入 → 布局 → 时间 → 单双周过滤）；
+  **同格撞车**由构造 fixture `dotnet/fixtures/tongji-2026-1-collision.json`（非抓包）覆盖，
+  `CollisionE2ETests.cs` 钉住；挂件视觉由 `BoardVisualTests.cs` 钉住。
+- 代理：只有推送到 GitHub / 拉 GitHub 资源时才用代理：
+  `export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`。
+  本机 NuGet 走 `.tools/nuget`（WSL）/ `C:\tjt-tools\nuget`（Windows 工作区）缓存，不需要额外镜像配置。
 
 ## 易错知识点
 
@@ -48,7 +59,7 @@ docs/                 架构、数据模型、适配器指南 · desktop-layer �
   - **课表页真正调的那条**：`GET /api/electionservice/reportManagement/findStudentTimetab?calendarId=<学期id>&studentCode=<前端加密的uid>`（研究生 `findSchoolTimetab2`，按前端源码走 `data.list`）→ `data[].timeTableList[]`。
     两者 `dayOfWeek`/`timeStart`/`timeEnd`/`weeks` 数组语义**完全一致**，只是课程在数组顶层、排课数组改名、教室多一层 `roomLable`（线上课堂/操场这类没有教室编号的场地，`roomIdI18n` 为空时才用它）。
   - **`calendarId` 只在请求 URL 上**（报表响应体里没有），所以抓取时要从粘贴的请求里把它取出来当 `ImportInput.TermId`，否则学期退化成"未知"（`tongji.term.unknown`）：C# 侧 `HttpRequestParser.QueryValue(spec, "calendarId")` → `TongjiFetchOutcome.TermId` → `ImportService`。
-  - 两条接口对同一个人给出的课表**逐条一致**（实测：14 门 / 19 条，条数一致是"同格多教师合并"后的结果，原始 `timeTableList` 有 27 条）。fixture：`packages/core/fixtures/tongji-2026-1-report.json`（脱敏：教师姓名→教师A…Z、工号→10001+、教学班 id→9xxxxxxxxxxxxxxx；TS 与 C# 共用）。
+  - 两条接口对同一个人给出的课表**逐条一致**（实测：14 门 / 19 条，条数一致是"同格多教师合并"后的结果，原始 `timeTableList` 有 27 条）。fixture：`dotnet/fixtures/tongji-2026-1-report.json`（脱敏：教师姓名→教师A…Z、工号→10001+、教学班 id→9xxxxxxxxxxxxxxx）。
 - 个人课表与培养计划是**同一套后端字段**（`dayOfWeek` / `weekState` / `timeStart` / `roomName` …），区别只在数据范围，所以字段映射逻辑可复用。
 - `weekState` 是 16 位周次掩码，bit0 = 第 1 周；单双周掩码不要硬编码 `0x5555/0xAAAA`（只对 16 周成立），按 `term.totalWeeks` 生成。
 - `dayOfWeek` 取值 1–7，**7 = 周日**（注意与 JS `Date.getDay()` 的 0=周日 区分）。
@@ -57,25 +68,20 @@ docs/                 架构、数据模型、适配器指南 · desktop-layer �
 - **同格多条 times 的合并键含教室**（适配器层：同天 + 同起止节次 + 同教室才合并、周次取并集）；同格不同教室不合并，成为并排的两块。
 - 教学班去重键用 `teachingClassId`（数字），`code` 是教学班代码字符串（如 `00213702`），`courseCode` 是课程代码（如 `002137`），三者不可混用。
 - 校历时间戳是毫秒（如 `beginDay: 1820160000000`），且 `weekBenginDay` 表示"周从周几开始"（同济为 2 = 周一），不是开学日。
-- **Electron 线（冻结）的依赖与打包坑**（koffi 平台二进制、electron-builder 缓存与精确版本、pnpm `allowBuilds`）、**窗口启动坑**（`ready-to-show`、首次启动反馈、单实例锁、`userData` 路径）：见 [`docs/electron-legacy.md`](docs/electron-legacy.md)。
-- WSL 内装依赖走代理极慢（实测 registry 请求 30s、19 KB/s）：改用国内镜像直连 `pnpm install --registry=https://registry.npmmirror.com`（实测 600 KB/s）。
-- WSL 内无法验证 Win32 窗口层级（置底/穿透）行为，这部分只能在 Windows 真机验收。
-- **不要从 UNC 路径（`\\wsl.localhost\...`）运行产物**：Chromium 需要内存映射加载 `resources.pak`/`icudtl.dat`，9p 文件系统上不可靠；产物要放到 Windows 本地磁盘（`C:\...`）再运行。WSL 侧复制过去极慢（9p 逐文件），让用户用资源管理器拖，或后台 robocopy。
-- **Electron 线（冻结）的层级层实现与 owner 结论/证据**（`SHELLDLL_DefView`、静息落点三态、5 秒巡检、`suspendRestingStyle()`、拖动/缩放真机结论、`layer.pause()`）：见 [`docs/electron-legacy.md`](docs/electron-legacy.md)。**现行实现在 C# 侧**（见下节「贴桌面常驻」）。
+- **层级层的历史结论与证据**（`SHELLDLL_DefView`、静息落点三态、5 秒巡检、拖动/缩放真机结论）：见 [`docs/desktop-layer.md`](docs/desktop-layer.md)。**现行实现在 C# 侧**（见下节「贴桌面常驻」）。
 - Windows 侧排查可用 WSL interop 直接调 `cmd.exe` / `powershell.exe`，但**参数里的引号与反斜杠会被 interop 再处理一次**：把逻辑写进 `.ps1`/`.bat` 再执行，不要在 `cmd /c` 里堆嵌套引号（`tasklist /FI "IMAGENAME eq x"` 这种就会解析失败）。`.ps1` 用 Windows PowerShell 5 执行时按 ANSI 读取，**脚本内容必须是纯 ASCII**（含中文注释会因引号配对错乱而解析失败）。
-- **改用户 `settings.json` 之前必须先停掉应用**：运行中的实例会在 `moved`/`resized` 等时机 `saveSettings()` 回写，而 `Stop-Process` 是强杀、退出路径不保证执行 —— 先改文件再杀进程，改动会被旧实例的内存值覆盖（实测："恢复挂件位置"这一步就这么白做了一次，`941×719` 被写回成 `819×535`）。正确顺序：**stop → 改 → start**（脚本见 `.tools/stop.ps1` / `.tools/start.ps1`）。
+- **改用户 `settings.json` 之前必须先停掉应用**：运行中的实例会在 `moved`/`resized` 等时机 `saveSettings()` 回写，而 `Stop-Process` 是强杀、退出路径不保证执行 —— 先改文件再杀进程，改动会被旧实例的内存值覆盖（实测："恢复挂件位置"这一步就这么白做了一次，`941×719` 被写回成 `819×535`）。正确顺序：**stop → 改 → start**（停用 `.tools/stop.ps1`；启动走 `C:\tjt-tools\TjtApp*.cmd`，见下文"手动启动"）。
 - **合成鼠标输入的三个坑**（本机验收反复踩到，用 `.tools/` 下的脚本时注意）：
   1. `SetCursorPos` 只挪光标、**不产生鼠标输入消息** —— 所以它测不出 hover（`:hover` 不触发）、也测不出点击；要真实输入得用 `mouse_event(MOUSEEVENTF_MOVE|MOUSEEVENTF_ABSOLUTE, x, y, ...)`，坐标是按主屏归一化到 0..65535 的（`x = 虚拟x * 65535 / 虚拟宽`）。
   2. **PowerShell 不是 DPI 感知进程**：`GetWindowRect` / `SetCursorPos` 用的是虚拟坐标，而应用日志里的 `rect` 是物理坐标（本机 2560×1600 / 缩放 150% → 虚拟 1707×1067，差 1.5 倍）；混用会得到"窗口没动/hover 没反应"的假结论。`CopyFromScreen` 反而吃物理坐标。
   3. 截图别赌坐标：直接全屏 `CopyFromScreen(0,0,2560,1600)`，再按日志里的物理 rect 裁剪 —— 局部截图一旦坐标偏一点，就会截到别的窗口而误判。
-  - 另外 `-webkit-app-region: drag` 的区域在 Chromium 里算**非客户区**，DOM 收不到 hover/mouseover；所以"悬停显示"的控件不要只挂在拖拽区上（挂件现在的做法是：hover 判定挂在 `.widget-shell`，而 `.widget-bar` 是拖拽区，实测悬停内容区即可让整壳 hover 生效）。
 
 ## 注意事项
 
 - 仓库 Public：fixtures 与文档中不得出现学号、姓名、cookie、token 等任何个人凭据。
-- **不做** 1 系统自动登录（SSO 带短信增强，塞进桌面客户端不划算）：改为用户手动粘贴 Cookie，主进程 `main/tongji.ts` 发起请求并探测接口路径。Cookie 存 `credentials.json`，**任何日志都不得打印 Cookie 内容**。
-- 窗口默认「桌面层 + 静息」：Owner 设为桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见），静息落点按前台窗口三选一（Electron 侧实现细节见 [`docs/electron-legacy.md`](docs/electron-legacy.md) 的「层级层结构」；C# 侧见下节「贴桌面常驻」）；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
-- 拖动用 `-webkit-app-region: drag`（见上）；静息态**不戴** `WS_EX_NOACTIVATE`（戴了拖不动，见"易错知识点"），交互期只做"临时浮起 + 结束后重新落点"。
+- **不做** 1 系统自动登录（SSO 带短信增强，塞进桌面客户端不划算）：改为用户手动粘贴 Cookie，外壳 `Data/TongjiFetcher.cs` 发起请求并探测接口路径。Cookie 存 `credentials.json`，**任何日志都不得打印 Cookie 内容**。
+- 窗口默认「桌面层 + 静息」：Owner 设为桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见），静息落点按前台窗口三选一（机制与证据见 [`docs/desktop-layer.md`](docs/desktop-layer.md)；现行实现见下节「贴桌面常驻」）；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换/回退模式保留，切换失败必须自动回退，不能黑屏。
+- 拖动与缩放都是自实现（`Win32/WindowDrag.cs` / `Win32/WindowEdgeResize.cs`），**起手先校验指针归属**（`PointerTarget`）；静息态**不戴** `WS_EX_NOACTIVATE`（戴了拖不动，见"易错知识点"），交互期只做"临时浮起 + 结束后重新落点"。
 
 ## C# / WinUI 线（2026-09-15 起）
 
@@ -87,21 +93,29 @@ docs/                 架构、数据模型、适配器指南 · desktop-layer �
 > "用了哪些 API / 什么机制"这类**事实**，不得抄代码、注释、文档正文、美术资源
 > （依据 `docs/deskbox-refactor-assessment.md`）。实践口径：**先查它、后自己写**。
 
-技术栈迁移**已完成**（2026-09-16 v1.0.0）：Electron 线弃用冻结，WinUI 线是唯一开发主线（见"项目定位"）。
+技术栈迁移**已完成**（2026-09-16 v1.0.0）：Electron 线已删除，WinUI 线是唯一实现（见"项目定位"）。
 当初转过来的原因是材质：Electron 的三条系统材质路径实测全拿不到 DeskBox 那种质感（DWM 对"从未被激活的窗口"一律降级成近黑平色），只有 WinUI 的 `MicaController` + `SystemBackdropConfiguration`（可强制 `IsInputActive`）能拿到。
+
+> **读代码时注意「溯源注释」**：`dotnet/` 里大量 `TS 侧 …` / `Electron 侧 …` 的注释是**移植溯源**
+> （说明这段 C# 是从哪份已删除的 TS/Electron 实现搬过来的），不是"还有另一条线要同步"。
+> 遇到 `packages/core/src/*.ts`、`apps/desktop/**` 这类路径，去 git 历史里找
+> （`git show <删除前的 commit>:<路径>`），别在仓库里找 —— 它们已经不存在了。
 
 ### 三个工程的分工（改动时必须守住）
 
 | 位置 | TFM | 能跑在哪 | 职责 |
 |---|---|---|---|
-| `dotnet/TjtCore` | `net10.0` | Linux + Windows | 模型 / 周次 / 冲突 / 布局 / 时间 / 适配器（TS `packages/core` 的移植） |
+| `dotnet/TjtCore` | `net10.0` | Linux + Windows | 模型 / 周次 / 冲突 / 布局 / 时间 / 适配器（溯源：已删除的 TS 核心库） |
 | `dotnet/Tjt.Widget` | `net10.0` | Linux + Windows | 挂件视觉层：几何、色块染色、名称分档、呈现模型（**纯计算，不得引用 WinUI/Win32**） |
 | `dotnet/Tjt.App` | `net10.0-windows10.0.22621.0` | **只能 Windows** | WinUI 外壳：窗口、材质、Win32、照坐标摆控件 |
 
 - `dotnet/TjtTimetable.slnx` = 前两个（Linux 也要能 `dotnet test`）；`dotnet/TjtTimetable.Windows.slnx` = 第三个。
   **不要**把 `Tjt.App` 并进前者，否则 Linux/CI 的构建整片失败。
 - 新逻辑优先下沉到 `Tjt.Widget`：那里能在 WSL 上编译 + 单测，反馈最快；外壳里只留"必须在 Windows 上跑"的东西。
-- 视觉规则的**唯一真源**仍是 `apps/desktop/src/renderer/shared/TimetableBoard.vue`（`blockRect` / `blockFontSize` / `blockName` / `tintStyle`）；C# 侧 `Tjt.Widget` 逐档对齐，改一边必须同步另一边，`BoardVisualTests` 有对照断言。
+- 视觉规则的**唯一真源就是 `Tjt.Widget`**：几何 / 字号 / 名称分档在 `BoardVisual.cs`，染色在 `TintPalette.cs`
+  （规则溯源自 Electron 渲染层的 `blockRect` / `blockFontSize` / `blockName` / `tintStyle`，该文件已随 Electron 线删除）；
+  期望值由 `TjtCore.Tests/BoardVisualTests.cs` 钉住 —— **改视觉 = 改这两个文件 + 这份测试**，不必再同步别处。
+  仓外的 `select_preview.html` 只在需要对照历史观感时看一眼。
 
 ### 在 Windows 本机构建（WSL 侧编译不了 WinUI）
 
@@ -118,6 +132,10 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   日志在 `C:\tjt-tools\build.log`。
 - **WSL 沙箱把 `/mnt/c` 挂成只读**：`touch /mnt/c/...` 会 `Permission denied`，robocopy 到 `/mnt/c` 也失败。
   一切对 Windows 盘的写操作都要走 PowerShell（interop 或 `-EncodedCommand`），别从 WSL 直接写。
+- **跑平台无关单测**（`TjtTimetable.slnx` = TjtCore + Tjt.Widget + TjtCore.Tests；WSL 里**没有** dotnet SDK，
+  只有 Windows 侧那份工作区 SDK）：`$PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\...\.tools\test-dotnet.ps1'`。
+  它复用 `build-winui.ps1` 镜像出来的 `C:\tjt-tools\work`，所以**先构建、后测试**（否则测的是上一版源码）。
+  实测 203 项全绿。
 - 脚本内容**必须是纯 ASCII**（Windows PowerShell 5 按 ANSI 读，中文注释会让解析错乱）；所有输出重定向到文件读，
   因为 interop 下 stderr 会被序列化成 CLIXML 没法看。
 - **GUI 进程不会自动退出**：冒烟自检一度把 CI job 挂成无限 `in_progress`（`Application.Exit()` 在"窗口从未激活"的路径上

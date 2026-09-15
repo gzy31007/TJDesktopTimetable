@@ -22,12 +22,13 @@
   </ItemGroup>
 
   <!--
-    黄金测试基准：脱敏后的真实抓包数据，**直接复用 TS 侧那一份**（单一真源）。
+    黄金测试基准：脱敏后的真实抓包数据（`dotnet/fixtures/`，2026-09-16 从 TS 线搬过来 ——
+    Electron 线已弃用，这里现在是唯一真源）。
     `Link` + `CopyToOutputDirectory` 让测试从输出目录读（AppContext.BaseDirectory/fixtures），
     避免依赖运行时的当前工作目录。
   -->
   <ItemGroup>
-    <Content Include="..\..\packages\core\fixtures\*.json" Link="fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\fixtures\*.json" Link="fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -6,10 +6,10 @@
     `describe` = 当前课表摘要），由 `App` 接到挂件窗口；设置窗口也**不认识 `MainWindow`**，一切经
     `SettingsWindow.SettingsHost`。`apply` 里对"窗口还没建"做了兜底（直接落盘）—— 否则 `--import`
     会因为那一刻 `_windows` 还是空的而静默失败。
-  - **落盘格式两端同形**：`TimetableJson` 用 camelCase、逐字段对齐 TS 的 `Timetable` 接口，因此
-    `%APPDATA%\TJDesktopTimetable\timetable.json` 在 Electron 线与 WinUI 线之间能互相读
+  - **落盘格式沿用旧 Electron 线的形状**：`TimetableJson` 用 camelCase、逐字段对齐当年 TS 的 `Timetable` 接口，
+    因此 `%APPDATA%\TJDesktopTimetable\timetable.json` **能直接读入旧版本写出的文件**
     （`credentials.json` 同理：`{ tongjiRequest, savedAt }`）。`Term.Label` 加了 `[JsonIgnore]`
-    （TS 没这个字段，写进去会让人工编辑的文件与 TS 形状不一致）。
+    （当年 TS 没这个字段，写进去会让人工编辑的文件形状不一致）。
   - **`TimetableJson.Deserialize` 会把缺失的集合补成空集合**：STJ 对位置记录缺字段给 `null` 且**不报错**，
     不补的话渲染层一遍历 `Slots`/`Sessions` 就崩（实测 `ArgumentNullException`）。缺 `term`/`courses` 返回 `null`，
     上层当"没有导入过"处理（`TimetableStore.Load` 里连"课程数为 0"也一并当没有）。

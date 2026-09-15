@@ -13,12 +13,12 @@ on:
   push:
     paths:
       - 'dotnet/**'
-      - 'packages/core/fixtures/**'
+      - 'dotnet/fixtures/**'
       - '.github/workflows/build-csharp.yml'
   pull_request:
     paths:
       - 'dotnet/**'
-      - 'packages/core/fixtures/**'
+      - 'dotnet/fixtures/**'
       - '.github/workflows/build-csharp.yml'
   workflow_dispatch:
 

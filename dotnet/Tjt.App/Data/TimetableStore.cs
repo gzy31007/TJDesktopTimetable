@@ -5,11 +5,11 @@ namespace Tjt.App.Data;
 /// <summary>
 /// 已导入课表的落盘（<c>%APPDATA%\TJDesktopTimetable\timetable.json</c>）。
 ///
-/// <para>与 Electron 侧**同一个文件名、同一套字段名**（camelCase，见 <see cref="TimetableJson"/>），
-/// 所以两端可以互相读对方写出的文件；用户手工替换/备份这份 JSON 也仍然有效。</para>
+/// <para>文件名与字段名沿用已删除的 Electron 线（camelCase，见 <see cref="TimetableJson"/>），
+/// 所以那边当年写出的文件仍然能读；用户手工替换/备份这份 JSON 也仍然有效。</para>
 ///
 /// <para>写入用"临时文件 + 改名"原子替换：直接覆盖时断电/崩溃会留下半个文件，
-/// 而这份文件正是每次启动都读的东西（Electron 侧的 store.ts 用了同样的手法）。</para>
+/// 而这份文件正是每次启动都读的东西（手法与 Electron 线的 store.ts 相同）。</para>
 /// </summary>
 internal static class TimetableStore
 {

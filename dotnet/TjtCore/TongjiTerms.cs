@@ -7,7 +7,7 @@ namespace Tjt.Core;
 /// 必须要它；校历接口需要复杂参数（实测 POST 返回"系统繁忙"）。所以把已知学期做成内置表：
 /// 命中即用，未命中则退化为"16 周 + 内置节次、不显示周次"。
 ///
-/// 数据来源：1 系统校历接口响应快照（<c>packages/core/fixtures/tongji-school-calendar.json</c>）。
+/// 数据来源：1 系统校历接口响应快照（<c>dotnet/fixtures/tongji-school-calendar.json</c>）。
 /// </summary>
 public sealed record TermPreset(string CalendarId, string Name, int Year, int TermNo, string StartDate, int TotalWeeks);
 

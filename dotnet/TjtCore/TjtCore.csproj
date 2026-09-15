@@ -2,8 +2,8 @@
 
   <!--
     纯逻辑核心库：**平台无关**（net10.0，不引任何 Windows/WinUI 依赖）。
-    对齐 TS 侧 `packages/core` 的硬约束（不得 import electron/vue/DOM）——
-    这样它能在 Linux/CI 上编译和跑测试，Windows 只属于将来的 WinUI 外壳。
+    这条硬约束原样继承自 Electron 线的 TS 核心库（`packages/core`，2026-09-16 随该线一起删除）——
+    这样它能在 Linux/CI 上编译和跑测试，Windows 只属于 WinUI 外壳。
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

@@ -9,9 +9,9 @@ namespace Tjt.Core;
 /// <para><b>为什么放在 core 而不放在外壳</b>：序列化是纯计算，放这里就能在 Linux 上单测
 /// （round-trip、字段名、容错）；外壳只负责"文件放在哪、什么时候写"。</para>
 ///
-/// <para><b>字段名用 camelCase</b>：与 TS 侧 <c>Timetable</c> 接口逐字段同名，
-/// 因此 <c>%APPDATA%\TJDesktopTimetable\timetable.json</c> 在 Electron 线与 WinUI 线之间
-/// 可以互相读 —— 用户在任一端导入的课表，另一端打开就能用（这也是"文件可直接手工替换"的前提）。</para>
+/// <para><b>字段名用 camelCase</b>：沿用已删除的 Electron 线 <c>Timetable</c> 接口的字段名，
+/// 所以那边当年写出的 <c>%APPDATA%\TJDesktopTimetable\timetable.json</c> 仍然能读进来
+/// （也是"文件可直接手工替换 / 备份"的前提）。</para>
 /// </summary>
 public static class TimetableJson
 {

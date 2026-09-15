@@ -3,10 +3,13 @@ using Tjt.Core;
 namespace Tjt.Widget;
 
 /// <summary>
-/// 色块染色 —— 与 Electron 侧 <c>apps/desktop/src/renderer/shared/TimetableBoard.vue</c>
-/// 的 <c>tintStyle()</c> 逐条对齐（那边用 CSS 变量，这边返回可直接赋给 XAML 画刷的色值）。
+/// 色块染色 —— **挂件视觉的真源之一**（染色在这里，几何/字号在 <c>BoardVisual</c>）。
 ///
-/// 差异只在表达方式：CSS 侧把 <c>--ink</c> 写成 <c>rgba(...)</c>，XAML 的 <c>Brush</c> 也能吃
+/// <para>规则溯源自 Electron 渲染层的 <c>TimetableBoard.vue</c>（<c>tintStyle()</c>），
+/// 那个文件随 Electron 线于 2026-09-16 删除；此后这里就是唯一实现，期望值由
+/// <c>TjtCore.Tests/BoardVisualTests.cs</c> 钉住。</para>
+///
+/// 表达方式：CSS 侧把 <c>--ink</c> 写成 <c>rgba(...)</c>，XAML 的 <c>Brush</c> 也能吃
 /// <c>#aarrggbb</c>，所以这里统一产出十六进制，避免渲染层再写一次字符串拼接。
 /// </summary>
 /// <param name="Tint">色块底色（浅色主题 13%、深色主题 30% 透明度）。</param>

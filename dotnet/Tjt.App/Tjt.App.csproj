@@ -69,7 +69,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\..\packages\core\fixtures\tongji-2026-1-personal.json"
+    <Content Include="..\fixtures\tongji-2026-1-personal.json"
              Link="fixtures\tongji-2026-1-personal.json"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
