@@ -94,11 +94,14 @@ internal static class ImportPage
             TextWrapping = TextWrapping.Wrap,
             Text =
                 "怎么复制这条请求？（一次即可，课表变了再重来一次）\n"
-                + "1. 浏览器登录 1.tongji.edu.cn，打开选课 / 我的课表页面。\n"
+                + "1. 浏览器登录 1.tongji.edu.cn，打开「我的课表」页面。\n"
                 + "2. 按 F12 → Network → 刷新页面。\n"
-                + "3. 找到返回 200、体积较大的那条（一般是 /api/electionservice/student/xxxx/getDataBk），"
-                + "右键 → Copy → Copy as cURL。\n"
-                + "4. 粘贴到上面的框里 → 点「获取我的课表」。\n"
+                + "3. 找到返回 200、内容是课程列表的那条 —— 课表页现在调的是\n"
+                + "    /api/electionservice/reportManagement/findStudentTimetab?calendarId=…&studentCode=…\n"
+                + "    （旧接口 /api/electionservice/student/xxxx/getDataBk 同样支持），右键 → Copy → Copy as cURL。\n"
+                + "    别复制成校历那条 /api/baseresservice/schoolCalendar/detail —— 那只是学期起止，里面没有课程。\n"
+                + "4. 粘贴到上面的框里 → 点「获取我的课表」。学期 id 会从请求里的 calendarId 自动取，"
+                + "所以「现在第几周」也是准的。\n"
                 + "粘贴内容只保存在本机 " + ImportService.DataDirectory + "\\credentials.json，不上传、不进日志。",
         };
 

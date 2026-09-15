@@ -33,9 +33,9 @@ const hasInput = computed(() => props.pastedText.trim().length > 0 || props.file
 const requestReady = computed(() => props.requestText.trim().length > 0);
 
 const requestPlaceholder = `在这里粘贴从浏览器复制的请求（F12 → Network → 右键该请求 → Copy → Copy as cURL），例如：
-curl 'https://1.tongji.edu.cn/api/electionservice/student/5582/getDataBk' -X POST -H 'cookie: ...' -H 'x-token: ...'
+curl 'https://1.tongji.edu.cn/api/electionservice/reportManagement/findStudentTimetab?calendarId=122&studentCode=...' -H 'cookie: ...' -H 'x-token: ...'
 
-也支持 PowerShell 的 Invoke-WebRequest 片段。整条请求自带登录态，程序只做这一次请求。`;
+也支持旧接口 /api/electionservice/student/xxxx/getDataBk 与 PowerShell 的 Invoke-WebRequest 片段。整条请求自带登录态，程序只做这一次请求。`;
 
 const jsonPlaceholder = `或者把课表接口的响应 JSON 直接粘贴到这里：
 {"code":200,"msg":"","data":{"calendarId":122,"selectedCourses":[{"course":{"courseName":"大学物理B2(I)","times":[...]}}]}}`;
@@ -61,13 +61,19 @@ const jsonPlaceholder = `或者把课表接口的响应 JSON 直接粘贴到这�
     <details class="help">
       <summary>怎么复制这条请求？（一次即可，课表变了再重来一次）</summary>
       <ol>
-        <li>浏览器登录 <code>1.tongji.edu.cn</code>，打开<b>选课 / 我的课表</b>页面。</li>
+        <li>浏览器登录 <code>1.tongji.edu.cn</code>，打开<b>我的课表</b>页面。</li>
         <li>按 F12 → <b>Network</b> → 刷新页面。</li>
         <li>
-          找到返回 200、体积较大的那条（一般是
-          <code>/api/electionservice/student/xxxx/getDataBk</code>），<b>右键 → Copy → Copy as cURL</b>。
+          找到返回 200、<b>内容是课程列表</b>的那条 —— 课表页现在调的是
+          <code>/api/electionservice/reportManagement/findStudentTimetab?calendarId=…&amp;studentCode=…</code>
+          （旧接口 <code>/api/electionservice/student/xxxx/getDataBk</code> 同样支持），
+          <b>右键 → Copy → Copy as cURL</b>。
+          别复制成校历那条 <code>/api/baseresservice/schoolCalendar/detail</code> —— 那只是学期起止，里面没有课程。
         </li>
-        <li>粘贴到上面的框里 → 点"获取我的课表"。请求里已经包含 Cookie 与 x-token，程序照原样请求一次。</li>
+        <li>
+          粘贴到上面的框里 → 点"获取我的课表"。请求里已经包含 Cookie 与 x-token，程序照原样请求一次；
+          学期 id 会从请求里的 <code>calendarId</code> 自动取，所以"现在第几周"也是准的。
+        </li>
       </ol>
       <p class="note">
         粘贴内容只保存在本机 <code>%APPDATA%\TJDesktopTimetable\credentials.json</code>，不上传、不进日志；用完可在浏览器退出登录使其失效。
