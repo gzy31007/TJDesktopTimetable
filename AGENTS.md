@@ -355,8 +355,9 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     WASDK 1.8 没有托盘 API，所以直接 P/Invoke；图标是 `Assets/app.ico`（运行时 `LoadImage` 加载）。
   - **设置窗口**（`SettingsWindow.xaml(.cs)` + `Rendering/SettingsView.cs`）：左侧 `NavigationView`
     导航（常规 / 外观 / 关于）+ 卡片行（左图标、标题、说明，右控件），照 DeskBox 那套。
-    改动**即时生效并落盘**（没有保存按钮）；**材质**例外 —— 它只在窗口创建时确定，
-    界面上明确写"重启后生效"。
+    改动**即时生效并落盘**（没有保存按钮）；**材质也是运行时即时切换**
+    （换控制器不重建窗口，见上面"材质切换"条目）—— 界面文案里已经没有"重启后生效"这种说法了，
+    若见到就是旧文档/旧产物。
 - **尺寸口径的第二版（重要，别再改回去）**：保存的**永远是"期望尺寸"**，实测尺寸只用来算
   `FrameCorrection`。之前两版都踩了同一个坑——把 Windows snap 后的实测尺寸当期望值存回去，
   于是"用户每拖一次窗口就变大一点"（实测 552x497 就是这么来的）。用户拖过之后，

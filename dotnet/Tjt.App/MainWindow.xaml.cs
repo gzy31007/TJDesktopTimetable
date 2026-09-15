@@ -627,7 +627,8 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// 应用新设置：落盘 → 立即生效（能立即生效的那些）→ 重排。
     ///
-    /// <para>"贴桌面层"立即重建层级；**材质**做不到（窗口创建时确定），由设置界面标注"重启后生效"。</para>
+    /// <para>"贴桌面层"立即重建层级；**材质**跑时即时切换（换控制器、不重建窗口，
+    /// 见 <c>BackdropHelper.SetMaterial</c>）。</para>
     /// </summary>
     internal void ApplySettings(WidgetSettings next)
     {
