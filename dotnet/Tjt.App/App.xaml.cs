@@ -22,6 +22,9 @@ public partial class App : Application
     /// <summary>自检硬超时（毫秒）：比 CI 侧的 WaitForExit 短，好让日志先落盘。</summary>
     private const int SmokeTimeout = 45_000;
 
+    /// <summary>登录窗口自检的硬超时（毫秒）：要等页面脚本跑完并发出课表请求。</summary>
+    private const int LoginTimeout = 60_000;
+
     /// <summary>托盘菜单命令 id（与 <c>ShowTrayMenu</c> 里的项一一对应）。</summary>
     private enum TrayCommand : uint
     {
@@ -32,12 +35,14 @@ public partial class App : Application
         ToggleDesktopLayer = 5,
         Import = 6,
         Exit = 7,
+        Login = 8,
     }
 
     private readonly List<MainWindow> _windows = [];
     private readonly List<SettingsWindow> _settingsWindows = [];
     private TrayIcon? _tray;
     private ImportService? _imports;
+    private TongjiLoginWindow? _loginWindow;
 
     /// <summary>
     /// 构造应用。
@@ -104,6 +109,15 @@ public partial class App : Application
                 SmokePassed = false;
             }
 
+            // 0c) 登录窗口自检（--login-check <url>）：开一个真窗口、跑完整捕获链路、用完即走。
+            //     刻意**不建挂件窗口** —— 验收脚本只关心"页面发出的课表请求能不能被接住并落盘"，
+            //     少一个窗口就少一处干扰；落盘走 ImportService 的兜底分支（TimetableStore.Save）。
+            if (options.LoginCheckUrl is not null)
+            {
+                RunLoginCheck(options.LoginCheckUrl);
+                return; // 由结束回调 / 看门狗硬退出
+            }
+
             var loaded = AppHost.Load(options.FixturePath);
             AppLog.Line($"[data] source={loaded.Source} origin={AppHost.OriginLabel(loaded.Origin)} courses={loaded.Timetable.Courses.Count} sessions={SessionCount(loaded)}");
 
@@ -123,6 +137,10 @@ public partial class App : Application
 
             window.ShowWidget();
             _tray = BuildTray(window);
+
+            // 内置登录窗口的入口（挂件菜单、托盘菜单、设置页按钮三处都落到同一个 ShowTongjiLogin）
+            window.SetLoginOpener(() => ShowTongjiLogin(window.CurrentIsDark));
+            if (options.Login) ShowTongjiLogin(window.CurrentIsDark);
 
             // 启动就停在某一页（验证导入页/截图用；托盘与挂件菜单也会用它）
             if (options.SettingsPage is { } page) ShowSettings(window.CurrentSettings, window.CurrentIsDark, page);
@@ -235,7 +253,8 @@ public partial class App : Application
                 Apply: next => widget.ApplySettings(next),
                 ResetPosition: () => widget.BuildActions().ResetPosition?.Invoke(),
                 ReloadTimetable: () => widget.ReloadTimetable(),
-                Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化")), page);
+                Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化"),
+                OpenLogin: () => ShowTongjiLogin(widget.CurrentIsDark)), page);
             _settingsWindows.Add(window);
             // 两个都要：VerifyPage 量一遍布局，shown 确认"打开时真的停在这一页"
             var built = window.VerifyPage(page);
@@ -273,7 +292,8 @@ public partial class App : Application
             Apply: next => _windows.FirstOrDefault()?.ApplySettings(next),
             ResetPosition: () => _windows.FirstOrDefault()?.BuildActions().ResetPosition?.Invoke(),
             ReloadTimetable: () => _windows.FirstOrDefault()?.ReloadTimetable(),
-            Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化")), page);
+            Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化"),
+            OpenLogin: () => ShowTongjiLogin(dark)), page);
         _settingsWindows.Add(window);
         window.Closed += (_, _) => _settingsWindows.Remove(window);
         window.Activate();
@@ -281,6 +301,82 @@ public partial class App : Application
         // MainWindowHandle 永远指向挂件那个）
         AppLog.Line($"[settings] 已打开设置窗口 page={page} shown={window.ShownPageIndex} hwnd=0x{WindowNative.GetWindowHandle(window):X}");
         return current;
+    }
+
+    /// <summary>
+    /// 打开**内置登录窗口**（已经开着就把它激活）。
+    ///
+    /// <para>这是"课表从哪来"的推荐路径：在应用自己的 WebView2 里走学校的统一身份认证
+    /// （含短信），课表页那条接口的响应被我们在一旁接住 —— 不碰浏览器数据、不猜加密、
+    /// 也不接触用户密码。抓到的响应交给 <see cref="ImportService.ApplyCapturedResponse"/>，
+    /// 与粘贴请求那条路落在同一个 <c>Apply</c> 上。</para>
+    /// </summary>
+    /// <param name="dark">当前是否深色主题（只影响这一个窗口）。</param>
+    private void ShowTongjiLogin(bool dark)
+    {
+        if (_loginWindow is { } existing)
+        {
+            existing.Activate();
+            return;
+        }
+
+        var window = new TongjiLoginWindow(
+            RequireImports(),
+            dark,
+            (ok, message) => AppLog.Line($"[login] 结束 ok={ok}：{message}"));
+        _loginWindow = window;
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_loginWindow, window)) _loginWindow = null;
+        };
+        window.Activate();
+        // hwnd 进日志：自动化脚本靠它定位登录窗口（它不是本进程的主窗口）
+        AppLog.Line($"[login] 已打开内置登录窗口 hwnd=0x{WindowNative.GetWindowHandle(window):X}");
+    }
+
+    /// <summary>
+    /// <c>--login-check &lt;url&gt;</c>：把登录窗口导航到给定地址，接住课表即退出（退出码表成败）。
+    ///
+    /// <para>给验收脚本用的：指向本地合成服务（一个会像 1 系统那样发出课表请求的小页面），
+    /// 于是**不需要拿真账号去登录**也能验证"捕获 → 解析 → 落盘"整条链路；
+    /// 加看门狗兜底，绝不让脚本悬着（超时即非零退出）。</para>
+    /// </summary>
+    private void RunLoginCheck(string url)
+    {
+        AppLog.Line($"[login] 自检模式：起点 {url}");
+        StartLoginWatchdog();
+
+        var window = new TongjiLoginWindow(
+            RequireImports(),
+            dark: false,
+            finished: (ok, message) =>
+            {
+                AppLog.Line($"[login] 自检结果 ok={ok}：{message}");
+                Environment.Exit(ok ? 0 : 1);
+            },
+            startUrl: url);
+        _loginWindow = window;
+        window.Activate();
+    }
+
+    /// <summary>取导入编排（还没建好就是编程错误，直接抛）。</summary>
+    private ImportService RequireImports() =>
+        _imports ?? throw new InvalidOperationException("导入编排尚未初始化");
+
+    /// <summary>登录自检的看门狗：超时即打印最后阶段并硬退出（退出码非零）。</summary>
+    private static void StartLoginWatchdog()
+    {
+        var watchdog = new Thread(() =>
+        {
+            Thread.Sleep(LoginTimeout);
+            AppLog.Error($"[login] fail: 自检 {LoginTimeout / 1000} 秒内没有捕获到课表（最后阶段见上方 [login] 日志）");
+            Environment.Exit(1);
+        })
+        {
+            IsBackground = true,
+            Name = "login-watchdog",
+        };
+        watchdog.Start();
     }
 
     /// <summary>建托盘图标：左键显示挂件，右键菜单给出常用动作。</summary>
@@ -299,6 +395,7 @@ public partial class App : Application
         new TrayMenuItem((uint)TrayCommand.Show, "显示挂件"),
         new TrayMenuItem((uint)TrayCommand.Settings, "设置…"),
         new TrayMenuItem((uint)TrayCommand.Import, "导入课表…"),
+        new TrayMenuItem((uint)TrayCommand.Login, "登录同济获取课表…"),
         new TrayMenuItem(null, string.Empty),
         new TrayMenuItem((uint)TrayCommand.Refresh, "重新载入课表"),
         new TrayMenuItem((uint)TrayCommand.ResetPosition, "恢复默认位置"),
@@ -319,6 +416,9 @@ public partial class App : Application
                 break;
             case TrayCommand.Import:
                 ShowSettings(widget.CurrentSettings, widget.CurrentIsDark, SettingsWindow.PageImport);
+                break;
+            case TrayCommand.Login:
+                ShowTongjiLogin(widget.CurrentIsDark);
                 break;
             case TrayCommand.Refresh:
                 widget.ReloadTimetable();

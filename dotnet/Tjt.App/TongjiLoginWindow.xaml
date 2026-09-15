@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Tjt.App.TongjiLoginWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="登录同济 1 系统">
+    <!-- 只声明宿主，内容在代码里搭（与挂件窗口 / 设置窗口同一策略） -->
+    <Grid x:Name="Host" />
+</Window>

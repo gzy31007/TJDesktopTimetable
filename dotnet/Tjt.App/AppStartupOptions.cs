@@ -18,6 +18,15 @@ namespace Tjt.App;
 /// （<c>--fetch-check</c>）。**不落盘**（诊断不该改用户数据）；失败时进程退出码非零。
 /// </param>
 /// <param name="SettingsPage">启动时直接打开设置窗口的第 N 页（0 常规 / 1 导入 / 2 外观 / 3 关于）。</param>
+/// <param name="Login">
+/// 启动后直接打开**内置登录窗口**（<c>--login</c>）：在应用自己的 WebView2 里登录 1 系统，
+/// 课表页那条接口的响应会被自动接住并导入。
+/// </param>
+/// <param name="LoginCheckUrl">
+/// 登录窗口的**自检**（<c>--login-check &lt;url&gt;</c>）：打开登录窗口并导航到给定地址，
+/// 等它捕获到课表 → 写日志 → 退出（退出码表成败）。给验收脚本指向本地合成服务用，
+/// 这样不必拿真账号去登录（详见 <c>.tools/verify-login.ps1</c>）。
+/// </param>
 internal sealed record AppStartupOptions(
     bool Smoke = false,
     bool? DesktopLayer = null,
@@ -29,14 +38,17 @@ internal sealed record AppStartupOptions(
     int? Height = null,
     string? ImportPath = null,
     string? FetchCheckPath = null,
-    int? SettingsPage = null)
+    int? SettingsPage = null,
+    bool Login = false,
+    string? LoginCheckUrl = null)
 {
     /// <summary>
     /// 解析命令行。
     ///
     /// 支持的形态：<c>--smoke</c>、<c>--desktop-layer</c> / <c>--no-desktop-layer</c>、<c>--no-backdrop</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>（不传就用窗口系统给的默认尺寸，传了就精确设成它，
-    /// 便于验证自适应）、<c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>。
+    /// 便于验证自适应）、<c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>、
+    /// <c>--login</c>、<c>--login-check &lt;url&gt;</c>。
     /// 未知参数被忽略（不崩在 CLI 上）。
     /// </summary>
     public static AppStartupOptions Parse(string[] args)
@@ -52,6 +64,8 @@ internal sealed record AppStartupOptions(
         string? importPath = null;
         string? fetchCheck = null;
         int? settingsPage = null;
+        var login = false;
+        string? loginCheck = null;
 
         for (var i = 0; i < args.Length; i += 1)
         {
@@ -66,6 +80,8 @@ internal sealed record AppStartupOptions(
             else if (Matches(arg, "fixture") && i + 1 < args.Length) fixture = args[++i];
             else if (Matches(arg, "import") && i + 1 < args.Length) importPath = args[++i];
             else if (Matches(arg, "fetch-check") && i + 1 < args.Length) fetchCheck = args[++i];
+            else if (Matches(arg, "login")) login = true;
+            else if (Matches(arg, "login-check") && i + 1 < args.Length) loginCheck = args[++i];
             else if (Matches(arg, "settings-page") && i + 1 < args.Length && int.TryParse(args[i + 1], out var page))
             {
                 settingsPage = page;
@@ -79,7 +95,7 @@ internal sealed record AppStartupOptions(
             }
         }
 
-        return new AppStartupOptions(smoke, desktopLayer, noBackdrop, logPath, fixture, dark, width, height, importPath, fetchCheck, settingsPage);
+        return new AppStartupOptions(smoke, desktopLayer, noBackdrop, logPath, fixture, dark, width, height, importPath, fetchCheck, settingsPage, login, loginCheck);
     }
 
     /// <summary>支持 <c>--flag</c> / <c>-flag</c> / <c>/flag</c> 三种前缀。</summary>

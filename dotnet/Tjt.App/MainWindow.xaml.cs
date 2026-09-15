@@ -56,6 +56,9 @@ public sealed partial class MainWindow : Window
     private WindowDrag? _drag;
     private WindowEdgeResize? _edgeResize;
     private Func<WidgetSettings, bool, int, WidgetSettings>? _openSettings;
+
+    /// <summary>打开内置登录窗口（由 <c>App</c> 提供，挂件只发意图）。</summary>
+    private Action? _openLogin;
     private FrameworkElement? _root;
     private double _dpiScale = 1.0;
 
@@ -618,6 +621,7 @@ public sealed partial class MainWindow : Window
     {
         OpenSettings = () => _openSettings?.Invoke(_settings, IsDark(), SettingsWindow.PageGeneral),
         OpenImport = () => _openSettings?.Invoke(_settings, IsDark(), SettingsWindow.PageImport),
+        OpenLogin = () => _openLogin?.Invoke(),
         Refresh = () => ReloadTimetable(),
         ResetPosition = () =>
         {
@@ -775,6 +779,9 @@ public sealed partial class MainWindow : Window
     }
 
     internal void SetSettingsOpener(Func<WidgetSettings, bool, int, WidgetSettings> opener) => _openSettings = opener;
+
+    /// <summary>注册"打开内置登录窗口"（顶部条菜单、设置页的按钮都走它）。</summary>
+    internal void SetLoginOpener(Action opener) => _openLogin = opener;
 
     /// <summary>当前设置（托盘菜单与设置窗口读它）。</summary>
     internal WidgetSettings CurrentSettings => _settings;

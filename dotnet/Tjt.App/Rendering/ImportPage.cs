@@ -32,7 +32,13 @@ internal static class ImportPage
     /// <param name="dark">深色主题（用色）。</param>
     /// <param name="windowHandle">设置窗口句柄（文件选择器要 <c>InitializeWithWindow</c>）。</param>
     /// <param name="xamlRoot">取当前 XamlRoot（<see cref="ContentDialog"/> 需要）。</param>
-    public static UIElement Build(ImportService imports, bool dark, nint windowHandle, Func<XamlRoot?> xamlRoot)
+    /// <param name="openLogin">打开内置登录窗口（外壳提供；为 <c>null</c> 时按钮禁用）。</param>
+    public static UIElement Build(
+        ImportService imports,
+        bool dark,
+        nint windowHandle,
+        Func<XamlRoot?> xamlRoot,
+        Action? openLogin = null)
     {
         ArgumentNullException.ThrowIfNull(imports);
 
@@ -106,12 +112,52 @@ internal static class ImportPage
         };
 
         var fetchStatus = StatusPanel();
+
+        // ── 推荐路径：内置登录窗口（不用去浏览器抓请求，也不用关 Edge / 读别人的 cookie）
+        var loginButton = new Button
+        {
+            Content = "登录同济并获取课表",
+            MinWidth = 168,
+            Style = AccentButtonStyle(),
+            IsEnabled = openLogin is not null,
+        };
+        loginButton.Click += (_, _) => openLogin?.Invoke();
+
+        var loginRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        loginRow.Children.Add(loginButton);
+        loginRow.Children.Add(new TextBlock
+        {
+            Text = "在应用自己的窗口里登录 1 系统（含短信验证），课表一打开就自动抓取导入。",
+            FontSize = StatusFontSize,
+            Opacity = 0.66,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 560,
+        });
+
+        var advanced = new TextBlock
+        {
+            Text = "或者：粘贴一条浏览器请求（高级 —— 不想在本应用里登录时用）",
+            FontSize = StatusFontSize,
+            Opacity = 0.6,
+            Margin = new Thickness(0, 6, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+
         var fetchBody = new StackPanel { Spacing = 10 };
+        fetchBody.Children.Add(loginRow);
+        fetchBody.Children.Add(advanced);
         fetchBody.Children.Add(requestBox);
         fetchBody.Children.Add(fetchStatus);
         fetchBody.Children.Add(help);
 
-        var fetchCard = SettingsView.Block(IconGlyph.Globe, "从 1 系统获取", "用浏览器里那条请求自带登录态，不需要在本应用里输密码", fetchBody, dark, fetchAction);
+        var fetchCard = SettingsView.Block(
+            IconGlyph.Globe,
+            "从 1 系统获取",
+            "推荐内置登录；也可以粘贴浏览器请求，用它的登录态抓一次",
+            fetchBody,
+            dark,
+            fetchAction);
 
         // ── 卡 3：本地 JSON
         var adapters = new List<(string Id, string Name)> { (string.Empty, "自动探测（推荐）") };

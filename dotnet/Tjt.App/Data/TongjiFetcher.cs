@@ -66,6 +66,21 @@ internal static class TongjiFetcher
                 : "粘贴的请求里没有 Cookie：请用「Copy as cURL」（会带上全部请求头），而不是只复制 URL。");
         }
 
+        return await FetchSpecAsync(spec, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 把**已经解析好的**请求发出去（<see cref="FetchAsync"/> 与内置登录窗口共用这一条）。
+    ///
+    /// <para>内置登录窗口为什么要用它：课上那条报表接口被 WebView2 拦到时，多数情况能直接读到响应体，
+    /// 但 POST 响应（旧 <c>getDataBk</c>）读不到 body —— 那时就用页面自己的 cookie 把同一个 GET
+    /// 重发一次。两条路都只在这里发请求，解析/探测/文案不会分叉。</para>
+    /// </summary>
+    /// <param name="spec">请求规格（<c>Source</c> 只进探测行与日志，用于说清"这条请求从哪来"）。</param>
+    /// <param name="cancellationToken">调用方的取消。</param>
+    public static async Task<TongjiFetchOutcome> FetchSpecAsync(HttpRequestSpec spec, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
         if (!Uri.TryCreate(spec.Url, UriKind.Absolute, out var uri))
         {
             return Fail($"解析出来的请求地址不合法：{spec.Url}");

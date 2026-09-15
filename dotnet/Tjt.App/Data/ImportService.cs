@@ -137,6 +137,42 @@ internal sealed class ImportService
         }
     }
 
+    /// <summary>
+    /// 把**内置登录窗口捕获到的**课表响应直接导入（不经过粘贴框，也不写凭证文件）。
+    ///
+    /// <para>与 <see cref="FetchAsync"/> 的差别只在"响应从哪来"：那边是用户粘贴的请求、由我们发出去；
+    /// 这边是登录窗口里页面自己发的那条请求被我们接住。**解析、诊断、落盘完全同一条路**
+    /// （都落到 <see cref="Apply"/>），所以两种入口的行为不会分叉。</para>
+    /// </summary>
+    /// <param name="responseText">捕获到的响应体（同济课表接口的 JSON）。</param>
+    /// <param name="termId">学期 id（报表接口只在 URL 上带 <c>calendarId</c>，见 <c>TongjiWebCapture</c>）。</param>
+    /// <param name="probes">给用户看的探测行（从哪条接口、多大、哪个学期）。</param>
+    public ImportOutcome ApplyCapturedResponse(
+        string responseText,
+        string? termId,
+        IReadOnlyList<FetchProbe>? probes = null)
+    {
+        var rows = probes ?? [];
+        if (string.IsNullOrWhiteSpace(responseText)) return ImportOutcome.Failure("捕获到的响应是空的。", rows);
+
+        try
+        {
+            // 登录窗口里只有 1 系统的页面，捕获到的响应一定来自同济选课/报表服务
+            var result = ImportPipeline.ImportTimetable(new ImportInput
+            {
+                Text = responseText,
+                AdapterId = TongjiStudentAdapter.AdapterId,
+                TermId = termId,
+            });
+            return Apply(result, rows);
+        }
+        catch (ImportException ex)
+        {
+            AppLog.Line($"[login] 捕获的响应解析失败 code={ex.Code}");
+            return new ImportOutcome(false, ex.Message, null, null, [], rows);
+        }
+    }
+
     /// <summary>清空已导入的课表：删文件 → 重新载入（回退到 fixtures / 内置样例）。</summary>
     public ImportOutcome ClearTimetable()
     {

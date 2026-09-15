@@ -60,11 +60,13 @@ public sealed partial class SettingsWindow : Window
     /// <param name="ResetPosition">把挂件放回屏幕右下角。</param>
     /// <param name="ReloadTimetable">按载入顺序重新读一遍课表。</param>
     /// <param name="Imports">导入编排（抓取 / 本地导入 / 清空）。</param>
+    /// <param name="OpenLogin">打开内置登录窗口（导入页的「登录同济并获取」按钮）。</param>
     internal sealed record SettingsHost(
         Action<WidgetSettings> Apply,
         Action ResetPosition,
         Action ReloadTimetable,
-        ImportService Imports);
+        ImportService Imports,
+        Action? OpenLogin = null);
 
     /// <summary>构造设置窗口。</summary>
     /// <param name="current">当前设置（用来回显）。</param>
@@ -233,7 +235,7 @@ public sealed partial class SettingsWindow : Window
         var dark = CurrentIsDark();
         _page.Content = index switch
         {
-            PageImport => ImportPage.Build(_host.Imports, dark, WindowNative.GetWindowHandle(this), () => _page.XamlRoot),
+            PageImport => ImportPage.Build(_host.Imports, dark, WindowNative.GetWindowHandle(this), () => _page.XamlRoot, _host.OpenLogin),
             PageAppearance => BuildAppearancePage(dark),
             PageAbout => BuildAboutPage(dark),
             _ => BuildGeneralPage(dark),
