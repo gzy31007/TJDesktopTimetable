@@ -379,6 +379,26 @@ internal static partial class NativeMethods
     [DllImport("user32.dll")]
     internal static extern bool GetCursorPos(out Point point);
 
+    /// <summary>加载系统光标（<c>LoadCursorW</c>；<paramref name="name"/> 传 <c>IDC_*</c> 资源号）。</summary>
+    [DllImport("user32.dll", EntryPoint = "LoadCursorW")]
+    internal static extern nint LoadCursor(nint instance, nint name);
+
+    /// <summary>设置光标（<c>SetCursor</c>）。自实现缩放靠它显示缩放光标。</summary>
+    [DllImport("user32.dll")]
+    internal static extern nint SetCursor(nint cursor);
+
+    /// <summary>水平双向箭头（<c>IDC_SIZEWE</c>）。</summary>
+    public static readonly nint IdcSizeWe = 32644;
+
+    /// <summary>垂直双向箭头（<c>IDC_SIZENS</c>）。</summary>
+    public static readonly nint IdcSizeNs = 32645;
+
+    /// <summary>左上-右下双向箭头（<c>IDC_SIZENWSE</c>）。</summary>
+    public static readonly nint IdcSizeNwse = 32642;
+
+    /// <summary>右上-左下双向箭头（<c>IDC_SIZENESW</c>）。</summary>
+    public static readonly nint IdcSizeNesw = 32643;
+
     /// <summary>屏幕坐标点。</summary>
     [StructLayout(LayoutKind.Sequential)]
     internal struct Point

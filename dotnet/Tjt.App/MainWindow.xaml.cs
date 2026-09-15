@@ -46,7 +46,7 @@ public sealed partial class MainWindow : Window
     private bool _userSizedRecently;
     private BackdropHelper? _backdrop;
     private WindowDrag? _drag;
-    private WindowResize? _resize;
+    private WindowEdgeResize? _edgeResize;
     private Func<WidgetSettings, bool, WidgetSettings>? _openSettings;
     private FrameworkElement? _root;
     private double _dpiScale = 1.0;
@@ -71,10 +71,11 @@ public sealed partial class MainWindow : Window
     /// WinUI 只能"禁用"关闭按钮（会变成灰色禁用态，反而更丑），没法只隐藏它；
     /// 而挂件本来就不需要这三个按钮（退出在 ⋯ 菜单与托盘里）。</para>
     ///
-    /// <para><b>清 <c>WS_THICKFRAME</c> 是这一版的第二半</b>：系统那圈缩放抓取带
-    /// （<c>SM_CXSIZEFRAME + SM_CXPADDEDBORDER</c> ≈ 8px）**整个画在窗口之外**，
-    /// 保留它等于在挂件四周留一圈"看不见、也没画出来的抓取边"。清掉之后改由我们自己回答
-    /// <c>WM_NCHITTEST</c>（见 <see cref="WindowResize"/>），把抓取带搬进**看得见的描边内侧**。</para>
+    /// <para><b>清 <c>WS_THICKFRAME</c> 是这一版的第二半</b>：它定义了那圈 10px 非客户区框
+    /// （见 <see cref="ConfigureWindowChrome"/> 里的实测数字），白边/黑带都是它。
+    /// 代价是系统不再提供缩放 —— 改由 <see cref="WindowEdgeResize"/> **自实现**：
+    /// 16ms 轮询光标，命中边缘抓取带且左键按下时按
+    /// <see cref="Tjt.Widget.ResizePolicy"/> 算外框并 <c>SetWindowPos</c>。</para>
     ///
     /// <para>代价：失去系统标题栏的拖动区。所以顶部条自己充当拖动区（<c>SetTitleBar</c> 于
     /// <c>ConfigureWindowChrome</c> 之后重新指定）。</para>
@@ -85,8 +86,7 @@ public sealed partial class MainWindow : Window
         {
             // 必须是 false：presenter 的 IsResizable 会往 GWL_STYLE 里塞回 WS_THICKFRAME，
             // 而**有它就有那圈 10px 非客户区框**（真机实测：true → client 比外框小 20px，
-            // false → frame=0,0）。缩放不靠这个样式位 —— 由我们自答 WM_NCHITTEST 触发
-            // 原生缩放循环（见 WindowResize），所以拖边缘照样能缩。
+            // false → frame=0,0）。缩放不靠这个样式位 —— 见 WindowEdgeResize 的自实现循环。
             presenter.IsResizable = false;
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
@@ -134,8 +134,9 @@ public sealed partial class MainWindow : Window
     /// 这也正是 DeskBox 的取法（它 `IsResizable/IsMaximizable/IsMinimizable` 全 false，
     /// 实测它的窗口 `GetClientRect` 与外框完全相等）。</para>
     ///
-    /// <para>缩放不受影响：不靠这个样式位，由我们自答 <c>WM_NCHITTEST</c> 触发原生缩放循环
-    /// （见 <see cref="WindowResize"/>），所以 <c>IsResizable = false</c> 之后拖边缘照样能缩。</para>
+    /// <para>缩放不受影响：不靠这个样式位 —— <see cref="WindowEdgeResize"/> 自己轮询光标、
+    /// 自己算外框、自己 <c>SetWindowPos</c>（原生循环在没有 <c>WS_THICKFRAME</c> 时压根起不来，
+    /// 这是真机验收"边缘缩放失效"之后改的）。</para>
     ///
     /// <para><b>另两件配套（对齐 DeskBox）</b>：<c>DwmExtendFrameIntoClientArea(-1,-1,-1,-1)</c>
     /// 把框区当玻璃（见 <see cref="ApplyFullWindowFrame"/>）；<c>DWMWA_BORDER_COLOR = NONE</c>
@@ -202,7 +203,7 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// 光标（**屏幕物理像素**，来自 <c>WM_NCHITTEST</c> 的 <c>lParam</c>）该抓哪条边。
     ///
-    /// <para><see cref="WindowResize"/> 每次都现问一次，而不是缓存矩形 —— 窗口刚被拖过、
+    /// <para><see cref="WindowEdgeResize"/> 每次都现问一次，而不是缓存矩形 —— 窗口刚被拖过、
     /// 设置还没回写的时序里，缓存值会让命中带落在错误的位置上。</para>
     ///
     /// <para>外框由 <c>GetWindowRect</c> 取（同为屏幕物理像素，与光标同坐标系）；
@@ -397,10 +398,20 @@ public sealed partial class MainWindow : Window
     {
         var hwnd = WindowNative.GetWindowHandle(this);
 
-        // 缩放：清掉 WS_THICKFRAME 之后系统不再认边缘，由我们自己答 WM_NCHITTEST。
-        // 缩放本身仍是原生循环，所以下面 WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE 照旧生效。
-        _resize = WindowResize.Attach(hwnd, ResolveResizeGrip);
-        AppLog.Line($"[resize] 自答命中测试已挂上（抓取带 {ResizePolicy.BorderWidth}px，贴可见描边内侧）");
+        // 缩放：边缘抓取带**自实现**（16ms 轮询光标 + SetWindowPos）。
+        // 不再走原生缩放循环 —— 它要求 WS_THICKFRAME，而那正是那圈 10px 非客户区框的来源。
+        _edgeResize = WindowEdgeResize.Attach(
+            hwnd,
+            ResolveResizeGrip,
+            onStart: () => _layer?.SuspendForInteraction("resize-start"),
+            onEnd: () =>
+            {
+                // 先存位置再落点：落点会改 z-order，但不动坐标
+                _userSizedRecently = true;
+                SaveBounds("缩放结束");
+                _layer?.ResumeAfterInteraction("resize-end");
+            });
+        AppLog.Line($"[resize] 边缘缩放已挂上（自实现，抓取带 {ResizePolicy.BorderWidth}px）");
 
         MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmEnterSizeMove, () =>
         {

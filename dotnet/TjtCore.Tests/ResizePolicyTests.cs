@@ -4,7 +4,7 @@ using Xunit;
 namespace Tjt.Core.Tests;
 
 /// <summary>
-/// 缩放策略的单测（对齐 <c>Tjt.App/Win32/WindowResize.cs</c> 的真机行为）。
+/// 缩放策略的单测（对齐 <c>Tjt.App/Win32/WindowEdgeResize.cs</c> 的真机行为）。
 ///
 /// <para>这是"缩放自实现"里唯一能在 Linux 上验证的部分，也是最容易错的部分：
 /// 判边的优先级（先角后边）、贴左用绝对坐标而不是差值、以及缩到下限时"哪条边不动"。
@@ -15,64 +15,30 @@ public class ResizePolicyTests
     /// <summary>一个 1000x700、左上角在 (100, 200) 的窗口（物理像素）。</summary>
     private static WindowBounds Window() => new(100, 200, 1000, 700);
 
-    private static ResizeGrip Hit(int x, int y) => ResizePolicy.HitTest(Window(), x, y);
-
-    [Fact]
-    public void 正中不抓()
+    [Theory]
+    [InlineData(ResizeGrip.None, 600, 500)]        // 正中
+    [InlineData(ResizeGrip.Left, 100, 500)]        // 左边中点
+    [InlineData(ResizeGrip.Right, 1099, 500)]      // 右边中点
+    [InlineData(ResizeGrip.Top, 600, 200)]         // 上边中点
+    [InlineData(ResizeGrip.Bottom, 600, 899)]      // 下边中点
+    [InlineData(ResizeGrip.TopLeft, 100, 200)]     // 四个角：先角后边
+    [InlineData(ResizeGrip.TopRight, 1099, 200)]
+    [InlineData(ResizeGrip.BottomLeft, 100, 899)]
+    [InlineData(ResizeGrip.BottomRight, 1099, 899)]
+    [InlineData(ResizeGrip.Left, 105, 500)]        // 带内
+    [InlineData(ResizeGrip.None, 107, 500)]        // 带外
+    [InlineData(ResizeGrip.None, 50, 500)]         // 窗口左侧之外
+    [InlineData(ResizeGrip.None, 94, 500)]         // 刚出界
+    [InlineData(ResizeGrip.None, 1150, 500)]
+    [InlineData(ResizeGrip.None, 600, 100)]
+    [InlineData(ResizeGrip.None, 600, 1000)]
+    public void 命中测试与吸附带模型一致(ResizeGrip expected, int x, int y)
     {
-        Assert.Equal(ResizeGrip.None, Hit(600, 500));
-    }
-
-    [Fact]
-    public void 四条边的中点各抓一条边()
-    {
-        Assert.Equal(ResizeGrip.Left, Hit(100, 500));
-        Assert.Equal(ResizeGrip.Right, Hit(1099, 500));
-        Assert.Equal(ResizeGrip.Top, Hit(600, 200));
-        Assert.Equal(ResizeGrip.Bottom, Hit(600, 899));
-    }
-
-    [Fact]
-    public void 四个角优先于边_先角后边()
-    {
-        // 角点同时满足"贴左"与"贴上"：必须判成角，否则角上永远只有一个方向能缩放
-        Assert.Equal(ResizeGrip.TopLeft, Hit(100, 200));
-        Assert.Equal(ResizeGrip.TopRight, Hit(1099, 200));
-        Assert.Equal(ResizeGrip.BottomLeft, Hit(100, 899));
-        Assert.Equal(ResizeGrip.BottomRight, Hit(1099, 899));
-    }
-
-    [Fact]
-    public void 抓取带宽度就是六像素()
-    {
-        // 带内（第 5 个像素）算命中
-        Assert.Equal(ResizeGrip.Left, Hit(105, 500));
-        // 带外（第 7 个像素）不算
-        Assert.Equal(ResizeGrip.None, Hit(107, 500));
-        // 右边同理（右边界 1100 是开区间）
-        Assert.Equal(ResizeGrip.Right, Hit(1094, 500));
-        Assert.Equal(ResizeGrip.None, Hit(1092, 500));
-    }
-
-    [Fact]
-    public void 贴左用绝对坐标而不是差值()
-    {
-        // 关键回归：判定必须是 x < left + band，不能写成 (x - left) < band。
-        // 窗口左上角在 (100,200)，若用差值判定，"窗口左侧外面"（x = 50 → 差值 -50）
-        // 也会满足 < band，于是挂件左边一整片桌面都成了我们的缩放手柄。
-        Assert.Equal(ResizeGrip.Left, Hit(100, 500));   // 边缘那一像素：必须命中
-        Assert.Equal(ResizeGrip.Left, Hit(105, 500));   // 带内
-        Assert.Equal(ResizeGrip.None, Hit(50, 500));    // 窗口左侧之外：不命中
-        Assert.Equal(ResizeGrip.None, Hit(94, 500));    // 刚出界
-    }
-
-    [Fact]
-    public void 窗口外一律不抓()
-    {
-        Assert.Equal(ResizeGrip.None, Hit(50, 500));
-        Assert.Equal(ResizeGrip.None, Hit(1150, 500));
-        Assert.Equal(ResizeGrip.None, Hit(600, 100));
-        Assert.Equal(ResizeGrip.None, Hit(600, 1000));
+        // 抓取带 = **内缩矩形**的 6px：`x < left + band` 而不是 `(x - left) < band` ——
+        // 后者会把窗口左侧外面一整片桌面也算成抓取带（x=50 也会命中）。
+        // 判定顺序是**先角后边**：角点同时满足"贴左"和"贴上"，不优先判角的话
+        // 角上永远只有一个方向能缩放。窗口外一律不抓（`x >= right` / `y >= bottom` 为开区间）。
+        Assert.Equal(expected, ResizePolicy.HitTest(Window(), x, y));
     }
 
     [Fact]

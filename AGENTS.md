@@ -173,8 +173,8 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     `初始位置 + 位移`（有 4px 的起拖阈值，避免误触）。交互开始还会把窗口**临时提到最前**
     （`ElevateForInteraction`），结束后再落点 —— 与我们 `SuspendForInteraction` 的思路一致。
   - 缩放：因为它把 `WS_THICKFRAME` 也清了，所以缩放同样自实现（自己有 resize 边框的命中处理 +
-    `ResizeGuideOverlay` 引导层）。**我们不跟这条**：清掉 `WS_THICKFRAME`、自己答 `WM_NCHITTEST`，
-    缩放本体仍交给系统原生循环（见下面"缩放自实现"条目）—— 少一套引导层与最小尺寸逻辑。
+    `ResizeGuideOverlay` 引导层）。**我们现在也走自实现**（圆角和缩放二选一时选了圆角，
+    见下面"缩放（2026-09-15 二次定稿）"）；只是没做引导层与吸附，简单些。
   - 托盘：用 **`H.NotifyIcon.WinUI`**（社区库）承载，菜单直接是 WinUI 的 `MenuFlyout`
     （不是原生 `TrackPopupMenu`）。我们没引那个包，走的是 `Shell_NotifyIcon` + 原生菜单。
   - 它额外做的：`WS_EX_TOOLWINDOW`、`IsShownInSwitchers=false`（我们已做前者）。
@@ -190,42 +190,34 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
   （实测光标始终停在原点），所以"拖动"这一条**只能手动验收** —— 别再用合成鼠标去验拖动，
   否则结论会是假的 FAIL（试过三轮，全是环境问题不是代码问题）。可验的是：按下事件到达
   （日志 `[drag] 按下`）、左键状态可读（`lbutton=True`）、以及渲染层 `[drag] poll#` 心跳。
-- **缩放（2026-09-15 完成：抓取带搬进可见描边，缩放本体仍是系统原生循环）**：
-  - **症状与根因**：上一版清掉标题栏后仍留着 `WS_THICKFRAME`，系统那圈缩放命中带
-    （`SM_CXSIZEFRAME + SM_CXPADDEDBORDER` ≈ 8px）**整个画在窗口之外** —— 于是"挂件四周有一圈
-    看不见、也没画出来的抓取边"。抓取带的定义来自窗口样式，不是屏幕上的像素。
-  - **做法**：`ConfigureWindowChrome()` 里把 `GWL_STYLE` 的
-    `WS_CAPTION | WS_BORDER | WS_DLGFRAME | WS_THICKFRAME` 一并清掉（`SWP_FRAMECHANGED` 生效），
-    再挂 `Win32/WindowResize.cs`：**只自答命中测试** —— 光标落在边缘内缩矩形上时返回
-    `HTLEFT`/`HTBOTTOMRIGHT`/… 这些码，Windows 自己会把鼠标消息交给 `DefWindowProc`，
-    由它跑**原生缩放循环**（最小尺寸夹取、吸附、DPI 变化全免费）。判据是纯函数
-    `Tjt.Widget/ResizePolicy.cs`（`HitTest` + `Resolve`，13 条单测在 Linux 上跑）。
-  - **不要改回去用自实现缩放**：那要自己管最小尺寸、自己画缩放引导层、自己处理"缩到屏幕外"，
-    收益为零。DeskBox 是因为把 XAML 指针事件整条链子都自己管了才顺带自实现缩放，**我们不跟**。
-    拖动那条路走自实现是另一回事（它不是窗口缩放，是渲染层把顶部条当拖拽区在用）。
-  - **命中测试的接口约定**：`MessageHook.Subscribe(hwnd, msg, Action<wParam, lParam>)` 能拿到消息参数，
-    回调里调 `MessageHook.SetResult(...)` 即覆盖原窗口过程的返回值（**只在当前这条消息内有效**，
-    `HookProc` 每条消息开头复位）。`WM_NCHITTEST` 的 `lParam` 是**两个 16 位有符号 short**
-    （低位 X、高位 Y）—— 多屏负坐标不做符号扩展会读成 65436，表现为"左边永远抓不住"。
-  - **抓取带宽度 6px（物理像素）**：与系统默认同级；150% 缩放下 ≈ 4 DIP，够抓且不会把顶部条的
-    按钮压得点不动。判边用**内缩矩形**（`x < left + band`，不是 `x - left < band`）：
-    后者会把窗口左侧外面一整片桌面算成抓取带（有单测钉住）。
-  - **状态复用是自动的**：原生缩放循环照样发 `WM_ENTERSIZEMOVE` / `WM_EXITSIZEMOVE`，
-    所以"暂停 owner 巡检 / 结束存位置与落点"那两条钩子完全不用改；`--size WxH` 走
-    `AppWindow.ResizeClient`，也不需要窗口样式。
-  - **真机验收脚本 `.tools/verify-resize.ps1`**：**不用合成鼠标** —— 直接
-    `SendMessage(hwnd, WM_NCHITTEST, 0, MAKELPARAM(x,y))` 就能验"这条链子通不通"
-    （实测四边四角全中、正中 `HTCLIENT`、窗外 `HTNOWHERE`），再用
-    `SetWindowPos` + `WM_EXITSIZEMOVE` 验持久化与重启恢复。两个写脚本时的坑：
-    1. **脚本进程必须 DPI 感知**（`SetProcessDpiAwarenessContext(-4)`，失败再退
-       `shcore!SetProcessDpiAwareness(2)`），否则 `GetWindowRect` 返回**虚拟化**坐标 ——
-       实测不感知读到 `1280x745`、感知后读到真实的 `1920x1117`，两者差 1.5 倍，会被误判成 bug；
-    2. 脚本的 rect 是**物理像素**、`settings.json` 是 **DIP**，缩放系数要从应用日志
-       `[settings] 保存 ... measured=...` 那一行反推，别自己假设 1:1。
-  - **验收状态（2026-09-15，全绿）**：上面两条自动检查 + **用户真机手动拖拽边缘通过**
-    （可见边缘出缩放光标、窗口跟手、松手后位置尺寸落盘）。也就是"按住边缘拖"这一步
-    **不再需要每轮重验** —— 遇到"边缘抓不住"的回归时，先跑 `verify-resize.ps1` 定位是
-    命中测试断了还是原生循环没起来，别一上来就改代码。
+- **缩放（2026-09-15 二次定稿：原生循环 → 自实现）**：
+  - **第一版走"自答 `WM_NCHITTEST` + 系统原生缩放循环"**，命中测试全对，但**真机手动验收判定"边缘缩放失效"** ——
+    因为原生循环要求窗口带 `WS_THICKFRAME`，而那个样式位正是那圈 10px 非客户区框的来源。
+    **两者不可兼得**：`IsResizable=true` → `frame=10,10`（白边/黑带），`false` → `frame=0,0`（无框但拖不动）。
+  - **现在与 DeskBox 同构：缩放自实现**（`Win32/WindowEdgeResize.cs`，16ms 轮询光标）：
+    <list type="bullet">
+    <item><description>光标进边缘抓取带 → `SetCursor` 显示对应缩放光标（`IDC_SIZEWE/NS/NWSE/NESW`）；</description></item>
+    <item><description>左键按下且落在带内 → 记起点与起始外框，开始拖拽；</description></item>
+    <item><description>每帧用 `Tjt.Widget/ResizePolicy.Resolve`（纯函数）算新外框 → 一次 `SetWindowPos`；</description></item>
+    <item><description>左键松开（`GetAsyncKeyState`）→ 存位置 + 重新落点 + 光标还原。</description></item>
+    </list>
+    与拖动同一套轮询机制（`WindowDrag` 是同一个模式），所以"这台机器挡掉合成指针输入"这条限制同样适用。
+  - **不要走 `WM_SETCURSOR` 返回 `HT*`**：那要求窗口正在处理鼠标消息，而挂件贴着桌面层、消息到得并不规律；
+    轮询里直接 `SetCursor` 更确定。抓取带仍是 6px、仍用**内缩矩形**判边（`x < left + band`，
+    不是 `x - left < band`，后者会把窗口左侧外面整片桌面算成抓取带 —— 有单测钉住）。
+  - **验收**（`.tools/verify-resize.ps1`，**不用合成鼠标**）：验三件能自动化的 ——
+    ① 日志里有 `[resize] 边缘缩放已挂上`（说明自实现循环挂上了）；
+    ② 几何：右边/下边增长时左上角锚定不动（`SetWindowPos` + 轮询等待尺寸生效）；
+    ③ `WM_EXITSIZEMOVE` 落盘 + 重启恢复。**"按住边缘拖"本身仍需手动**。
+    真机实测（150% 缩放）：`scale=1.5`、落盘 `880x600 DIP`（`correction=0,0`、`delta 0x0`）、
+    重启恢复 `677,428 1320x900` 与预期完全一致。
+  - **脚本踩过的坑**：`SetWindowPos` 之后应用是**下一个消息循环才应用尺寸**的，
+    直接读 `GetWindowRect` 会读到旧值（表现为假 FAIL）—— 必须轮询等待；
+    缩放系数要用 `GetDpiForWindow()/96`，**不要**从日志里的 `bounds`/`measured` 反推
+    （那条 `measured` 可能是"上一次"事件的，会算出 `scale=0.239` 这种鬼值）。
+  - **`ResizePolicy.MinWidth/MinHeight = 320x240 DIP` 只在策略层生效**：
+    真机实测把窗口强行设到 `40x40` 物理像素时 Windows 仍会接受（没有夹到 320x240 DIP），
+    因为窗口系统自己有更小的下限。别把它当成系统的硬约束。
 - **挂件四边那 10px 非客户区框（白边 → 黑带）——根因是 `presenter.IsResizable = true`（2026-09-15 结案）**：
   - **症状两连**：先是一圈 `#F3F3F3` **白边**；把框区改成"当玻璃"后又变成一条 `#2B2B2B` **黑带**。
     两种都不是渲染层画的 —— 用一次性探针（给 `BoardRenderer` 的内容根铺洋红）量出：
@@ -240,9 +232,9 @@ B64=$(python3 -c "import base64;print(base64.b64encode(open('.tools/build-winui.
     2. `DwmExtendFrameIntoClientArea(hwnd, (-1,-1,-1,-1))` —— "sheet of glass"；
     3. `DWMWA_BORDER_COLOR = 0xFFFFFFFE` —— 透明描边（它自己用 XAML 画边框）。
     三者都在主题变化时重发（DeskBox 是在 `WidgetWindowBase.Backdrop` 里按主题签名重发）。
-  - **缩放不受影响**：不靠 `WS_THICKFRAME`，靠我们自答 `WM_NCHITTEST` 触发原生缩放循环
-    （见上面"缩放"条目）。实测 `IsResizable=false` 之后四边四角命中码照旧全中，
-    而且尺寸落盘**不再需要边框校正**（`correction=0,0`，`delta 0x0`）—— 因为客户区就是外框。
+  - **缩放怎么办**：`IsResizable=false` 之后原生缩放循环起不来（真机验收过），
+    所以缩放改成了自实现 —— 见上面"缩放（2026-09-15 二次定稿）"条目。
+    附带收获：尺寸落盘**不再需要边框校正**（`correction=0,0`，`delta 0x0`），因为客户区就是外框。
   - **⚠️ 别把 `DwmExtendFrameIntoClientArea` 的 `-1` 和 `(0,0,0,0)` 搞混**：`(0,0,0,0)` 是
     "**不扩展**"，等于什么都没做（曾经因此误判"这个 API 没用"）。`-1` 才是扩展。
   - **诊断手法（值得复用）**：给内容根铺一层洋红（`root.Background = Magenta`）跑一次，
