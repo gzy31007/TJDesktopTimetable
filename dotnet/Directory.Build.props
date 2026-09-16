@@ -1,12 +1,12 @@
 <Project>
 
   <!--
-    三个工程的统一版本号（`dotnet/` 下的 Directory.Build.props 会被 TjtCore / Tjt.Widget / Tjt.App 自动导入，
-    项目文件里若单独写 Version 则以项目文件为准）。
+    四个工程的统一版本号（`dotnet/` 下的 Directory.Build.props 会被 TjtCore / Tjt.Widget / Tjt.App / Tjt.Linux
+    自动导入，项目文件里若单独写 Version 则以项目文件为准）。
     单一处声明：发版时只改这一个数字 → 设置窗口「关于」页读的就是它（AssemblyVersion）。
   -->
   <PropertyGroup>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Product>TJDesktopTimetable</Product>
     <Authors>gzy31007</Authors>
     <Copyright>MIT © 2026 gzy31007</Copyright>

@@ -46,12 +46,22 @@ docs/                   desktop-layer.md · winui-build.md · winui-lessons.md �
 
 ## 安装
 
-1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.1.0-win-x64.zip`（自包含：**不需要**预装 .NET 或 Windows App Runtime）。
+**Windows**
+
+1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.2.0-win-x64.zip`（自包含：**不需要**预装 .NET 或 Windows App Runtime）。
 2. 解压到任意**本地磁盘**目录（别放在 `\\wsl.localhost\...` 这类 UNC 路径下）。
 3. 双击 `Tjt.App.exe`。首次启动会打开设置窗口的「导入课表」页，按下一节导入一次即可。
 
-> 卸载 = 删目录；数据在 `%APPDATA%\TJDesktopTimetable\`（`settings.json` / `timetable.json` / `credentials.json`），
-> 想彻底清干净就一并删掉。
+**Linux**
+
+1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.2.0-linux-x64.tar.gz`（自包含单文件：**不需要**预装 .NET）。
+2. `tar -xzf TJDesktopTimetable-v1.2.0-linux-x64.tar.gz -C ~/.local/opt/TJDesktopTimetable`。
+3. 运行 `~/.local/opt/TJDesktopTimetable/Tjt.Linux`。首次启动没有课表时会打开导入窗口。
+   > 依赖：X11 / XWayland，以及 `libICE` / `libSM`（Debian/Ubuntu：`sudo apt install libice6 libsm6`）；
+   > 中文课表需要 CJK 字体。详见下面 [Linux 版](#linux-版tjtlinux)。
+
+> Windows 卸载 = 删目录；数据在 `%APPDATA%\TJDesktopTimetable\`（`settings.json` / `timetable.json` / `credentials.json`），
+> 想彻底清干净就一并删掉。Linux 数据目录为 `~/.config/TJDesktopTimetable/`。
 > 开发机上重新构建后启动：`C:\tjt-tools\TjtApp.cmd`（普通窗口）/ `TjtApp-desktop.cmd`（显式贴桌面层）/ `TjtApp-nobackdrop.cmd`（跳过材质）。
 
 ## Linux 版（Tjt.Linux）
@@ -173,7 +183,7 @@ install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
 - 内置学期表只覆盖已知学期（当前 `122` / `124`）：更远的学期导入后课表正常，但顶部不显示"现在第几周"。
 - Acrylic 需要透明窗口，观感可能弱于 Mica。
 - 设置里的**周次过滤（只看单周 / 双周）尚未实现**；「显示周末」已在 v1.1.0 支持（外观页 / 挂件 `⋯` 菜单 / 托盘）。
-- 仅 Windows x64（Windows 10 2004+）。
+- 仅 x64：Windows 10 2004+ / linux-x64（Linux 版限制见上文「已知限制」）。
 
 ## 开发
 
@@ -201,6 +211,8 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
 - [x] **v1.0.0** · WinUI 3 主线正式发布（真实课表导入 / 四种材质 / 无边框缩放 / 托盘与设置 / 自包含发布）
 - [x] 内置登录窗口（WebView2 里走学校 SSO，旁路捕获课表接口响应）
 - [x] **v1.1.0** · 内置登录窗口 + 「显示周末」开关（外加遮挡误拖、表头呼吸位、窗口图标三项修复）
+- [x] **v1.2.0** · Linux 版（Avalonia 壳）首发；视觉收口（时间列 64 DIP / 深色色块提亮 / 名称按宽度截断）+
+      时间线按节次分段、画布贴顶、材质四档对齐 DeskBox
 - [ ] 新学期自动取校历（不再依赖内置学期表）
 - [ ] 周次过滤（只看单周 / 双周）
 - [ ] ICS / 图片导出
