@@ -367,7 +367,7 @@ public sealed partial class SettingsWindow : Window
         rows.Add(SettingsView.Row(
             "\uE790",
             "窗口材质",
-            "改动即时生效；Acrylic 两档都需要透明窗口，个别机型上观感可能与 Mica 接近；轻薄亚克力最透",
+            "改动即时生效；Acrylic 透的是窗口下方的内容（下面压着深色窗口时会显得暗），轻薄亚克力最透",
             material,
             dark));
 

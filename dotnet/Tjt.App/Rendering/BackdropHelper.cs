@@ -34,7 +34,11 @@ internal sealed class BackdropHelper : IDisposable
     private readonly Window _window;
     private readonly SystemBackdropConfiguration _configuration;
     private MicaController? _mica;
+    private DesktopAcrylicController? _acrylic;
     private bool _builtInFallback;
+
+    /// <summary>当前 Acrylic 是不是 Thin 档（主题切换 / 重绑时要按同一档给参数）。</summary>
+    private bool _acrylicThin;
 
     private BackdropHelper(Window window, SystemBackdropConfiguration configuration)
     {
@@ -116,8 +120,9 @@ internal sealed class BackdropHelper : IDisposable
     private static string Describe(MaterialMode mode) => mode switch
     {
         MaterialMode.Solid => "solid",
-        MaterialMode.AcrylicThin => "acrylic-thin-mica",
-        MaterialMode.Acrylic => "acrylic-mica",
+        MaterialMode.AcrylicThin when DesktopAcrylicController.IsSupported() => "acrylic-thin-controller",
+        MaterialMode.Acrylic when DesktopAcrylicController.IsSupported() => "acrylic-controller",
+        MaterialMode.AcrylicThin or MaterialMode.Acrylic => "acrylic-builtin-fallback",
         MaterialMode.MicaAlt when MicaController.IsSupported() => "mica-controller(alt)",
         MaterialMode.Mica when MicaController.IsSupported() => "mica-controller",
         MaterialMode.MicaAlt => "mica-builtin-fallback",
@@ -140,16 +145,20 @@ internal sealed class BackdropHelper : IDisposable
         {
             switch (mode)
             {
-                case MaterialMode.AcrylicThin or MaterialMode.Acrylic when MicaController.IsSupported():
-                    // 见 ApplyMicaTint 的说明：这台机器上只有 Mica 控制器真能出材质，
-                    // Acrylic 两档就用它的低 tint / 高亮度档来给"轻薄"观感。
-                    _mica = BindMica(_window, _configuration, MicaKind.Base, IsDark, mode);
-                    Mode = mode == MaterialMode.AcrylicThin ? "acrylic-thin-mica" : "acrylic-mica";
-                    break;
-
-                case MaterialMode.AcrylicThin:
-                case MaterialMode.Acrylic:
-                    Mode = "acrylic-unsupported";
+                case MaterialMode.AcrylicThin or MaterialMode.Acrylic when DesktopAcrylicController.IsSupported():
+                    // Acrylic 走控制器（Base / Thin 两档），参数按 DeskBox 的机制显式给（见 ApplyAcrylicTint）。
+                    // ⚠️ 验证时注意：Acrylic 透的是**窗口下面的内容**（不像 Mica 用壁纸色调）——
+                    // 窗口下面压着黑窗口时照出来就是灰黑，别据此判定"Acrylic 不生效"（实测踩过）。
+                    _acrylicThin = mode == MaterialMode.AcrylicThin;
+                    var acrylic = new DesktopAcrylicController
+                    {
+                        Kind = _acrylicThin ? DesktopAcrylicKind.Thin : DesktopAcrylicKind.Base,
+                    };
+                    ApplyAcrylicTint(acrylic, IsDark, _acrylicThin);
+                    acrylic.AddSystemBackdropTarget(_window.As<ICompositionSupportsSystemBackdrop>());
+                    acrylic.SetSystemBackdropConfiguration(_configuration);
+                    _acrylic = acrylic;
+                    Mode = _acrylicThin ? "acrylic-thin-controller" : "acrylic-controller";
                     break;
 
                 case MaterialMode.MicaAlt when MicaController.IsSupported():
@@ -163,13 +172,13 @@ internal sealed class BackdropHelper : IDisposable
                     break;
 
                 default:
-                    // Mica 控制器不可用：退回内置 backdrop（简单，但活跃状态交回系统）
-                    _window.SystemBackdrop = new MicaBackdrop
-                    {
-                        Kind = mode == MaterialMode.MicaAlt ? MicaKind.BaseAlt : MicaKind.Base,
-                    };
+                    // 控制器不可用：退回内置 backdrop（简单，但活跃状态交回系统）
+                    var acrylicFallback = mode is MaterialMode.Acrylic or MaterialMode.AcrylicThin;
+                    _window.SystemBackdrop = acrylicFallback
+                        ? new DesktopAcrylicBackdrop()
+                        : new MicaBackdrop { Kind = mode == MaterialMode.MicaAlt ? MicaKind.BaseAlt : MicaKind.Base };
                     _builtInFallback = true;
-                    Mode = "mica-builtin-fallback";
+                    Mode = acrylicFallback ? "acrylic-builtin-fallback" : "mica-builtin-fallback";
                     break;
             }
         }
@@ -177,6 +186,8 @@ internal sealed class BackdropHelper : IDisposable
         {
             _mica?.Dispose();
             _mica = null;
+            _acrylic?.Dispose();
+            _acrylic = null;
             Mode = $"none({ex.GetType().Name})";
         }
     }
@@ -190,7 +201,30 @@ internal sealed class BackdropHelper : IDisposable
         if (IsDark == dark) return;
         IsDark = dark;
         _configuration.Theme = dark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
+        // Acrylic 的浓淡随主题变（DeskBox 在主题签名变化时也是整份参数重发）；Mica 由配置对象自己跟主题走
+        if (_acrylic is not null) ApplyAcrylicTint(_acrylic, dark, _acrylicThin);
         AppLog.Line($"[backdrop] 材质主题 → {(dark ? "深色" : "浅色")}");
+    }
+
+    /// <summary>
+    /// Acrylic 两档（Base / Thin）的浓淡 —— 机制对齐 DeskBox：它把 <c>DesktopAcrylicController.Kind</c>
+    /// 分成 <c>Base</c> / <c>Thin</c>，并且**两档都显式设** <c>TintColor</c> / <c>FallbackColor</c> /
+    /// <c>TintOpacity</c> / <c>LuminosityOpacity</c>（Thin 明显更轻），而不是交给系统默认。
+    ///
+    /// <para>取值按它的插值机制取中档（材质强度 0.5）：Base 深色 tint 0.45 / 亮度 0.60（浅色 0.37 / 0.68）；
+    /// Thin 深色 0.23 / 0.36（浅色 0.18 / 0.43）。TintColor 与 FallbackColor 用深灰 <c>#202226</c>
+    /// （DeskBox 也就是这个基色再掺一点系统 accent）。</para>
+    ///
+    /// <para>⚠️ Acrylic 透的是**窗口下面的内容**：截图验证时窗口下面若压着黑窗口，照出来就是灰黑 ——
+    /// 别据此判定"Acrylic 没生效"（实测踩过这个坑，`.tools/shot-top.ps1` 现在会先报告下方窗口类名）。</para>
+    /// </summary>
+    private static void ApplyAcrylicTint(DesktopAcrylicController controller, bool dark, bool thin)
+    {
+        var tint = Windows.UI.Color.FromArgb(0xFF, 0x20, 0x22, 0x26);
+        controller.TintColor = tint;
+        controller.FallbackColor = tint;
+        controller.TintOpacity = (float)(thin ? (dark ? 0.23 : 0.18) : (dark ? 0.45 : 0.37));
+        controller.LuminosityOpacity = (float)(thin ? (dark ? 0.36 : 0.43) : (dark ? 0.60 : 0.68));
     }
 
     /// <summary>建 MicaController 并绑到窗口（默认物料的活跃策略由 <c>IsInputActive</c> 接管）。</summary>
@@ -243,10 +277,6 @@ internal sealed class BackdropHelper : IDisposable
         if (!dark) return;
         var (r, g, b, tint, luminosity) = mode switch
         {
-            // 轻薄档：tint 色偏暖（贴着壁纸的暖调），强度居中 —— 目标是 DeskBox 那两片面板的
-            // 「亮 + 暖」（实测 #5C3530），中性灰 tint 无论怎么调都只能做到「亮但发灰」
-            MaterialMode.AcrylicThin => ((byte)0x3A, (byte)0x2E, (byte)0x2A, 0.45f, 0.70f),
-            MaterialMode.Acrylic => ((byte)0x2E, (byte)0x26, (byte)0x24, 0.42f, 0.74f),
             MaterialMode.MicaAlt => ((byte)0x20, (byte)0x22, (byte)0x26, 0.55f, 0.53f),
             _ => ((byte)0x20, (byte)0x22, (byte)0x26, 0.25f, 0.86f),
         };
@@ -281,6 +311,8 @@ internal sealed class BackdropHelper : IDisposable
     {
         _mica?.Dispose();
         _mica = null;
+        _acrylic?.Dispose();
+        _acrylic = null;
         if (_builtInFallback)
         {
             _window.SystemBackdrop = null;
