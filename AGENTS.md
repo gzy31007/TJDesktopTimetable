@@ -299,12 +299,25 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     - 默认 → `#221F1F`
     - 只把 `TintOpacity` 改成 0.0 / 0.6（`TintColor` 仍默认透明）→ `#AA999A` / `#A39C9D`
       —— **没有颜色的 tint 层等于不存在**，光调不透明度越调越亮、方向反了；
-    - **`TintColor = #202020` + `TintOpacity = 0.6f` + `LuminosityOpacity = 0.5f`** → `#3A3333` / `#3F2926`，
-      与 DeskBox 面板的 `#3B2321~#4C2B29` 同一档 ✅（`ApplyMicaTint`，只作用于深色档）。
+    - **`TintColor = #202020` + `TintOpacity = 0.6f` + `LuminosityOpacity = 0.5f`** → `#3A3333` / `#3F2926`
+      （**这一档是凑出来的，方向搞反了，见下面的修正**）。
     - 属性类型是 **float**（写 `0.0` 会 `CS0664`）。
+  - ③ **二次修正（2026-09-16 晚，用户："深色主题下 mica 的背景现在有点亮"）—— 照 DeskBox 的机制重设**。
+    读 `.refs/DeskBox`（只取事实，不抄实现）得到的关键事实：
+    - **Mica Base 与 BaseAlt 的档位是相反的**：`CalculateMica` 里 Base 走 `useAlt=false` 分支 ——
+      **低 tint + 高亮度**（tint 0.04→0.46、luminosity 深色 0.78→0.94，两者都按"材质强度"插值）；
+      **Alt** 才是中等 tint（0.28→0.82）+ 中亮度（0.34→0.72）。
+    - **TintColor 不是壁纸色**：深色基色 `#202226` 只掺约 7% 系统 accent（`0.07 × intensity`）。
+    - DeskBox 还把 `MicaController.FallbackColor` 显式设过（不可用时的兜底色），我们**没设**（保持系统默认）。
+    - 我上一轮给的 tint 0.6 + luminosity 0.5 正好和 Base 档**反着来** → tint 层（中性灰）占大头，
+      背景"又灰又亮"（用户截图采样 `#4F3430` = 79,52,48，G/B 比 DeskBox 高 20+）。
+    - **现行取值**（`ApplyMicaTint`，只作用于深色档）：Base → `TintColor #202226` + `TintOpacity 0.25f`
+      + `LuminosityOpacity 0.86f`；BaseAlt → 0.55f / 0.53f。实测同区域采样 **`#461F1A` (70,31,26)**
+      vs DeskBox 面板 **`#4B241F` (75,36,31)** —— 同一档且不再发灰。
   - 对比方法（可复用）：拿用户的桌面截图直接采样像素 —— DeskBox 面板空白处 vs 挂件 gutter 空白处，
     同图同区域最公平；只截自己窗口容易把"位置不同导致壁纸色不同"误判成材质问题（先把窗口
     `SetWindowPos` 挪到面板同一区域再比，`.tools/shot-top.ps1 -X -Y`）。
+    取中位数色、并**过滤掉文字与网格线像素**（亮度 >115 / <18），否则采样会被内容带偏。
   - 浅色档**没动**（默认值本身不暗，实测 `#F9F1EF`）；Acrylic 也没做同款对齐。
 - **浅色模式"完全不是浅色"——材质主题没接主题（2026-09-15 结案）**：
   - **症状（真机采样）**：`--dark` 与 `--light` 两种模式的**底色像素一模一样**（顶部都是 `#261E1C`），

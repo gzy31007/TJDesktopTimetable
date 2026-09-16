@@ -197,7 +197,7 @@ internal sealed class BackdropHelper : IDisposable
     private static MicaController BindMica(Window window, SystemBackdropConfiguration configuration, MicaKind kind, bool dark)
     {
         var controller = new MicaController { Kind = kind };
-        ApplyMicaTint(controller, dark);
+        ApplyMicaTint(controller, dark, kind);
         // Window 的实现类型不是投影后的接口，必须用 WinRT 的 As<> 转换
         controller.AddSystemBackdropTarget(window.As<ICompositionSupportsSystemBackdrop>());
         controller.SetSystemBackdropConfiguration(configuration);
@@ -205,28 +205,34 @@ internal sealed class BackdropHelper : IDisposable
     }
 
     /// <summary>
-    /// Mica 的浓淡（深色主题）—— 对齐 DeskBox 的"无论是否选中都透亮"。
+    /// Mica 的浓淡（深色主题）—— 机制对齐 DeskBox（GPL 只读参考，只取"用哪两个参数、朝哪个方向"这类事实，
+    /// 具体数值由本机采样迭代定）。
     ///
-    /// <para>WinUI 的默认 <c>TintOpacity = 0.8</c> 会把阴影层压得很实：真机实测（2560×1600 深色壁纸，
-    /// 窗口摆在 DeskBox 面板同一区域）背景是 <c>#221F1F</c>（纯暗灰，看不出壁纸色），而 DeskBox 的面板是
-    /// <c>#3B2321~#4C2B29</c>（暗，但壁纸的暖色透得出来）。变体矩阵实测：</para>
+    /// <para><b>关键事实：Mica Base 与 BaseAlt 的档位是相反的</b> —— DeskBox 里
+    /// Base 是**低 tint + 高亮度**（tint 0.04→0.46、luminosity 深色 0.78→0.94，按"材质强度"插值），
+    /// Alt 才是中等 tint（0.28→0.82）+ 中亮度（0.34→0.72）；它的 tint 色也**不是壁纸色**，
+    /// 而是深灰基色（深色 `#202226`）只掺约 7% 系统 accent。</para>
+    ///
+    /// <para><b>2026-09-16 修正</b>：先前我们给的是 tint 0.6 + luminosity 0.5（自己按采样凑的），
+    /// 方向与 DeskBox 的 Base 档正好相反 —— tint 层（中性灰）占大头，于是背景**又灰又亮**
+    /// （用户实测："深色主题下 mica 的背景现在有点亮"）。现在按同机制取：</para>
     /// <list type="bullet">
-    /// <item><description><c>TintOpacity = 0.8</c>（WinUI 默认，且 TintColor 未设）→ <c>#221F1F</c>，太闷；</description></item>
-    /// <item><description>只把 <c>TintOpacity</c> 调到 0.0 / 0.6（TintColor 仍是默认的透明）→ <c>#AA999A</c> / <c>#A39C9D</c>，
-    /// 透过头 —— 说明**没有颜色的 tint 层等于不存在**，光调不透明度不管用；</description></item>
-    /// <item><description><b><c>TintColor = #202020</c> + <c>TintOpacity = 0.6</c></b> → 与 DeskBox 的 <c>#3B~#4C</c> 同一档。</description></item>
+    /// <item><description><b>Base（默认）</b>：<c>TintOpacity = 0.25f</c>（少压色）+ <c>LuminosityOpacity = 0.86f</c>
+    /// （让壁纸模糊层唱主角）；</description></item>
+    /// <item><description><b>BaseAlt</b>：tint 0.55 / 亮度 0.53（Alt 本来就是"更实、分层更明显"那一档）；</description></item>
+    /// <item><description>TintColor 深色 <c>#202226</c>（深灰，与 DeskBox 的基色同量级）。</description></item>
     /// </list>
-    /// <para>亮度层留在 0.5（WinUI 默认）：Mica 的"壁纸色调"就是这一层，不动它才不至于变成另一种材质。</para>
     ///
     /// <para>浅色档**保持 WinUI 默认**：浅色下默认值本身不暗（实测底色 `#F9F1EF`），没有一并调
     /// （避免顺手改掉没验证过的观感）。</para>
     /// </summary>
-    private static void ApplyMicaTint(MicaController controller, bool dark)
+    private static void ApplyMicaTint(MicaController controller, bool dark, MicaKind kind)
     {
         if (!dark) return;
-        controller.TintColor = Windows.UI.Color.FromArgb(0xFF, 0x20, 0x20, 0x20);
-        controller.TintOpacity = 0.6f;
-        controller.LuminosityOpacity = 0.5f;
+        var alt = kind == MicaKind.BaseAlt;
+        controller.TintColor = Windows.UI.Color.FromArgb(0xFF, 0x20, 0x22, 0x26);
+        controller.TintOpacity = alt ? 0.55f : 0.25f;
+        controller.LuminosityOpacity = alt ? 0.53f : 0.86f;
     }
 
     /// <summary>
