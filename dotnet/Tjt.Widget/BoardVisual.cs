@@ -377,10 +377,19 @@ public static class BoardVisualBuilder
     }
 
     /// <summary>
-    /// "当前时间线"距网格顶部的偏移；不在任何节次范围内（或没有节次）时返回 <c>null</c>。
+    /// "当前时间线"距网格顶部的偏移；早于首节开始 / 晚于末节结束（或没有节次表）时返回 <c>null</c>。
     ///
-    /// 算式与渲染层 <c>nowFraction</c> 一致：按"首节开始 → 末节结束"线性插值，
-    /// 而不是按节次分段 —— 课间时间也照样平滑推进。
+    /// <para><b>按节次分段（2026-09-16 修，不再线性插值）</b>：旧实现按"首节开始 → 末节结束"在整张网格上
+    /// 线性插值，课间 / 午休 / 晚饭时段线会继续往前爬 —— 实测 12:30（午休）落进第 4 行内、
+    /// 13:00 落进第 5 行（13:30 才上课）。用户看到的就是"下课休息时线还停在上课时间"。现在：</para>
+    /// <list type="bullet">
+    /// <item><description><b>节内</b>：按**该节自己的**起止时间在行内插值（行顶 + 比例 × 行高）；</description></item>
+    /// <item><description><b>课间</b>：钉在**刚上完那一节的末尾**（该行底边），表示"课间休息中"；</description></item>
+    /// <item><description><b>全部下课之后 / 上课之前</b>：不画（<c>null</c>）。</description></item>
+    /// </list>
+    ///
+    /// <para>行是连续的网格，所以"上一节末尾"与"下一节行顶"是同一个 Y —— 课间与下一节开始的线位置重合，
+    /// 差别在于课间时线已经停住、不再随分钟推进。</para>
     /// </summary>
     internal static double? NowLineTop(BoardState state, Tjt.Core.BoardGeometry geometry, int? nowMinutes)
     {
@@ -388,12 +397,33 @@ public static class BoardVisualBuilder
         ArgumentNullException.ThrowIfNull(geometry);
         if (nowMinutes is not { } minutes) return null;
         if (state.Rows.Count == 0) return null;
-        var first = Time.ToMinutes(state.Rows[0].Begin);
-        var last = Time.ToMinutes(state.Rows[^1].End);
-        if (first is null || last is null || last <= first) return null;
-        if (minutes < first.Value || minutes > last.Value) return null;
-        var gridHeight = geometry.RowHeight * state.Rows.Count;
-        var fraction = (double)(minutes - first.Value) / (last.Value - first.Value);
-        return geometry.HeaderHeight + (fraction * gridHeight);
+
+        var firstBegin = Time.ToMinutes(state.Rows[0].Begin);
+        var lastEnd = Time.ToMinutes(state.Rows[^1].End);
+        if (firstBegin is null || lastEnd is null || lastEnd <= firstBegin) return null;
+        if (minutes < firstBegin.Value || minutes > lastEnd.Value) return null;
+
+        double? previousEndTop = null;
+        for (var index = 0; index < state.Rows.Count; index += 1)
+        {
+            var begin = Time.ToMinutes(state.Rows[index].Begin);
+            var end = Time.ToMinutes(state.Rows[index].End);
+            if (begin is null || end is null || end <= begin) continue;
+
+            // 节内：按这一节自己的起止时间在行内插值
+            if (minutes >= begin.Value && minutes <= end.Value)
+            {
+                var fraction = (double)(minutes - begin.Value) / (end.Value - begin.Value);
+                return geometry.HeaderHeight + ((index + fraction) * geometry.RowHeight);
+            }
+
+            // 已经上完的节：记住它的底边，课间就钉在这里
+            if (end.Value <= minutes)
+            {
+                previousEndTop = geometry.HeaderHeight + ((index + 1) * geometry.RowHeight);
+            }
+        }
+
+        return previousEndTop;
     }
 }

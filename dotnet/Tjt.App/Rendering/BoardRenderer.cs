@@ -50,9 +50,16 @@ internal static class BoardRenderer
         var canvas = BuildCanvas(visual, dark);
         // 网格可能比可用空间大（列宽或行高到了下限）—— 用 ScrollViewer 兜住，
         // 与渲染层 `.f-scroll` 的表现一致；装得下时滚动条不会出现。
+        //
+        // ⚠️ `VerticalContentAlignment = Top` 不能省：ScrollViewer 默认把**装得下的内容垂直居中**，
+        // 于是画布 < 视口时（例如窗口 1100×760：画布 612 dip、视口 726 dip）上下各留
+        // (726-612)/2 = 57 dip 空白，表头离头部条 57 dip —— 顶部那 6 dip 呼吸位的设计被架空，
+        // 真机截图一眼可见"课表浮在中间"。贴顶后呼吸位才真的是 6 dip。
         var scroller = new ScrollViewer
         {
             Content = canvas,
+            VerticalContentAlignment = VerticalAlignment.Top,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
             HorizontalScrollBarVisibility = visual.NeedsHorizontalScroll
                 ? ScrollBarVisibility.Auto
                 : ScrollBarVisibility.Disabled,
@@ -305,6 +312,11 @@ internal static class BoardRenderer
         {
             Width = visual.CanvasWidth,
             Height = visual.CanvasHeight,
+            // ⚠️ 显式 Top/Left 对齐：Canvas 有固定尺寸，而默认的 Stretch 只是"占满槽位"——
+            // 尺寸小于槽位时它会被**居中**（真机实测：1100×760 的窗口里画布 612 dip、槽位 726 dip，
+            // 于是整块课表下移 57 dip，表头离头部条 57 dip，顶部那 6 dip 呼吸位等于白设）。
+            VerticalAlignment = VerticalAlignment.Top,
+            HorizontalAlignment = HorizontalAlignment.Left,
             Background = new SolidColorBrush(Colors.Transparent),
         };
 

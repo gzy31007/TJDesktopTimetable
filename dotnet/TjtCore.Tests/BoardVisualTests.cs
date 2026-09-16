@@ -297,13 +297,33 @@ public class BoardVisualTests
     }
 
     [Fact]
-    public void 当前时间线按首末节次线性插值_范围外不画()
+    public void 当前时间线按节次分段_课间钉在上一节末尾_范围外不画()
     {
-        var visual = Visual(1000, nowMinutes: 8 * 60); // 第 1 节起点
-        Assert.Equal(34d, visual.NowLineTop!.Value, 6); // 网格顶部（顶部呼吸位 6 + 表头 28）
+        // 网格顶 = 顶部呼吸位 6 + 表头 28 = 34；行高 52（TestTerm 用同济节次表，11 行）
+        const double top = 34d;
 
-        visual = Visual(1000, nowMinutes: (8 * 60) + 45); // 第 1 节终点，仍在网格内
-        Assert.NotNull(visual.NowLineTop);
+        // 第 1 节 08:00-08:45 起点 → 网格顶
+        Assert.Equal(top, Visual(1000, nowMinutes: 8 * 60).NowLineTop!.Value, 6);
+
+        // 节内按**该节自己的**起止时间插值：08:22 是第 1 节的 22/45 处
+        Assert.Equal(top + (52d * 22d / 45d), Visual(1000, nowMinutes: (8 * 60) + 22).NowLineTop!.Value, 6);
+
+        // 课间 09:40 / 09:50（第 2 节 08:50-09:35 之后、第 3 节 10:00 之前）→ 钉在第 2 行底边
+        var afterSecond = top + (2d * 52d);
+        Assert.Equal(afterSecond, Visual(1000, nowMinutes: (9 * 60) + 40).NowLineTop!.Value, 6);
+        Assert.Equal(afterSecond, Visual(1000, nowMinutes: (9 * 60) + 50).NowLineTop!.Value, 6);
+
+        // 午休 12:30（第 4 节 10:50-11:35 之后、第 5 节 13:30 之前）→ 第 4 行底边。
+        // 旧实现（整张网格线性插值）这里算成"第 4 行内 0.83"、13:00 更会爬进第 5 行 —— 就是被修掉的行为。
+        var afterFourth = top + (4d * 52d);
+        Assert.Equal(afterFourth, Visual(1000, nowMinutes: (12 * 60) + 30).NowLineTop!.Value, 6);
+
+        // 第 5 节开始的那一刻位置相同（行是连续网格），此后才在行内继续推进
+        Assert.Equal(afterFourth, Visual(1000, nowMinutes: (13 * 60) + 30).NowLineTop!.Value, 6);
+        Assert.True(Visual(1000, nowMinutes: (13 * 60) + 40).NowLineTop!.Value > afterFourth);
+
+        // 末节 20:10-20:55 结束前仍在网格内
+        Assert.NotNull(Visual(1000, nowMinutes: (20 * 60) + 54).NowLineTop);
 
         // 早于首节 / 晚于末节 / 未给时间 → 不画
         Assert.Null(Visual(1000, nowMinutes: 6 * 60).NowLineTop);

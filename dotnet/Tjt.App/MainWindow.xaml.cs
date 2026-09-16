@@ -377,7 +377,8 @@ public sealed partial class MainWindow : Window
             board,
             widthDip,
             IsDark(),
-            Tjt.Core.Time.LocalMinutesOfDay(),
+            // `--now HH:mm` 覆盖"当前时刻"（只影响当前时间线）；不传就用系统时钟
+            _options.NowMinutes ?? Tjt.Core.Time.LocalMinutesOfDay(),
             minCellWidth: 72,
             availableHeight: heightDip);
 

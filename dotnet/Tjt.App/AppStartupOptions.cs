@@ -7,6 +7,11 @@ namespace Tjt.App;
 /// 显示周末两列；<c>null</c> = 用设置里的值（默认 true）。
 /// 只影响本次运行、不落盘，供验收脚本跑"隐藏周末"那种布局。
 /// </param>
+/// <param name="NowMinutes">
+/// 覆盖"当前时刻"（<c>--now HH:mm</c>，如 <c>--now 12:30</c>），只影响**当前时间线**的位置；
+/// <c>null</c> = 用系统时钟。存在的理由：时间线的几何取决于真实时间，而课间 / 午休那些分支
+/// 不可能等到点上再去截图验证（见 <c>BoardVisualTests</c> 的同名用例）。
+/// </param>
 /// <param name="NoBackdrop">跳过系统材质（无 GPU 的 CI runner 上 D3D 合成会挂住）。</param>
 /// <param name="LogPath">日志文件路径（WinExe 不附加控制台，CI 只能靠文件拿输出）。</param>
 /// <param name="FixturePath">显式指定要导入的课表 JSON；为空时按约定位置探测。</param>
@@ -35,6 +40,7 @@ internal sealed record AppStartupOptions(
     bool Smoke = false,
     bool? DesktopLayer = null,
     bool? Weekend = null,
+    int? NowMinutes = null,
     bool NoBackdrop = false,
     string? LogPath = null,
     string? FixturePath = null,
@@ -52,7 +58,8 @@ internal sealed record AppStartupOptions(
     ///
     /// 支持的形态：<c>--smoke</c>、<c>--desktop-layer</c> / <c>--no-desktop-layer</c>、<c>--weekend</c> / <c>--no-weekend</c>、<c>--no-backdrop</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>（不传就用窗口系统给的默认尺寸，传了就精确设成它，
-    /// 便于验证自适应）、<c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>、
+    /// 便于验证自适应）、<c>--now HH:mm</c>（覆盖"当前时刻"，只为验证时间线，见 <c>NowMinutes</c>）、
+    /// <c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>、
     /// <c>--login</c>、<c>--login-check &lt;url&gt;</c>。
     /// 未知参数被忽略（不崩在 CLI 上）。
     /// </summary>
@@ -61,6 +68,7 @@ internal sealed record AppStartupOptions(
         var smoke = false;
         bool? desktopLayer = null;
         bool? weekend = null;
+        int? nowMinutes = null;
         var noBackdrop = false;
         string? logPath = null;
         var dark = (bool?)null;
@@ -95,6 +103,11 @@ internal sealed record AppStartupOptions(
                 settingsPage = page;
                 i += 1;
             }
+            else if (Matches(arg, "now") && i + 1 < args.Length && Tjt.Core.Time.ToMinutes(args[i + 1]) is { } minutes)
+            {
+                nowMinutes = minutes;
+                i += 1;
+            }
             else if (Matches(arg, "size") && i + 1 < args.Length && TryParseSize(args[i + 1], out var w, out var h))
             {
                 width = w;
@@ -107,6 +120,7 @@ internal sealed record AppStartupOptions(
             Smoke: smoke,
             DesktopLayer: desktopLayer,
             Weekend: weekend,
+            NowMinutes: nowMinutes,
             NoBackdrop: noBackdrop,
             LogPath: logPath,
             FixturePath: fixture,

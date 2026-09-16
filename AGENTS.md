@@ -386,8 +386,8 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   - 自适应规则：**横向**保持最小列宽 72（沿用渲染层 `minCellWidth`），装不下就横向滚动；
     **纵向**把行高压到刚好铺满（下限 34），再装不下才纵向滚动 —— 也就是缩窗口先压行高、再出滚动条，
     不会把格子压成一条缝。实测：`--size 820x640 → rowH=52 无滚动`、`--size 760x420 → rowH=37 + 纵向滚动`。
-  - `--size WxH` 会真的改窗口尺寸（专门为验证自适应加的）；`--fixture/--log/--no-backdrop/--desktop-layer/--weekend`
-    见 `AppStartupOptions`。
+  - `--size WxH` 会真的改窗口尺寸（专门为验证自适应加的）；`--fixture/--log/--no-backdrop/--desktop-layer/--weekend/--now HH:mm`
+    见 `AppStartupOptions`（`--now` 只覆盖时间线用的「当前时刻」，为的是能验课间 / 午休那几档）。
 - **显示周末开关（2026-09-15 完成）**：外观页原先那个 disabled 占位开关做成了真的，并同步到挂件 `⋯` 菜单与托盘。
   - **口径**：`WidgetSettings.ShowWeekend`（默认 true）→ `Layout.BuildBoard` 的 `BoardOptions.ShowWeekend`。
     关掉后只生成周一到周五 **5 列**，周末的课**直接不占列**（被 `visibleDays` 过滤，且不计入"被周次过滤隐藏"
@@ -410,8 +410,28 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   - **左侧时间标签改成居中**（原来是右对齐）：行高被压小时字号跟着变小（`RowHeight × 0.24`），
     右对齐会让"文字与窗口左边缘的空白"随字号变小而**变大** —— 这正是用户看到的现象。
     现在 `Width = GutterWidth - 8`、`Left = 4`（左右对称居中，右侧 8dip 留给"正在上"的竖条标记）。
+  - **⚠️ 网格 Canvas 必须显式 `VerticalAlignment = Top`（2026-09-16 补）**：`BoardRenderer` 的画布是固定尺寸
+    （`CanvasWidth/CanvasHeight`），而默认的 `Stretch` 在"槽位比它大"时会把它**居中** ——
+    真机实测 1100×760 的窗口里画布 612 dip、槽位 726 dip，整块课表下移 57 dip，表头离头部条 57 dip，
+    上面那条 6 dip 呼吸位等于白设（截图一眼看到"课表浮在中间"）。
+    只设 `ScrollViewer.VerticalContentAlignment = Top` **不够**（真机验证过：位置一点没变），
+    要对齐的是 Canvas 自己。验证法：截一张大窗口图，量 gutter 第一行标签的 y —— 贴顶时 ≈ 91 dip。
   - 教训：这类"边距/留白"问题的根因经常是**对齐方式 × 字号自适应**的组合，而不是列宽本身；
     只调列宽（gutter）会改掉几何基准、牵动全部视觉断言，代价大且治不了根。
+- **当前时间线按节次分段（2026-09-16 修：课间不再"假装还在上课"）** —— 用户看到"下课休息时线仍在上课位置"，
+  问是 bug 还是有意为之：**是有意的老行为**（`NowLineTop` 原先照抄 Electron 渲染层，按"首节开始 → 末节结束"
+  在整张网格上**线性插值**，注释里就写着"课间时间也照样平滑推进"），但它确实不准：
+  实测 12:30（午休）会落在第 4 行内 0.83、**13:00 更会爬进第 5 行**（13:30 才上课）、18:00 落进第 9 行。
+  - **现行规则**（`Tjt.Widget/BoardVisual.cs` 的 `NowLineTop`，两端共用，改这里就行）：
+    ① **节内**按**该节自己的**起止时间在行内插值（行顶 + 比例 × 行高）；② **课间**钉在**刚上完那一节的末尾**
+    （该行底边）；③ 早于首节 / 晚于末节 → 不画。行是连续网格，所以"上一节末尾"与"下一节行顶"是同一个 Y。
+  - 单测 `BoardVisualTests.当前时间线按节次分段_课间钉在上一节末尾_范围外不画` 钉住四个点：
+    09:40/09:50 课间 → 第 2 行底、12:30 午休 → 第 4 行底、13:30 = 同一位置、13:40 才 > 该位置、20:56 不画。
+  - **诊断开关 `--now HH:mm`**（`AppStartupOptions.NowMinutes` → `MainWindow.Render`）：覆盖"当前时刻"，
+    只影响时间线位置。**加它的理由**：时间线的几何取决于真实时间，课间/午休那些分支不可能等到点上再截图，
+    有了它才能真机验（`.tools/shot-top.ps1 -Now 13:00`）。
+  - 真机验证（1100×760 窗口，从截图里按强调色找线、量 y）：09:50 → 172.7 dip（期望 172）、
+    12:30 → 276.7（276）、13:40 → 288.0（287.6）、20:56 → 线消失（命中像素 289 → 75）。
 - **时间列宽 / 深色色块 / 名称截断（2026-09-15 三项视觉调整）**：都落在视觉真源里，
   期望值同步到 `BoardVisualTests` / `LayoutTests` / `CollisionE2ETests`（**改这三项 = 改 4 个文件 + 3 份测试**）。
   - **左侧时间列 74 → 64 DIP**（`TjtCore/Layout.DefaultGeometry`）：标签按 `GutterWidth - 8` 居中，
