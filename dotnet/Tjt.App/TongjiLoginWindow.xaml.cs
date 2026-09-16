@@ -7,23 +7,40 @@ using Tjt.App.Data;
 using Tjt.App.Rendering;
 using Tjt.App.Win32;
 using Tjt.Core;
+using Tjt.Core.Adapters;
 using Windows.Graphics;
 using Windows.Storage.Streams;
 using WinRT.Interop;
 
 namespace Tjt.App;
 
+/// <summary>内置登录窗口这次服务哪所学校（决定起始页、接口判定与捕获策略）。</summary>
+internal enum LoginSchool
+{
+    /// <summary>同济 1 系统：粘的/拦到的那条课表请求原样解析。</summary>
+    Tongji,
+
+    /// <summary>交大「学在交大」：页面按周拉取，我们改用登录态取整学期课表 + 教务日历。</summary>
+    Sjtu,
+}
+
 /// <summary>
-/// 内置登录窗口：在应用自己的 WebView2 里打开 <c>1.tongji.edu.cn</c>，用户走学校自己的
-/// 统一身份认证（含短信增强），**课表页那条接口的响应由我们在一旁接住**。
+/// 内置登录窗口：在应用自己的 WebView2 里打开学校网站，用户走学校自己的统一身份认证，
+/// **课表页那条接口的响应由我们在一旁接住**。
 ///
-/// <para><b>为什么不自己发登录请求</b>：1 系统的登录走统一身份认证，带短信增强；
-/// 课表页那条接口还要 <c>studentCode</c>（前端加密的 uid，算法在 bundle 里、随发版变）。
-/// 让页面自己去登录、自己去发请求，我们只做旁观者 —— 既不接触密码，也不猜加密算法。</para>
+/// <para>两所学校共用这一个窗口，差别收在 <see cref="LoginSchool"/> 上：</para>
+/// <list type="bullet">
+///   <item><b>同济（1 系统）</b>：课表页那条接口要 <c>studentCode</c>（前端加密的 uid，算法在 bundle 里、
+///   随发版变）—— 所以只做旁观者，页面自己发请求，我们接住响应。</item>
+///   <item><b>交大（学在交大）</b>：登录是标准 jAccount OAuth2，课表接口只需要 <c>year</c>/<c>semester</c>
+///   两个明文参数 —— 所以拿到页面自己的 cookie 后，我们**主动**取整学期课表与教务日历
+///   （页面默认的按周接口不带周次信息，见 <see cref="SjtuWebCapture"/>）。</item>
+/// </list>
 ///
 /// <para><b>为什么用独立 user data folder</b>：会话数据放在
 /// <c>%APPDATA%\TJDesktopTimetable\WebView2</c>，与用户自己的 Edge / 其它 WebView2 应用完全隔离；
-/// 顺带让"下次打开还在登录态"成为自然结果（cookie 存在这个 profile 里）。</para>
+/// 顺带让"下次打开还在登录态"成为自然结果（cookie 存在这个 profile 里）。两校共用同一个 profile
+/// （域名不同，cookie 互不干扰）。</para>
 ///
 /// <para><b>安全</b>：cookie 只在内存里过一遍（拼请求头），**任何日志都不打印它的内容**；
 /// 日志只记"撞上了哪条接口、多少字节、学期 id"。</para>
@@ -36,26 +53,39 @@ internal sealed partial class TongjiLoginWindow : Window
     private readonly ImportService _imports;
     private readonly Action<bool, string> _finished;
     private readonly string _startUrl;
+    private readonly LoginSchool _school;
+    private readonly string? _sjtuBaseUrl;
 
     private WebView2? _view;
     private TextBlock? _status;
     private bool _done;
     private bool _webViewReady;
 
+    /// <summary>交大那条路的"只抓一次"闸门（页面会连发几条接口，别重复导入）。</summary>
+    private bool _sjtuCapturing;
+
     /// <summary>构造登录窗口。</summary>
     /// <param name="imports">导入编排（捕获成功后就落到它手里）。</param>
     /// <param name="dark">当前是否深色主题（只影响这一窗的主题）。</param>
     /// <param name="finished">结束回调（成功 / 关闭都会调一次，<b>只调一次</b>）。</param>
-    /// <param name="startUrl">初始导航目标；<c>null</c> = 1 系统首页（验收脚本会指向本地合成服务）。</param>
+    /// <param name="school">服务哪所学校（决定起始页与捕获策略）。</param>
+    /// <param name="startUrl">初始导航目标；<c>null</c> = 该校的默认入口（验收脚本会指向本地合成服务）。</param>
+    /// <param name="sjtuBaseUrl">
+    /// 覆盖交大接口主机（<c>--sjtu-host</c>，只给验收脚本用）；<c>null</c> = 真 <c>j.sjtu.edu.cn</c>。
+    /// </param>
     internal TongjiLoginWindow(
         ImportService imports,
         bool dark,
         Action<bool, string> finished,
-        string? startUrl = null)
+        LoginSchool school = LoginSchool.Tongji,
+        string? startUrl = null,
+        string? sjtuBaseUrl = null)
     {
         _imports = imports ?? throw new ArgumentNullException(nameof(imports));
         _finished = finished ?? throw new ArgumentNullException(nameof(finished));
-        _startUrl = string.IsNullOrWhiteSpace(startUrl) ? TongjiWebCapture.TongjiOrigin : startUrl.Trim();
+        _school = school;
+        _sjtuBaseUrl = sjtuBaseUrl;
+        _startUrl = string.IsNullOrWhiteSpace(startUrl) ? DefaultStartUrl(school) : startUrl.Trim();
 
         InitializeComponent();
         SystemBackdrop = new MicaBackdrop();
@@ -74,6 +104,11 @@ internal sealed partial class TongjiLoginWindow : Window
     /// <summary>用户点「取消」或直接关窗时，把窗口关掉（<see cref="Complete"/> 只认第一次）。</summary>
     private void CloseWindow() => Close();
 
+    /// <summary>该校的默认入口：同济是 1 系统首页，交大直接进课表页（登录后页面自己会拉课表）。</summary>
+    private static string DefaultStartUrl(LoginSchool school) => school == LoginSchool.Sjtu
+        ? SjtuTerms.SjtuOrigin + "/app/ui/timetable"
+        : TongjiWebCapture.TongjiOrigin;
+
     /* ------------------------------------------------------------------ 界面 */
 
     private Grid BuildLayout()
@@ -83,18 +118,22 @@ internal sealed partial class TongjiLoginWindow : Window
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+        var sjtu = _school == LoginSchool.Sjtu;
         var header = new StackPanel { Spacing = 4, Padding = new Thickness(16, 14, 16, 10) };
         header.Children.Add(new TextBlock
         {
-            Text = "登录 1 系统，然后点开「我的课表」",
+            Text = sjtu ? "登录交大「学在交大」" : "登录 1 系统，然后点开「我的课表」",
             FontSize = 14,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         header.Children.Add(new TextBlock
         {
-            Text =
-                "下面就是学校自己的登录页面（统一身份认证，短信验证也在这里完成）—— 本应用不接触你的密码。\n"
-                + "课表一加载出来，程序会自动抓取并导入，然后这个窗口自己关上；没抓到就正常关掉、什么都不会改。",
+            Text = sjtu
+                ? "下面就是交大自己的登录页面（jAccount）—— 本应用不接触你的密码。\n"
+                  + "登录后课表页会自己加载；程序随即用这份登录态取一次整学期课表与教务日历，"
+                  + "拿到就自动导入并关窗，没拿到就正常关掉、什么都不会改。"
+                : "下面就是学校自己的登录页面（统一身份认证，短信验证也在这里完成）—— 本应用不接触你的密码。\n"
+                  + "课表一加载出来，程序会自动抓取并导入，然后这个窗口自己关上；没抓到就正常关掉、什么都不会改。",
             FontSize = 12,
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
@@ -206,7 +245,7 @@ internal sealed partial class TongjiLoginWindow : Window
     }
 
     /// <summary>
-    /// 页面每收到一个响应都会到这里。只看课表接口那几条 —— 认出来就把响应体读走。
+    /// 页面每收到一个响应都会到这里。只看目标学校课表相关的那几条 —— 认出来就把响应体读走。
     /// </summary>
     private async void OnResponseReceived(CoreWebView2 sender, CoreWebView2WebResourceResponseReceivedEventArgs args)
     {
@@ -215,6 +254,19 @@ internal sealed partial class TongjiLoginWindow : Window
             if (_done) return;
 
             var url = args.Request.Uri;
+
+            // 交大：页面拉到课表（或日历）说明登录态已就绪 —— 不读它的响应体，
+            // 而是用同一份 cookie 去取"整学期课表 + 教务日历"（按周响应没有周次信息）
+            if (_school == LoginSchool.Sjtu)
+            {
+                if (!SjtuWebCapture.IsTimetableEndpoint(url) && !SjtuWebCapture.IsCalendarEndpoint(url)) return;
+
+                AppLog.Line($"[login] 撞上交大接口：{SjtuWebCapture.EndpointLabel(url)}（HTTP {args.Response.StatusCode}）");
+                SetStatus("登录成功，正在用这份登录态取整学期课表…");
+                await CaptureSjtuAsync(url);
+                return;
+            }
+
             if (!TongjiWebCapture.IsEndpoint(url)) return;
 
             AppLog.Line($"[login] 撞上课表接口：{TongjiWebCapture.EndpointLabel(url)}（HTTP {args.Response.StatusCode}）");
@@ -313,6 +365,87 @@ internal sealed partial class TongjiLoginWindow : Window
 
         Succeed(url, outcome.TimetableText, outcome.TermId);
         return true;
+    }
+
+    /// <summary>
+    /// 交大：用页面自己的 cookie **主动**取一次整学期课表 + 教务日历，然后导入。
+    ///
+    /// <para>为什么要主动取而不是像同济那样接住页面的响应：交大课表页按周拉取，
+    /// 那条响应里的 <c>time</c> 是 <c>null</c>（没有"上哪些周"），照它建挂件只会剩本周有课。
+    /// 整学期接口 <c>listBySemester</c> 只要 <c>year</c>/<c>semester</c> 两个明文参数，
+    /// 不存在同济那种"前端加密 uid"的障碍。三条请求与解析全在 <see cref="SjtuFetcher"/>。</para>
+    ///
+    /// <para>页面一次加载会连发好几条接口，用 <see cref="_sjtuCapturing"/> 保证只抓一次。</para>
+    /// </summary>
+    private async Task CaptureSjtuAsync(string triggerUrl)
+    {
+        if (_sjtuCapturing || _done) return;
+        if (_view?.CoreWebView2 is not { } core) return;
+
+        _sjtuCapturing = true;
+        try
+        {
+            var cookies = await core.CookieManager.GetCookiesAsync(triggerUrl);
+            var header = TongjiWebCapture.CookieHeader(
+                triggerUrl,
+                cookies.Select(cookie => new WebCookie(cookie.Name, cookie.Value, cookie.Domain, cookie.Path)));
+
+            if (header.Length == 0)
+            {
+                SetStatus("还没读到交大的登录 cookie：请先在这个窗口里完成 jAccount 登录，再打开课表页。");
+                _sjtuCapturing = false;
+                return;
+            }
+
+            // 只记条数，不记内容
+            AppLog.Line($"[login] 交大：用 {cookies.Count} 条 cookie 取整学期课表（触发自 {SjtuWebCapture.EndpointLabel(triggerUrl)}）");
+            SetStatus("正在取整学期课表与教务日历…");
+
+            var spec = new HttpRequestSpec(
+                triggerUrl,
+                "GET",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["cookie"] = header },
+                null,
+                "内置登录窗口");
+
+            var fetched = await SjtuFetcher.FetchAsync(spec, default, _sjtuBaseUrl);
+            if (!fetched.Ok || fetched.TimetableText is null)
+            {
+                SetStatus(fetched.Message);
+                _sjtuCapturing = false;
+                return;
+            }
+
+            SucceedSjtu(triggerUrl, fetched);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"[login] 交大抓取异常：{ex}");
+            _sjtuCapturing = false;
+        }
+    }
+
+    /// <summary>交大捕获成功：把课表（外加教务日历）交给导入编排，然后关窗。</summary>
+    private void SucceedSjtu(string triggerUrl, TongjiFetchOutcome fetched)
+    {
+        var probes = new List<FetchProbe>(fetched.Probes)
+        {
+            new("来源", "内置登录窗口"),
+            new("接口", SjtuWebCapture.EndpointLabel(triggerUrl)),
+        };
+
+        var applied = _imports.ApplyCapturedResponse(
+            fetched.TimetableText!,
+            fetched.TermId,
+            probes,
+            fetched.AdapterId ?? SjtuStudentAdapter.AdapterId,
+            fetched.Files);
+
+        AppLog.Line($"[login] 交大捕获：{SjtuWebCapture.Describe(triggerUrl, fetched.TimetableText!.Length)} applied={applied.Ok}");
+
+        SetStatus(applied.Message);
+        Complete(applied.Ok, applied.Message);
+        if (applied.Ok) Close();
     }
 
     /// <summary>捕获成功：交给导入编排落盘 + 重画，然后关窗。</summary>

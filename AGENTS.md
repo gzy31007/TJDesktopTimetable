@@ -4,7 +4,8 @@
 
 ## 项目定位
 
-Windows 桌面小组件：把同济课表以半透明色块网格固定在桌面上。数据源（学校适配器）与窗口 / 渲染层解耦：新增一所学校 = 加一个适配器文件。
+Windows 桌面小组件：把课表以半透明色块网格固定在桌面上。数据源（学校适配器）与窗口 / 渲染层解耦：新增一所学校 = 加一个适配器文件。
+已支持**同济 1 系统**（`tongji-student`）与**上海交大「学在交大」**（`sjtu-student`，`j.sjtu.edu.cn`）。
 
 - 本地 `/root/TJDesktopTimetable`；远端 https://github.com/gzy31007/TJDesktopTimetable （Public / MIT）
 - 技术栈：**WinUI 3（C#，`dotnet/`）唯一主线**。`TjtCore` 平台无关（Linux 可测）、`Tjt.Widget` 纯计算、`Tjt.App` WinUI 外壳 + Win32 P/Invoke
@@ -30,7 +31,7 @@ docs/                 desktop-layer（层级层结论）· winui-build（DeskBox
 1. `TjtCore` / `Tjt.Widget` **不得**引用 WinUI / Win32 / `Tjt.App` —— 必须 `net10.0` 平台无关，Linux 上能 `dotnet test`；P/Invoke 一律留 `Tjt.App`。
 2. `Tjt.App` 只做必须在 Windows 上跑的事（窗口 / 材质 / Win32 / 托盘 / 设置 UI / 文件与网络 IO）；业务逻辑进 `TjtCore`，视觉计算进 `Tjt.Widget`。
 3. 新逻辑优先 `Tjt.Widget`（WSL 能编译 + 单测，反馈最快）；只有"必须真实窗口 / 句柄"才落 `Tjt.App`。
-4. `dotnet/fixtures/` 是黄金数据**唯一真源**（csproj 用 `Content Link` 复制到测试输出）；改 fixture = 改验收基准，两边（`Tjt.App` 的 `--fixture`、`TjtCore.Tests`）都要跑通。
+4. `dotnet/fixtures/` 是黄金数据**唯一真源**（含交大 `sjtu-2026-1-semester.json` / `sjtu-2026-1-calendar.json`）（csproj 用 `Content Link` 复制到测试输出）；改 fixture = 改验收基准，两边（`Tjt.App` 的 `--fixture`、`TjtCore.Tests`）都要跑通。
 
 ## 任务规范
 
@@ -42,6 +43,7 @@ docs/                 desktop-layer（层级层结论）· winui-build（DeskBox
 ## 易错知识点
 
 - **已移除**「专业培养计划适配器」与「教学班勾选」：只支持个人课表导入即用。误把培养计划数据（同课多教学班）导进来会异常；**没有** `tongji.looksLikePlan` 这类标识（旧文档不准）。真正诊断码：`tongji.personal` / `tongji.report` / `tongji.flat` / `tongji.noSchedule` / `tongji.schedule.missing` / `tongji.term.unknown` / `tongji.term.startDate` / `tongji.summary`。
+- **交大（学在交大）适配器**：`sjtu-student`，诊断码 `sjtu.lessons` / `sjtu.summary` / `sjtu.noSchedule` / `sjtu.weeks.unknown` / `sjtu.term.startDate` / `sjtu.schedule.missing`。数据源是 `GET /app/stu/lesson/listBySemester`（整学期，带 `time` 周次文本）与 `GET /app/stu/school/semester/calendar`（逐日日历，week 0-21）。⚠️ 课表页默认的 `listByWeek` **不带周次信息**（`time` 全为 `null`），粘它也会被改写成整学期请求（`Data/SjtuFetcher.cs`）。开学日 = 第 1 周周一（**不是** `startDay`）、单双周要在区间展开**之后**过滤、相邻节次要并块 —— 见 `TjtCore/SjtuTerms.cs` 与 [`docs/import.md`](docs/import.md)。
 - **同济个人课表两条接口**（以 1 系统前端 bundle 为准）：
   - 旧：`POST /api/electionservice/student/{选课批次id}/getDataBk` → `data.selectedCourses[].course.times[]`（`{id}` 无法稳定构造）。
   - 现行：`GET /api/electionservice/reportManagement/findStudentTimetab?calendarId=<学期id>&studentCode=<前端加密的uid>`（研究生 `findSchoolTimetab2`，按前端源码走 `data.list`）→ `data[].timeTableList[]`。两者 `dayOfWeek`/`timeStart`/`timeEnd`/`weeks` 语义一致；差别：课程在数组顶层、排课数组改名、教室多一层 `roomLable`（线上课堂 / 操场无编号场地用它）。
@@ -66,7 +68,7 @@ docs/                 desktop-layer（层级层结论）· winui-build（DeskBox
 ## 注意事项
 
 - 仓库 Public：fixtures / 文档不得出现学号、姓名、cookie、token 等凭据。
-- 登录态两条路（都**不**破解浏览器数据）：① 内置登录窗口（`TongjiLoginWindow` + WebView2）：用户在学校页面登录，课表页面接口响应被旁路接住；② 粘一条浏览器请求（`Data/TongjiFetcher.cs`），Cookie 存 `credentials.json`。**不做**读 Edge/Chrome Cookies 库：Edge 153 独占锁 + App-Bound 加密（`Local State` 里 `app_bound_encrypted_key` 前缀 `APPB`），解 v20 要调 IElevator COM = 绕过浏览器安全机制。**任何日志不得打印 Cookie 内容**（只记长度 / 条数）。
+- 登录态两条路（都**不**破解浏览器数据）：① 内置登录窗口（`TongjiLoginWindow` + WebView2，两校共用、按 `LoginSchool` 分派）：用户在学校页面登录 —— 同济那条是"课表页接口响应被旁路接住"，交大那条是"拿到登录态后主动取整学期课表 + 教务日历"；② 粘一条浏览器请求（`Data/SchoolFetcher.cs` 按主机分派到 `TongjiFetcher` / `SjtuFetcher`），Cookie 存 `credentials.json`。**不做**读 Edge/Chrome Cookies 库：Edge 153 独占锁 + App-Bound 加密（`Local State` 里 `app_bound_encrypted_key` 前缀 `APPB`），解 v20 要调 IElevator COM = 绕过浏览器安全机制。**任何日志不得打印 Cookie 内容**（只记长度 / 条数）。
 - 窗口默认「桌面层 + 静息」：Owner = 桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见）；挂载前存档原 owner、写入后**读回校验**，失败即还原；宿主解析不到时回退成"无 owner 置底"（日志 `[layer] 桌面宿主不可用，回退为无 owner 置底`），不能黑屏。⚠️ **没有** `wallpaper` 模式：`SetParent` 到 WorkerW 子窗口会被桌面图标压住、拖动坐标错乱，发 `0x052C` 催生 WorkerW 还会在登录期与 Explorer 抢时序、打乱桌面图标布局（`Win32/DesktopHost.cs` 头注释）—— 别再把它当"可选 / 回退模式"实现（旧 Electron 线的 `mode: desktop | wallpaper` 已随该线删除）。
 - 拖动 / 缩放自实现（`Win32/WindowDrag.cs` / `Win32/WindowEdgeResize.cs`），**起手先校验指针归属**（`PointerTarget`）；静息态**不戴** `WS_EX_NOACTIVATE`（戴上拖不动）；交互期"临时浮起 + 结束后重新落点"。
 
@@ -189,9 +191,9 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   - 为什么让页面自己发请求：报表接口要 `studentCode`（前端加密 uid、随发版变）→ **不猜算法、不读浏览器 cookie 库**。
   - 兜底 cookie 重发：`GetContentAsync()` 能读 GET 响应体，POST（旧 `getDataBk`）读不到 → `CoreWebView2.CookieManager.GetCookiesAsync(url)` 取 cookie，经 `TongjiWebCapture.CookieHeader` 拼头，交给 `TongjiFetcher.FetchSpecAsync` 重发 GET。cookie 只进请求头、日志只记条数。
   - WebView2 独立 profile `%APPDATA%\TJDesktopTimetable\WebView2`（与 Edge 隔离；登录态留在那里 → 下次仍登录）；关 DevTools / 右键 / 密码保存与自动填充；`NewWindowRequested` 在当前窗口内继续导航；`WindowCloseRequested` 关窗。
-  - 触发点两个：① 设置「导入」页的「登录同济并获取课表」按钮（`SettingsHost.OpenLogin` → `ImportPage.Build(..., openLogin)`）；② **启动时没有真实课表** —— `OnLaunched` 在 `AppHost.Load` 后判 `loaded.Origin is Fixture or Demo`（**2026-09-15 修**：原写成 `!= Imported`，害得 `--fixture` 也弹窗）→ `ShowTongjiLogin` + 日志 `[login] 启动时没有真实课表（origin=…，source=…）：自动打开内置登录窗口`；`--login` 可显式开。自检 / 诊断模式（`--smoke` / `--fetch-check` / `--login-check`）一律不自动弹；窗口单例（已开着就 `Activate`）。
+  - 触发点两个：① 设置「导入」页的按钮 —— 「登录同济并获取课表」/「登录交大并获取课表」（`SettingsHost.OpenLogin` / `OpenSjtuLogin` → `ImportPage.Build(..., openLogin, openSjtuLogin)`）；② **启动时没有真实课表** —— `OnLaunched` 在 `AppHost.Load` 后判 `loaded.Origin is Fixture or Demo`（**2026-09-15 修**：原写成 `!= Imported`，害得 `--fixture` 也弹窗）→ `ShowSchoolLogin` + 日志 `[login] 启动时没有真实课表（origin=…，source=…）：自动打开内置登录窗口`；`--login` 可显式开。自检 / 诊断模式（`--smoke` / `--fetch-check` / `--login-check`）一律不自动弹；窗口单例（已开着就 `Activate`）。
   - 验收 `.tools/verify-auto-login.ps1`：A 删掉 `timetable.json` 启动 → 日志有 `[login] …hwnd=0x…`；B 先 `--import <fixture>` 再启动 → 无 `[login]`（脚本备份 / 还原真实 `timetable.json`）。
-  - CLI：`--login`（启动即开）与 `--login-check <url>`（开真窗口导航 → 捕获 → 写日志 → `Environment.Exit`，退出码表成败；60 秒看门狗）。
+  - CLI：`--login`（启动即开，同济）、`--login-school tongji|sjtu`（选学校；验收脚本指向本地合成服务时主机名看不出学校）、`--login-check <url>`（开真窗口导航 → 捕获 → 写日志 → `Environment.Exit`，退出码表成败；60 秒看门狗）。
   - 验收 `.tools/verify-login.ps1`（本地 `HttpListener` 假扮 1 系统，页面自己 `fetch` `?calendarId=122&studentCode=verify` → 捕获 → 14 门 / 19 条落盘）。
   - 坑：① 验收脚本不能出现中文（匹配用 ASCII 锚点如 `\[login\].*findStudentTimetab`）；② "读 Edge cookie"走不通（Cookies 独占锁 + `Local State` 里 `app_bound_encrypted_key` 前缀 `APPB`）；③ 登录窗口**不设** `ExtendsContentIntoTitleBar`（保留系统标题栏）。
     ④ **窗口图标必须显式设**：WinUI 3 的 `Window` 没有 `Icon` 属性、窗口类也不带图标，不设会落到系统默认空白应用图标。正解两件一起：`Rendering/WindowIcon.cs`（`AppWindow.SetIcon(...)`，三个窗口构造里各调一次；失败只记日志）+ csproj 的 `<ApplicationIcon>`（只改 exe PE 资源，**不能**替代 SetIcon）。窗口图标用蓝色 `Assets/app-blue.ico`（取 `TintPalette.DarkAccent` = `#4CC2FF`，由 `.tools/make-blue-icon.py` 从 `app.ico` 重绘；脚本不入库、产物入库）；托盘仍用白色 `app.ico`。验收 `.tools/verify-icon.ps1`（读 `WM_GETICON`）+ `.tools/dump-window-icon.ps1`（dump PNG 与 ico 的 48×48 逐像素比）。⚠️ 别用 `new Icon(ico,48,48).ToBitmap()` 比对（GDI+ 重绘丢 alpha → 假 FAIL）；要解 ICO 里 48×48 那一帧（本仓 9 帧全是 PNG，`PIL.Image.open(BytesIO(blob))`）。
@@ -217,7 +219,7 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
 - **拖动 / 缩放走 Avalonia 原生循环**（`BeginMoveDrag` / `BeginResizeDrag`）：热区几何、方向、最小尺寸仍用 `Tjt.Widget` 的 `CursorZones` / `ResizePolicy` 纯函数。Windows 版那套 16ms 光标轮询是 WinUI 指针捕获缺陷逼出来的补丁，Avalonia 不需要，**别照搬**。
 - **字体**：Avalonia 12 默认 Inter，多数发行版没装（直接抛 glyphTypeface）→ 启动时用 `fc-match sans-serif` 解析真实默认字体（`Program.ResolveDefaultFontFamily`）。
 - **数据目录**：`Environment.SpecialFolder.ApplicationData` 在 Linux 上映射 XDG（`~/.config`），`settings.json` / `timetable.json` / `credentials.json` 与 Windows 版同构、可互拷。
-- **内置登录窗口是 WebView2 专属**，Linux 不做；「粘贴一条浏览器请求」（`TongjiFetcher`）就是主路径。
+- **内置登录窗口是 WebView2 专属**，Linux 不做；「粘贴一条浏览器请求」就是主路径（`SchoolFetcher` 按主机分派，交大交接 `SjtuFetcher` —— 与 Windows 线同一套 core 逻辑）。
 - 位置尺寸持久化是 DIP 口径（物理像素 ÷ RenderScaling），恢复用主屏缩放近似 + 屏内校验兜底（多屏异缩放接受近似，与 Windows 版 `FrameCorrection` 的取舍同源）。
 
 ### 开发（Linux 本机）

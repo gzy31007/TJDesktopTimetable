@@ -139,10 +139,11 @@ const DATA = {"term": {"id": 122, "year": 2026, "termNo": 1}, "classes": [
     {
         var registry = AdapterRegistry.Default;
         Assert.Equal(
-            ["tongji-student", "preview-html", "generic-json"],
+            new[] { "tongji-student", "sjtu-student", "preview-html", "generic-json" },
             registry.List().Select(adapter => adapter.Id));
         Assert.Same(PreviewHtmlAdapter.Instance, registry.Get("preview-html"));
         Assert.Same(TongjiStudentAdapter.Instance, registry.Get("tongji-student"));
+        Assert.Same(SjtuStudentAdapter.Instance, registry.Get("sjtu-student"));
         Assert.Null(registry.Get("nope"));
 
         // 导入管线不带 registry 时能拿到内置注册表（Registry 的静态构造已完成装配）

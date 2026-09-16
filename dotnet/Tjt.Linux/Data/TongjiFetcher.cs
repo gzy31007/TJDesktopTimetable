@@ -1,26 +1,35 @@
 using System.Net.Http;
 using System.Text;
 using Tjt.Core;
+using Tjt.Core.Adapters;
 
 namespace Tjt.Linux.Data;
 
 /// <summary>抓取过程里给用户看的一条探测结果（如"HTTP 200"、"响应 128 KB"）。</summary>
 internal sealed record FetchProbe(string Label, string Value);
 
-/// <summary>一次抓取的结果：失败时 <see cref="Message"/> 直接显示给用户。</summary>
+/// <summary>
+/// 一次抓取的结果：失败时 <see cref="Message"/> 直接显示给用户。
+///
+/// <para><see cref="AdapterId"/> 与 <see cref="Files"/> 是为**交大**加的：交大一张课表要两份数据
+/// （课程 + 教务日历），且必须点名适配器。同济那条路保持默认值，行为不变。</para>
+/// </summary>
 internal sealed record TongjiFetchOutcome(
     bool Ok,
     string Message,
     string? TimetableText,
     IReadOnlyList<FetchProbe> Probes,
-    string? TermId = null);
+    string? TermId = null,
+    string? AdapterId = null,
+    IReadOnlyList<ImportFile>? Files = null);
 
 /// <summary>
 /// 用「用户从浏览器复制出来的请求」抓取个人课表（Tjt.App/Data/TongjiFetcher.cs 的移植）。
 ///
 /// <para>为什么不猜接口路径：1 系统的个人课表来自选课服务，其 <c>{id}</c> 是选课批次相关的
 /// 内部 id，无法稳定构造。让用户 F12 → Copy as cURL 粘一次最可靠，也天然带上了 Cookie 与 <c>x-token</c>。
-/// Linux 版没有内置登录窗口（WebView2 专属），这条粘贴请求的路径就是主路径。</para>
+/// Linux 版没有内置登录窗口（WebView2 专属），这条粘贴请求的路径就是主路径 —— 交大同样走它
+/// （<see cref="SjtuFetcher"/>，粘贴的请求只用来取学期参数与 Cookie）。</para>
 ///
 /// <para><b>安全</b>：Cookie 只在内存里过一遍，<b>任何日志都不打印它的内容</b>；
 /// 请求头也不进日志（只记 URL、HTTP 状态、响应大小）。</para>
@@ -37,7 +46,10 @@ internal static class TongjiFetcher
     /// <summary>
     /// 抓取：解析粘贴的请求 → 原样发一次 → 检查响应像不像课表数据。
     /// </summary>
-    public static async Task<TongjiFetchOutcome> FetchAsync(string requestText, CancellationToken cancellationToken = default)
+    public static async Task<TongjiFetchOutcome> FetchAsync(
+        string requestText,
+        CancellationToken cancellationToken = default,
+        string? sjtuBaseUrl = null)
     {
         var spec = HttpRequestParser.Parse(requestText);
         if (spec is null)
@@ -57,6 +69,13 @@ internal static class TongjiFetcher
                 ? "粘贴的内容里只有地址、没有请求头，所以没有 Cookie。看起来只复制了第一行 —— "
                   + "请在该请求上右键 → Copy → Copy as cURL，把整条命令（含 -H 'cookie: …' 那些行）一起粘贴过来。"
                 : "粘贴的请求里没有 Cookie：请用「Copy as cURL」（会带上全部请求头），而不是只复制 URL。");
+        }
+
+        // 按主机分派：同济原样重发；交大只取请求里的学期参数，改用登录态取整学期课表 + 教务日历
+        if (SjtuWebCapture.IsSjtuUrl(spec.Url))
+        {
+            AppLog.Line($"[sjtu] 粘贴的是交大请求：{SjtuWebCapture.EndpointLabel(spec.Url)}");
+            return await SjtuFetcher.FetchAsync(spec, cancellationToken, sjtuBaseUrl).ConfigureAwait(false);
         }
 
         return await FetchSpecAsync(spec, cancellationToken).ConfigureAwait(false);
@@ -132,7 +151,7 @@ internal static class TongjiFetcher
     }
 
     /// <summary>把解析出来的请求规格变成一次真实的 HTTP 请求（细节口径与 Windows 版一致）。</summary>
-    private static HttpRequestMessage BuildRequest(HttpRequestSpec spec, Uri uri)
+    internal static HttpRequestMessage BuildRequest(HttpRequestSpec spec, Uri uri)
     {
         var request = new HttpRequestMessage(new HttpMethod(spec.Method), uri);
 
@@ -160,7 +179,7 @@ internal static class TongjiFetcher
         return request;
     }
 
-    private static TongjiFetchOutcome Fail(string message, IReadOnlyList<FetchProbe>? probes = null) =>
+    internal static TongjiFetchOutcome Fail(string message, IReadOnlyList<FetchProbe>? probes = null) =>
         new(false, message, null, probes ?? []);
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..max];

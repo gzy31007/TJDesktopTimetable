@@ -44,3 +44,37 @@
     `HttpRequestSpec`"并负责发送/探测/文案，后者只剩"解析粘贴文本 + 没 Cookie 时的引导提示"。
     登录窗口的兜底（响应体读不到时用页面 cookie 重发一次 GET）复用它 —— 这是**抽取而不是复制**，
     以后改发送细节只需改一处。
+  - **交大（学在交大 / `j.sjtu.edu.cn`）走的是"改写请求"而不是"原样重发"**：课表页按周拉取
+    （`GET /app/stu/lesson/listByWeek?year=&semester=&week=`），而按周响应里的 `time` 是 `null`
+    —— 没有"这门课上哪些周"（实测 14 条全部如此），照它建挂件只会剩本周有课。所以
+    `Data/SchoolFetcher.cs` 按**主机**分派：交大交给 `Data/SjtuFetcher.cs`，只取粘贴请求里的
+    `year`/`semester` 与 Cookie，依次取三条 —— `calendar/info`（当前学期）→
+    `listBySemester`（整学期课表，带 `time`）→ `semester/calendar`（教务日历，作为附加
+    `ImportFile` 交给适配器）。请求一律重建到 `SjtuTerms.SjtuHost`，**不跟随粘贴内容里的主机**
+    （粘错了地址也不会把登录态发去别处）。课表页那条 URL 只用来取参数，`userId` 前端自己也传
+    `undefined`（被 axios 丢掉），我们同样不传。
+  - **交大开学日是"第 1 周周一"，不是 `startDay`**：`semester/calendar` 返回**逐日**日历
+    （`{week, weekDay, day}`，week 0-21），`startDay=2026-09-07` 是第 0 周（报到周），
+    第 1 周周一是 `2026-09-14` —— 与 `listByWeek?week=1` 里各条的 `detailTime` 对得上。
+    总周数取日历里最大的 `week`（实测 21，正好覆盖到 `endDay`）。
+  - **交大单双周必须在区间展开之后过滤**：`time="5周,9周,13-15周"` + `suffix=["单周"]` 的正确结果是
+    5/9/13/15；反过来先按单周筛会把 `13-15` 当成"第 13 周"、只剩 5/9/13。见
+    `SjtuTerms.ParseWeeks` 与 `SjtuCaptureTests.单双周在区间展开之后过滤`。
+  - **交大相邻节次要并成一块**：前端 `WeekTable.mergeSameClass` 按 `day + jxbId` 分组、节次相邻
+    （`下一段起始 == 当前段结束 + 1`）就合并 —— 实测"民法总论"是 `["6","6"]` + `["7","8"]`，
+    前端显示成 6-8 一整块。适配器同口径，但**周次取并集**（前端合并时只 `{...list[m]}` 保留第一条，
+    会把周次丢掉）。同一天同一教学班的**重复记录**也算命中，避免画出两层色块。
+  - **交大节次是 13 节**（教务处《上海交通大学学生上课时间表》）：1-4 上午、5-6 中午、7-10 下午、
+    11-13 晚上（官方原文"第十一、十二、十三节 晚上 3 节连上 18:00-20:20"）。后端偶尔给第 14 节，
+    前端 `14 == t && (t = 13)` 折算成 13，适配器同口径（`SjtuStudentAdapter.ClampSlot`）。
+  - **交大响应包装是 `{errno, error, data}`**（同济是 `{code, msg, data}`）：成功 `errno="0"`、
+    `error="成功"`；课表为空时前端会看到 `errno="99999"`（`WeekTable` 专门判了它）。
+    探测在 `TjtCore/SjtuResponseProbe.cs`（与同济的 `TongjiResponseProbe` 并列，互不干扰）。
+  - **交大没有教师字段**：`listBySemester` 只给 `name`/`code`/`jxbId`/`address`/`duration`/`time`/
+    `suffix`/`credit`，教师只在 `lesson/detail`（参数 `code=jxbId`）里 —— 挂件色块不显示教师，
+    所以不额外发那一次请求，`Course.Teachers` 留空。
+  - **交大登录窗口是"主动取"而不是"接住页面响应"**：jAccount 是标准 OAuth2，课表接口只要明文的
+    `year`/`semester` —— 所以 `TongjiLoginWindow`（现按 `LoginSchool` 分派，两校共用）在撞到
+    `j.sjtu.edu.cn` 的课表/日历接口后，用页面自己的 cookie 调 `SjtuFetcher` 取整学期数据，
+    再走与同济同一个 `ImportService.ApplyCapturedResponse`（多两个参数：`adapterId` 与附加 `files`）。
+    触发用 `_sjtuCapturing` 闸门保证只抓一次（页面一次加载会连发好几条接口）。

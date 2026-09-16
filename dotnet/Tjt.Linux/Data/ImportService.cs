@@ -114,13 +114,15 @@ internal sealed class ImportService
 
         try
         {
-            // 抓回来的响应一定来自同济选课服务，直接指定适配器
+            // 抓回来的响应一定来自某所学校：用抓取侧点名的适配器（同济不给这个字段 → 退回家门口那个；
+            // 交大除了课表还带一份教务日历）
             var result = ImportPipeline.ImportTimetable(new ImportInput
             {
                 Text = fetched.TimetableText,
-                AdapterId = TongjiStudentAdapter.AdapterId,
+                AdapterId = fetched.AdapterId ?? TongjiStudentAdapter.AdapterId,
                 // 报表格式的响应里没有学期，只能从请求 URL 带过来（见 TongjiFetcher）
                 TermId = fetched.TermId,
+                Files = fetched.Files,
             });
             return Apply(result, fetched.Probes);
         }

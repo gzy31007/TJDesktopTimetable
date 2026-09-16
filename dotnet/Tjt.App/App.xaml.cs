@@ -88,7 +88,7 @@ public partial class App : Application
             // 0) 抓取诊断（--fetch-check）：只抓一次、把结论写日志、退出。**不落盘**。
             if (options.FetchCheckPath is not null)
             {
-                SmokePassed = RunFetchCheck(options.FetchCheckPath);
+                SmokePassed = RunFetchCheck(options.FetchCheckPath, options.SjtuHost);
                 return; // finally 里收尾（smoke 之外也会正常退出：这是一条"跑完即走"的路径）
             }
 
@@ -126,7 +126,7 @@ public partial class App : Application
             //     少一个窗口就少一处干扰；落盘走 ImportService 的兜底分支（TimetableStore.Save）。
             if (options.LoginCheckUrl is not null)
             {
-                RunLoginCheck(options.LoginCheckUrl);
+                RunLoginCheck(options.LoginCheckUrl, options.School);
                 return; // 由结束回调 / 看门狗硬退出
             }
 
@@ -160,14 +160,14 @@ public partial class App : Application
             window.ShowWidget();
             _tray = BuildTray(window);
 
-            // 内置登录窗口只有两个触发点（**没有**菜单入口，见 ShowTongjiLogin 的说明）：
+            // 内置登录窗口只有两个触发点（**没有**菜单入口，见 ShowSchoolLogin 的说明）：
             //   ① 用户在设置窗口「导入」页点按钮（SettingsHost.OpenLogin）
             //   ② 启动时挂件上不是"用户自己导入的课表" —— 也就是**还没有真实课表**
             // 走到这里的一定是交互模式：--smoke / --fetch-check / --login-check 都已提前 return。
             if (options.Login)
             {
                 AppLog.Line("[login] --login 显式要求：打开内置登录窗口");
-                ShowTongjiLogin(window.CurrentIsDark);
+                ShowSchoolLogin(LoginSchool.Tongji, window.CurrentIsDark);
             }
             else if (loaded.Origin is TimetableOrigin.Fixture or TimetableOrigin.Demo)
             {
@@ -175,7 +175,7 @@ public partial class App : Application
                 // `--fixture <path>` 是**显式**指定（自检、截图、排查视觉时用），不该被登录窗口盖住 ——
                 // 早先这里写的是 `Origin != Imported`，`--fixture` 会被判成"没有课表"而弹窗（实测踩到）。
                 AppLog.Line($"[login] 启动时没有真实课表（origin={loaded.Origin}，source={loaded.Source}）：自动打开内置登录窗口");
-                ShowTongjiLogin(window.CurrentIsDark);
+                ShowSchoolLogin(LoginSchool.Tongji, window.CurrentIsDark);
             }
 
             // 启动就停在某一页（验证导入页/截图用；托盘与挂件菜单也会用它）
@@ -227,7 +227,7 @@ public partial class App : Application
     /// <para><b>不落盘</b>：这是诊断路径，不该改用户的课表文件。失败即退出码非零，
     /// 用来回答"我这条请求为什么抓不到"。</para>
     /// </summary>
-    private static bool RunFetchCheck(string requestPath)
+    private static bool RunFetchCheck(string requestPath, string? sjtuBaseUrl)
     {
         string requestText;
         try
@@ -242,9 +242,10 @@ public partial class App : Application
 
         // 只记长度：内容含 Cookie
         AppLog.Line($"[fetch-check] 开始（请求 {requestText.Trim().Length} 字符）");
-        // 在 UI 线程上阻塞等待是安全的：TongjiFetcher 内部一律 ConfigureAwait(false)，
+        // 在 UI 线程上阻塞等待是安全的：抓取层内部一律 ConfigureAwait(false)，
         // 它的续体不需要回到 UI 线程，因此不会互相等（死锁）。
-        var fetched = TongjiFetcher.FetchAsync(requestText).GetAwaiter().GetResult();
+        // SchoolFetcher 按主机分派：同济原样重发，交大改写成整学期请求（外加一份教务日历）。
+        var fetched = SchoolFetcher.FetchAsync(requestText, default, sjtuBaseUrl).GetAwaiter().GetResult();
         foreach (var probe in fetched.Probes) AppLog.Line($"[fetch-check] {probe.Label}：{probe.Value}");
         AppLog.Line($"[fetch-check] 抓取 ok={fetched.Ok}：{fetched.Message}");
         if (!fetched.Ok || fetched.TimetableText is null) return false;
@@ -254,9 +255,10 @@ public partial class App : Application
             var result = ImportPipeline.ImportTimetable(new ImportInput
             {
                 Text = fetched.TimetableText,
-                AdapterId = TongjiStudentAdapter.AdapterId,
+                AdapterId = fetched.AdapterId ?? TongjiStudentAdapter.AdapterId,
                 // 与界面那条抓取路一样：学期 id 来自请求 URL（不然报表格式只能退化成"未知学期"）
                 TermId = fetched.TermId,
+                Files = fetched.Files,
             });
             foreach (var diagnostic in result.Diagnostics)
             {
@@ -361,7 +363,8 @@ public partial class App : Application
         ResetPosition: () => widget.BuildActions().ResetPosition?.Invoke(),
         ReloadTimetable: () => widget.ReloadTimetable(),
         Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化"),
-        OpenLogin: () => ShowTongjiLogin(widget.CurrentIsDark),
+        OpenLogin: () => ShowSchoolLogin(LoginSchool.Tongji, widget.CurrentIsDark),
+        OpenSjtuLogin: () => ShowSchoolLogin(LoginSchool.Sjtu, widget.CurrentIsDark),
         DescribeUpdate: () => DescribeUpdate(widget),
         CheckUpdates: () => CheckUpdatesNow(widget, RefreshSettingsWindows),
         OpenUpdatePage: () => OpenUpdatePage(widget),
@@ -491,18 +494,25 @@ public partial class App : Application
     /// <summary>
     /// 打开**内置登录窗口**（已经开着就把它激活）。
     ///
-    /// <para>这是"课表从哪来"的推荐路径：在应用自己的 WebView2 里走学校的统一身份认证
-    /// （含短信），课表页那条接口的响应被我们在一旁接住 —— 不碰浏览器数据、不猜加密、
-    /// 也不接触用户密码。抓到的响应交给 <see cref="ImportService.ApplyCapturedResponse"/>，
+    /// <para>这是"课表从哪来"的推荐路径：在应用自己的 WebView2 里走学校自己的登录
+    /// （同济的统一身份认证含短信 / 交大的 jAccount），课表相关响应被我们接住 —— 不碰浏览器数据、
+    /// 不猜加密、也不接触用户密码。抓到的东西交给 <see cref="ImportService.ApplyCapturedResponse"/>，
     /// 与粘贴请求那条路落在同一个 <c>Apply</c> 上。</para>
     ///
-    /// <para><b>触发点只有两个</b>（挂件 <c>⋯</c> 菜单与托盘里**没有**这一项了）：
-    /// ① 用户在设置窗口「导入」页点「登录同济并获取课表」（<c>SettingsHost.OpenLogin</c>）；
+    /// <para>两校的差别（都在 <see cref="TongjiLoginWindow"/> 里按 <see cref="LoginSchool"/> 分支）：
+    /// 同济只做旁观者（课表接口要前端加密的 <c>studentCode</c>，猜不了）；
+    /// 交大拿到登录态后主动取整学期课表 + 教务日历（接口只要明文的 <c>year</c>/<c>semester</c>，
+    /// 而且页面默认的按周接口不带周次信息）。</para>
+    ///
+    /// <para><b>触发点</b>（挂件 <c>⋯</c> 菜单与托盘里**没有**这一项了）：
+    /// ① 用户在设置窗口「导入」页点「登录同济并获取课表」/「登录交大并获取课表」
+    /// （<c>SettingsHost.OpenLogin</c> / <c>OpenSjtuLogin</c>）；
     /// ② 启动时挂件上**没有真实课表**（<c>TimetableOrigin</c> 不是 <c>Imported</c>，
-    /// 也就是只有黄金 fixture 或内置样例）—— 见 <c>OnLaunched</c> 里那一段。</para>
+    /// 也就是只有黄金 fixture 或内置样例）—— 见 <c>OnLaunched</c> 里那一段，那一条固定走同济。</para>
     /// </summary>
+    /// <param name="school">服务哪所学校（同济 1 系统 / 交大学在交大）。</param>
     /// <param name="dark">当前是否深色主题（只影响这一个窗口）。</param>
-    private void ShowTongjiLogin(bool dark)
+    private void ShowSchoolLogin(LoginSchool school, bool dark)
     {
         if (_loginWindow is { } existing)
         {
@@ -513,7 +523,9 @@ public partial class App : Application
         var window = new TongjiLoginWindow(
             RequireImports(),
             dark,
-            (ok, message) => AppLog.Line($"[login] 结束 ok={ok}：{message}"));
+            (ok, message) => AppLog.Line($"[login] 结束 ok={ok}：{message}"),
+            school,
+            sjtuBaseUrl: Startup.SjtuHost);
         _loginWindow = window;
         window.Closed += (_, _) =>
         {
@@ -521,7 +533,7 @@ public partial class App : Application
         };
         window.Activate();
         // hwnd 进日志：自动化脚本靠它定位登录窗口（它不是本进程的主窗口）
-        AppLog.Line($"[login] 已打开内置登录窗口 hwnd=0x{WindowNative.GetWindowHandle(window):X}");
+        AppLog.Line($"[login] 已打开内置登录窗口 school={school} hwnd=0x{WindowNative.GetWindowHandle(window):X}");
     }
 
     /// <summary>
@@ -531,9 +543,13 @@ public partial class App : Application
     /// 于是**不需要拿真账号去登录**也能验证"捕获 → 解析 → 落盘"整条链路；
     /// 加看门狗兜底，绝不让脚本悬着（超时即非零退出）。</para>
     /// </summary>
-    private void RunLoginCheck(string url)
+    private void RunLoginCheck(string url, LoginSchool? overrideSchool)
     {
-        AppLog.Line($"[login] 自检模式：起点 {url}");
+        // 合成服务跑在 127.0.0.1 上，主机名看不出学校 → 以 --login-school 为准；
+        // 没给就按 URL 主机猜（真站点能猜对，本地服务默认同济）
+        var school = overrideSchool
+            ?? (SjtuWebCapture.IsSjtuUrl(url) ? LoginSchool.Sjtu : LoginSchool.Tongji);
+        AppLog.Line($"[login] 自检模式：起点 {url}（学校 {school}）");
         StartLoginWatchdog();
 
         var window = new TongjiLoginWindow(
@@ -544,6 +560,7 @@ public partial class App : Application
                 AppLog.Line($"[login] 自检结果 ok={ok}：{message}");
                 Environment.Exit(ok ? 0 : 1);
             },
+            school,
             startUrl: url);
         _loginWindow = window;
         window.Activate();

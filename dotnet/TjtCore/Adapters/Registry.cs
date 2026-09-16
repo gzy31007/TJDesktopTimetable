@@ -15,11 +15,14 @@ public static class AdapterRegistry
     /// 内置适配器（按优先级：具体学校优先于通用格式）。
     ///
     /// 顺序即优先级：<c>detect</c> 打分相同时先登记的胜出，因此同济（0.98/0.9）永远压过
-    /// 通用 JSON（0.9/0.6/0.4）。
+    /// 通用 JSON（0.9/0.6/0.4）。同济与交大都是 0.98，但特征字段互斥
+    /// （同济 <c>selectedCourses</c>/<c>timeTableList</c>/<c>weekState</c>，
+    /// 交大 <c>errno</c> + <c>jxbId</c>/<c>duration</c>），不会互相抢。
     /// </summary>
     public static readonly IReadOnlyList<ISchoolAdapter> BuiltinAdapters =
     [
         TongjiStudentAdapter.Instance,
+        SjtuStudentAdapter.Instance,
         PreviewHtmlAdapter.Instance,
         GenericJsonAdapter.Instance,
     ];

@@ -110,9 +110,9 @@ internal sealed class ImportService
         CredentialsStore.SaveRequest(effective);
 
         // 这里刻意 **不** 用 ConfigureAwait(false)：await 之后要经由 _apply 回到挂件窗口重画，
-        // 而 XAML 只能在 UI 线程上碰。网络层（TongjiFetcher）内部用 ConfigureAwait(false) 没关系 ——
-        // 那是"不等回来就不碰 UI"，回到这里仍然会被调度回 UI 上下文。
-        var fetched = await TongjiFetcher.FetchAsync(effective, cancellationToken);
+        // 而 XAML 只能在 UI 线程上碰。网络层（SchoolFetcher / 各校 Fetcher）内部用 ConfigureAwait(false)
+        // 没关系 —— 那是"不等回来就不碰 UI"，回到这里仍然会被调度回 UI 上下文。
+        var fetched = await SchoolFetcher.FetchAsync(effective, cancellationToken);
         if (!fetched.Ok || fetched.TimetableText is null)
         {
             return ImportOutcome.Failure(fetched.Message, fetched.Probes);
@@ -120,13 +120,15 @@ internal sealed class ImportService
 
         try
         {
-            // 抓回来的响应一定来自同济选课服务，直接指定适配器（与 Electron 侧一致）
+            // 抓回来的响应一定来自某所学校，直接用抓取侧点名的适配器
+            // （同济不给这个字段 → 退回家门口那个；交大除了课表还带一份教务日历）
             var result = ImportPipeline.ImportTimetable(new ImportInput
             {
                 Text = fetched.TimetableText,
-                AdapterId = TongjiStudentAdapter.AdapterId,
+                AdapterId = fetched.AdapterId ?? TongjiStudentAdapter.AdapterId,
                 // 报表格式的响应里没有学期，只能从请求 URL 带过来（见 TongjiFetcher）
                 TermId = fetched.TermId,
+                Files = fetched.Files,
             });
             return Apply(result, fetched.Probes);
         }
@@ -144,25 +146,30 @@ internal sealed class ImportService
     /// 这边是登录窗口里页面自己发的那条请求被我们接住。**解析、诊断、落盘完全同一条路**
     /// （都落到 <see cref="Apply"/>），所以两种入口的行为不会分叉。</para>
     /// </summary>
-    /// <param name="responseText">捕获到的响应体（同济课表接口的 JSON）。</param>
-    /// <param name="termId">学期 id（报表接口只在 URL 上带 <c>calendarId</c>，见 <c>TongjiWebCapture</c>）。</param>
+    /// <param name="responseText">捕获到的响应体（课表接口的 JSON）。</param>
+    /// <param name="termId">学期 id（同济报表接口只在 URL 上带 <c>calendarId</c>，见 <c>TongjiWebCapture</c>）。</param>
     /// <param name="probes">给用户看的探测行（从哪条接口、多大、哪个学期）。</param>
+    /// <param name="adapterId">用哪个适配器解析；默认同济（旧调用点行为不变），交大传 <c>sjtu-student</c>。</param>
+    /// <param name="files">随课表一起交进来的附加数据（交大的教务日历走这里）。</param>
     public ImportOutcome ApplyCapturedResponse(
         string responseText,
         string? termId,
-        IReadOnlyList<FetchProbe>? probes = null)
+        IReadOnlyList<FetchProbe>? probes = null,
+        string adapterId = TongjiStudentAdapter.AdapterId,
+        IReadOnlyList<ImportFile>? files = null)
     {
         var rows = probes ?? [];
         if (string.IsNullOrWhiteSpace(responseText)) return ImportOutcome.Failure("捕获到的响应是空的。", rows);
 
         try
         {
-            // 登录窗口里只有 1 系统的页面，捕获到的响应一定来自同济选课/报表服务
+            // 登录窗口里只有目标学校的页面，捕获到的响应一定来自它点名的适配器
             var result = ImportPipeline.ImportTimetable(new ImportInput
             {
                 Text = responseText,
-                AdapterId = TongjiStudentAdapter.AdapterId,
+                AdapterId = adapterId,
                 TermId = termId,
+                Files = files,
             });
             return Apply(result, rows);
         }

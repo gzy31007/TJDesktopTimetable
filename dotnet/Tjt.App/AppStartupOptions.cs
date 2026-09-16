@@ -30,6 +30,10 @@ namespace Tjt.App;
 /// 只做一次抓取诊断：读文件里的浏览器请求 → 抓一次 → 把探测结果与解析结果写日志 → 退出
 /// （<c>--fetch-check</c>）。**不落盘**（诊断不该改用户数据）；失败时进程退出码非零。
 /// </param>
+/// <param name="SjtuHost">
+/// 覆盖交大接口主机（<c>--sjtu-host http://127.0.0.1:port</c>）：验收脚本指向本地合成服务，
+/// 不必拿真账号去登录；<c>null</c> = 真 <c>j.sjtu.edu.cn</c>。与 <c>--update-api</c> 同一套路。
+/// </param>
 /// <param name="SettingsPage">启动时直接打开设置窗口的第 N 页（0 常规 / 1 导入 / 2 外观 / 3 关于）。</param>
 /// <param name="Login">
 /// 启动后直接打开**内置登录窗口**（<c>--login</c>）：在应用自己的 WebView2 里登录 1 系统，
@@ -39,6 +43,11 @@ namespace Tjt.App;
 /// 登录窗口的**自检**（<c>--login-check &lt;url&gt;</c>）：打开登录窗口并导航到给定地址，
 /// 等它捕获到课表 → 写日志 → 退出（退出码表成败）。给验收脚本指向本地合成服务用，
 /// 这样不必拿真账号去登录（详见 <c>.tools/verify-login.ps1</c>）。
+/// </param>
+/// <param name="LoginSchool">
+/// 内置登录窗口服务哪所学校（<c>--login-school tongji|sjtu</c>）；<c>null</c> = 同济。
+/// 交大那条路要按学校选捕获策略（见 <see cref="LoginSchool"/>），验收脚本指向本地合成服务时
+/// 主机名看不出学校，所以必须能显式指定。
 /// </param>
 /// <param name="UpdateCheck">
 /// 启动即查一次新版本、把结论写日志后退出（<c>--update-check</c>）。**不建挂件窗口、不落盘**，
@@ -62,8 +71,10 @@ internal sealed record AppStartupOptions(
     int? Height = null,
     string? ImportPath = null,
     string? FetchCheckPath = null,
+    string? SjtuHost = null,
     int? SettingsPage = null,
     bool Login = false,
+    LoginSchool? School = null,
     string? LoginCheckUrl = null,
     bool UpdateCheck = false,
     string? UpdateApiUrl = null)
@@ -75,7 +86,8 @@ internal sealed record AppStartupOptions(
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>（不传就用窗口系统给的默认尺寸，传了就精确设成它，
     /// 便于验证自适应）、<c>--now HH:mm</c>（覆盖"当前时刻"，只为验证时间线，见 <c>NowMinutes</c>）、
     /// <c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>、
-    /// <c>--login</c>、<c>--login-check &lt;url&gt;</c>、<c>--update-check</c>、<c>--update-api &lt;url&gt;</c>。
+    /// <c>--login</c>、<c>--login-school tongji|sjtu</c>、<c>--login-check &lt;url&gt;</c>、<c>--sjtu-host &lt;url&gt;</c>、
+    /// <c>--update-check</c>、<c>--update-api &lt;url&gt;</c>。
     /// 未知参数被忽略（不崩在 CLI 上）。
     /// </summary>
     public static AppStartupOptions Parse(string[] args)
@@ -93,8 +105,10 @@ internal sealed record AppStartupOptions(
         int? height = null;
         string? importPath = null;
         string? fetchCheck = null;
+        string? sjtuHost = null;
         int? settingsPage = null;
         var login = false;
+        LoginSchool? loginSchool = null;
         string? loginCheck = null;
         var updateCheck = false;
         string? updateApi = null;
@@ -114,7 +128,13 @@ internal sealed record AppStartupOptions(
             else if (Matches(arg, "fixture") && i + 1 < args.Length) fixture = args[++i];
             else if (Matches(arg, "import") && i + 1 < args.Length) importPath = args[++i];
             else if (Matches(arg, "fetch-check") && i + 1 < args.Length) fetchCheck = args[++i];
+            else if (Matches(arg, "sjtu-host") && i + 1 < args.Length) sjtuHost = args[++i];
             else if (Matches(arg, "login")) login = true;
+            else if (Matches(arg, "login-school") && i + 1 < args.Length && ParseSchool(args[i + 1]) is { } parsedSchool)
+            {
+                loginSchool = parsedSchool;
+                i += 1;
+            }
             else if (Matches(arg, "login-check") && i + 1 < args.Length) loginCheck = args[++i];
             else if (Matches(arg, "update-check")) updateCheck = true;
             else if (Matches(arg, "update-api") && i + 1 < args.Length) updateApi = args[++i];
@@ -155,8 +175,10 @@ internal sealed record AppStartupOptions(
             Height: height,
             ImportPath: importPath,
             FetchCheckPath: fetchCheck,
+            SjtuHost: sjtuHost,
             SettingsPage: settingsPage,
             Login: login,
+            School: loginSchool,
             LoginCheckUrl: loginCheck,
             UpdateCheck: updateCheck,
             UpdateApiUrl: updateApi);
@@ -167,6 +189,14 @@ internal sealed record AppStartupOptions(
         string.Equals(arg, $"--{name}", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(arg, $"-{name}", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(arg, $"/{name}", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>学校名 → 枚举（不认识返回 null，让调用方按默认处理）。</summary>
+    private static LoginSchool? ParseSchool(string text) => text.ToLowerInvariant() switch
+    {
+        "sjtu" or "j" => LoginSchool.Sjtu,
+        "tongji" or "tj" => LoginSchool.Tongji,
+        _ => null,
+    };
 
     /// <summary>材质名 → 枚举（认 <c>acrylic-thin</c> / <c>acrylicthin</c> / <c>thin</c> 三种写法；不认识返回 null）。</summary>
     private static Data.MaterialMode? ParseMaterial(string text) => text.ToLowerInvariant() switch

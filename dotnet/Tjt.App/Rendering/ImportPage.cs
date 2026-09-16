@@ -32,13 +32,15 @@ internal static class ImportPage
     /// <param name="dark">深色主题（用色）。</param>
     /// <param name="windowHandle">设置窗口句柄（文件选择器要 <c>InitializeWithWindow</c>）。</param>
     /// <param name="xamlRoot">取当前 XamlRoot（<see cref="ContentDialog"/> 需要）。</param>
-    /// <param name="openLogin">打开内置登录窗口（外壳提供；为 <c>null</c> 时按钮禁用）。</param>
+    /// <param name="openLogin">打开同济内置登录窗口（外壳提供；为 <c>null</c> 时按钮禁用）。</param>
+    /// <param name="openSjtuLogin">打开交大内置登录窗口（同上）。</param>
     public static UIElement Build(
         ImportService imports,
         bool dark,
         nint windowHandle,
         Func<XamlRoot?> xamlRoot,
-        Action? openLogin = null)
+        Action? openLogin = null,
+        Action? openSjtuLogin = null)
     {
         ArgumentNullException.ThrowIfNull(imports);
 
@@ -108,6 +110,8 @@ internal static class ImportPage
                 + "    别复制成校历那条 /api/baseresservice/schoolCalendar/detail —— 那只是学期起止，里面没有课程。\n"
                 + "4. 粘贴到上面的框里 → 点「获取我的课表」。学期 id 会从请求里的 calendarId 自动取，"
                 + "所以「现在第几周」也是准的。\n"
+                + "上海交通大学：登录 j.sjtu.edu.cn 打开课表页，F12 里复制任意一条 listBySemester / listByWeek\n"
+                + "    请求即可 —— 程序会只取其中的学期参数，改用登录态取整学期课表与教务日历（按周那条不带周次信息）。\n"
                 + "粘贴内容只保存在本机 " + ImportService.DataDirectory + "\\credentials.json，不上传、不进日志。",
         };
 
@@ -123,17 +127,28 @@ internal static class ImportPage
         };
         loginButton.Click += (_, _) => openLogin?.Invoke();
 
+        // 交大：同一个登录窗口，只是起始页与捕获策略不同（见 LoginSchool）——
+        // 它拿登录态主动取"整学期课表 + 教务日历"，因为课表页默认的按周接口不带周次信息
+        var sjtuLoginButton = new Button
+        {
+            Content = "登录交大并获取课表",
+            MinWidth = 168,
+            IsEnabled = openSjtuLogin is not null,
+        };
+        sjtuLoginButton.Click += (_, _) => openSjtuLogin?.Invoke();
+
         var loginRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         loginRow.Children.Add(loginButton);
+        loginRow.Children.Add(sjtuLoginButton);
         loginRow.Children.Add(new TextBlock
         {
-            Text = "在应用自己的窗口里登录 1 系统（含短信验证），课表一打开就自动抓取导入。\n"
-                 + "还没有真实课表时，挂件启动也会自动打开这个窗口。",
+            Text = "在应用自己的窗口里登录学校系统（同济含短信验证 / 交大走 jAccount），课表随即自动抓取导入。\n"
+                 + "还没有真实课表时，挂件启动也会自动打开同济那个窗口。",
             FontSize = StatusFontSize,
             Opacity = 0.66,
             VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 560,
+            MaxWidth = 520,
         });
 
         var advanced = new TextBlock
@@ -154,8 +169,8 @@ internal static class ImportPage
 
         var fetchCard = SettingsView.Block(
             IconGlyph.Globe,
-            "从 1 系统获取",
-            "推荐内置登录；也可以粘贴浏览器请求，用它的登录态抓一次",
+            "从学校系统获取",
+            "推荐内置登录（同济 / 交大）；也可以粘贴浏览器请求，用它的登录态抓一次",
             fetchBody,
             dark,
             fetchAction);

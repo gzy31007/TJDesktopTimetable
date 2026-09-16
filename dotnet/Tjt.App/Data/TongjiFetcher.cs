@@ -1,19 +1,28 @@
 using System.Net.Http;
 using System.Text;
 using Tjt.Core;
+using Tjt.Core.Adapters;
 
 namespace Tjt.App.Data;
 
 /// <summary>抓取过程里给用户看的一条探测结果（如"HTTP 200"、"响应 128 KB"）。</summary>
 internal sealed record FetchProbe(string Label, string Value);
 
-/// <summary>一次抓取的结果：失败时 <see cref="Message"/> 直接显示给用户。</summary>
+/// <summary>
+/// 一次抓取的结果：失败时 <see cref="Message"/> 直接显示给用户。
+///
+/// <para><see cref="AdapterId"/> 与 <see cref="Files"/> 是为**交大**加的：交大一张课表要两份数据
+/// （课程 + 教务日历），而且必须显式点名适配器（响应形状与同济完全不同，靠自动探测也能中，但没必要赌）。
+/// 同济那条路保持默认值，行为不变。</para>
+/// </summary>
 internal sealed record TongjiFetchOutcome(
     bool Ok,
     string Message,
     string? TimetableText,
     IReadOnlyList<FetchProbe> Probes,
-    string? TermId = null);
+    string? TermId = null,
+    string? AdapterId = null,
+    IReadOnlyList<ImportFile>? Files = null);
 
 /// <summary>
 /// 用「用户从浏览器复制出来的请求」抓取个人课表（TS 侧 <c>apps/desktop/src/main/tongji.ts</c> 的移植）。
@@ -38,39 +47,7 @@ internal static class TongjiFetcher
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// 抓取：解析粘贴的请求 → 原样发一次 → 检查响应像不像课表数据。
-    /// </summary>
-    /// <param name="requestText">粘贴的请求全文（含 Cookie）。</param>
-    /// <param name="cancellationToken">调用方的取消（设置窗口关掉时用）。</param>
-    public static async Task<TongjiFetchOutcome> FetchAsync(string requestText, CancellationToken cancellationToken = default)
-    {
-        var spec = HttpRequestParser.Parse(requestText);
-        if (spec is null)
-        {
-            return Fail("没能从粘贴的内容里解析出请求。请在 F12 → Network 里右键该请求 → Copy → Copy as cURL，然后原样粘贴到上面。");
-        }
-
-        if (HttpRequestParser.CookieOf(spec).Length == 0)
-        {
-            // 实测用户最容易犯的错：只把第一行（URL）复制进去了，于是"没有 Cookie"——
-            // 这句话必须把他引回"整条命令"，否则他会以为是程序不认这条请求。
-            var onlyUrl = !requestText.Contains("-H", StringComparison.Ordinal)
-                && !requestText.Contains("--header", StringComparison.Ordinal)
-                && !requestText.Contains("-b ", StringComparison.Ordinal)
-                && !requestText.Contains("Invoke-", StringComparison.OrdinalIgnoreCase)
-                && !requestText.Contains("$session", StringComparison.Ordinal);
-
-            return Fail(onlyUrl
-                ? "粘贴的内容里只有地址、没有请求头，所以没有 Cookie。看起来只复制了第一行 —— "
-                  + "请在该请求上右键 → Copy → Copy as cURL，把整条命令（含 -H 'cookie: …' 那些行）一起粘贴过来。"
-                : "粘贴的请求里没有 Cookie：请用「Copy as cURL」（会带上全部请求头），而不是只复制 URL。");
-        }
-
-        return await FetchSpecAsync(spec, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// 把**已经解析好的**请求发出去（<see cref="FetchAsync"/> 与内置登录窗口共用这一条）。
+    /// 把**已经解析好的**请求发出去（<see cref="SchoolFetcher"/> 与内置登录窗口共用这一条）。
     ///
     /// <para>内置登录窗口为什么要用它：课上那条报表接口被 WebView2 拦到时，多数情况能直接读到响应体，
     /// 但 POST 响应（旧 <c>getDataBk</c>）读不到 body —— 那时就用页面自己的 cookie 把同一个 GET
@@ -154,7 +131,7 @@ internal static class TongjiFetcher
     /// 必须挂在 <c>Content</c> 上 —— 用 <c>StringContent</c> 的默认值会让服务端按
     /// <c>text/plain</c> 收 JSON（与 Electron 侧"照抄请求头"的语义保持一致）。</para>
     /// </summary>
-    private static HttpRequestMessage BuildRequest(HttpRequestSpec spec, Uri uri)
+    internal static HttpRequestMessage BuildRequest(HttpRequestSpec spec, Uri uri)
     {
         var request = new HttpRequestMessage(new HttpMethod(spec.Method), uri);
 
@@ -182,7 +159,7 @@ internal static class TongjiFetcher
         return request;
     }
 
-    private static TongjiFetchOutcome Fail(string message, IReadOnlyList<FetchProbe>? probes = null) =>
+    internal static TongjiFetchOutcome Fail(string message, IReadOnlyList<FetchProbe>? probes = null) =>
         new(false, message, null, probes ?? []);
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..max];
