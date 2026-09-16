@@ -135,6 +135,12 @@ public partial class App : Application
                 return; // finally 里收尾
             }
 
+            // 开机自启：以 settings.json 为准把注册表 Run 项对齐一次（幂等 —— 换了安装目录、
+            // 或用户手工删过那项，都会在这一步自动纠正）。
+            // 只在交互模式做：自检 / 诊断路径（--smoke / --fetch-check / --login-check）都已提前 return，
+            // 那些会反复启动的验收流程不该动真实系统状态（同"冒烟不写设置"的理由）。
+            AutoStart.Sync(window.CurrentSettings.LaunchAtLogin);
+
             window.ShowWidget();
             _tray = BuildTray(window);
 

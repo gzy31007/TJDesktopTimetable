@@ -317,6 +317,14 @@ public sealed partial class SettingsWindow : Window
         };
         rows.Add(SettingsView.Row("\uE7F4", "启动时显示挂件", "关掉后启动只在托盘区常驻，需要时再从托盘显示", showWidget, dark));
 
+        var launchAtLogin = SettingsView.Switch(_current.LaunchAtLogin);
+        launchAtLogin.Toggled += (_, _) =>
+        {
+            if (_loading) return;
+            Apply(_current with { LaunchAtLogin = launchAtLogin.IsOn });
+        };
+        rows.Add(SettingsView.Row("\uE7E8", "开机自启", "登录 Windows 后自动启动挂件（写当前用户的 Run 项；关掉时会删干净）", launchAtLogin, dark));
+
         var desktopLayer = SettingsView.Switch(_current.DesktopLayer);
         desktopLayer.Toggled += (_, _) =>
         {

@@ -714,6 +714,14 @@ public sealed partial class MainWindow : Window
             AppLog.Line($"[settings] 显示周末 → {next.ShowWeekend}");
             Render("显示周末变化");
         }
+
+        if (previous.LaunchAtLogin != next.LaunchAtLogin)
+        {
+            // 开机自启是"设置 → 系统状态"的同步（写 HKCU Run 项）；失败只记日志，
+            // 设置值保留 —— 下次启动还会再对一次账（见 AutoStart.Sync 的注释）
+            var ok = AutoStart.Sync(next.LaunchAtLogin);
+            AppLog.Line($"[settings] 开机自启 → {next.LaunchAtLogin} applied={ok}");
+        }
     }
 
     /// <summary>

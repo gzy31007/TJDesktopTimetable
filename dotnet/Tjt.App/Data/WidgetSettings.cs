@@ -55,6 +55,14 @@ internal sealed record WidgetSettings
     public bool DesktopLayer { get; init; } = true;
 
     /// <summary>
+    /// 是否开机自启（登录时自动拉起挂件）。
+    ///
+    /// <para>落点是 <c>HKCU\...\CurrentVersion\Run</c> 下的 <c>TJDesktopTimetable</c> 值
+    /// （见 <see cref="AutoStart"/>）；这里只记"用户想要什么"，启动时会以它为准把注册表对齐一遍。</para>
+    /// </summary>
+    public bool LaunchAtLogin { get; init; }
+
+    /// <summary>
     /// 是否显示周末两列（周六 / 周日）。
     ///
     /// <para>默认 <c>true</c>（与历史行为一致）。关掉后课表只画周一到周五，周末的课**不占列**
