@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Linux 外壳（Avalonia）：窗口 / 渲染 / X11 贴桌面层 / 导入编排。
+
+    与 Tjt.App（WinUI 外壳，只在 Windows 上编译）平行的另一条壳：
+    - 业务逻辑全部来自 TjtCore（平台无关），视觉计算全部来自 Tjt.Widget（纯函数）；
+    - 本工程只做"必须在 Linux 桌面上跑"的事：Avalonia 窗口、X11 层级、文件与网络 IO；
+    - 刻意不并进 dotnet/TjtTimetable.slnx（那是平台无关的测试解决方案，结构保持与上游一致），
+      用 dotnet/TjtTimetable.Linux.slnx 单独构建。
+
+    数据目录：Environment.SpecialFolder.ApplicationData 在 Linux 上映射 XDG（~/.config），
+    落点 ~/.config/TJDesktopTimetable/，settings.json / timetable.json / credentials.json
+    与 Windows 版同构（手工互拷可用）。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Tjt.Linux</RootNamespace>
+    <AssemblyName>Tjt.Linux</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TjtCore\TjtCore.csproj" />
+    <ProjectReference Include="..\Tjt.Widget\Tjt.Widget.csproj" />
+  </ItemGroup>
+
+  <!--
+    脱敏黄金数据：与 Tjt.App 同一份（单一真源），启动时读它当作"当前课表"，
+    找不到时退回内置样例（见 Data/DemoData.cs）。
+    图标同样复用 Tjt.App 的资产（packaging/tjt-linux.desktop 安装时引用）。
+  -->
+  <ItemGroup>
+    <Content Include="..\fixtures\tongji-2026-1-personal.json"
+             Link="fixtures\tongji-2026-1-personal.json"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Tjt.App\Assets\app-256.png"
+             Link="Assets\app-256.png"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
