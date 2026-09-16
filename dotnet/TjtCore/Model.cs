@@ -58,9 +58,18 @@ public sealed record Term(
     IReadOnlyList<Slot> Slots,
     string? StartDate = null)
 {
-    /// <summary>人类可读的学期标签（TS 侧没有这个字段，落盘时忽略它，保持两端文件同形）。</summary>
+    /// <summary>
+    /// 人类可读的学期标签（TS 侧没有这个字段，落盘时忽略它，保持两端文件同形）。
+    ///
+    /// <para>年份解析不出来时（交大若只贴了课表 JSON、既没有教务日历也没带学期参数）给
+    /// <c>未知学期</c> —— 不然表头会出现 <c>0-1学年第0学期</c> 这种明显是 bug 的文案。</para>
+    /// </summary>
     [JsonIgnore]
-    public string Label => string.IsNullOrEmpty(Name) ? $"{Year}-{Year + 1}学年第{TermNo}学期" : Name;
+    public string Label => !string.IsNullOrEmpty(Name)
+        ? Name
+        : Year > 0
+            ? $"{Year}-{Year + 1}学年第{TermNo}学期"
+            : "未知学期";
 
     public string SlotBegin(int index) => Slots.FirstOrDefault(s => s.Index == index)?.Begin ?? string.Empty;
 

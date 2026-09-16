@@ -125,6 +125,18 @@ public class SjtuTimetableTests
         Assert.Equal(11, result.Courses.Count);
     }
 
+    [Fact]
+    public void 既没有日历也没有学期参数时学期标签显示为未知()
+    {
+        // 交大响应体里没有学期字段（只有 time/weekNum），日历与 TermId 都缺时确实无从得知 ——
+        // 但表头不能出现 "0-1学年第0学期" 这种看起来像 bug 的文案
+        var result = ImportPipeline.ImportTimetable(new ImportInput { Text = SemesterJson });
+
+        Assert.Equal("sjtu-student", result.AdapterId);
+        Assert.Equal(0, result.Term.Year);
+        Assert.Equal("未知学期", result.Term.Label);
+    }
+
     // ── 课程与时段 ───────────────────────────────────────────────────────────────
 
     [Fact]
