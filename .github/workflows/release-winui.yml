@@ -80,6 +80,11 @@ jobs:
             $ghArgs = @('release', 'create', $tag, '--repo', '${{ github.repository }}', '--title', "TJDesktopTimetable $tag", '--verify-tag')
             if (Test-Path $notes) { $ghArgs += @('--notes-file', $notes) } else { $ghArgs += @('--generate-notes') }
             & gh @ghArgs
+            if ($LASTEXITCODE -ne 0) {
+              # 与 release-linux.yml 并发时可能撞车（同一个 tag 两个工作流）：只要 Release 已存在就继续
+              gh release view $tag --repo '${{ github.repository }}' 2>$null
+              if ($LASTEXITCODE -ne 0) { throw "创建 Release $tag 失败（既没建出来也读不到）" }
+            }
           }
           gh release upload $tag $zip.FullName --repo '${{ github.repository }}' --clobber
           gh release view $tag --repo '${{ github.repository }}'

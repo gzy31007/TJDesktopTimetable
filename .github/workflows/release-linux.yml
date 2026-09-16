@@ -1,0 +1,102 @@
+name: Release (Linux)
+
+# v* tag → 发布自包含的 Avalonia Linux 挂件（解压即用，不需要预装 .NET）。
+#
+# 与 release-winui.yml 平行：两个工作流都由同一个 tag 触发、都往同一个 Release 挂资产
+# （Windows 版 zip / Linux 版 tar.gz），所以两边都有"Release 不存在就创建"的逻辑 ——
+# 谁先跑完谁创建，后到的那个只上传，`gh release create` 撞车时容忍"已存在"。
+#
+# 只做构建与打包，**不跑 GUI 运行时验收**：runner 上没有 X11 会话，
+# 贴桌面层 / 显示桌面可见性 / 拖缩这些行为只能在真机（KDE X11 / XWayland）上看，
+# 见 README「Linux 版」一节的验收口径。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish（Tjt.Linux，自包含 linux-x64 单文件）
+        run: >
+          dotnet publish dotnet/Tjt.Linux/Tjt.Linux.csproj
+          --configuration Release
+          --runtime linux-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:DebugType=embedded
+          --output publish
+
+      - name: 打包（tar.gz + 使用说明）
+        run: |
+          set -euo pipefail
+          if [ ! -x publish/Tjt.Linux ]; then
+            echo "publish 产物里没有可执行的 Tjt.Linux："
+            ls -la publish
+            exit 1
+          fi
+          # 版本号取自 Directory.Build.props（Release tag 与它应当一致；不一致时以产物为准并提示）
+          version=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' dotnet/Directory.Build.props | head -1)
+          name="TJDesktopTimetable-v${version}-linux-x64"
+          cat > publish/使用说明.txt <<EOF
+          TJDesktopTimetable v${version} · 同济桌面课表小组件（Avalonia Linux 版）
+
+          1. 解压到任意目录，例如 ~/.local/opt/TJDesktopTimetable
+          2. 运行其中的 Tjt.Linux（自包含产物，不需要预装 .NET）
+          3. 首次启动时若还没有课表，会打开导入窗口：浏览器 F12 → Network → 打开「我的课表」页刷新 →
+             找到返回 200、内容是课程列表的那条请求 → 右键 Copy → Copy as cURL → 粘贴 → 获取我的课表
+
+          运行时依赖：X11 或 XWayland（Avalonia 稳定线没有原生 Wayland 后端）；
+          Avalonia X11 后端还需要 libICE / libSM —— Debian/Ubuntu: sudo apt install libice6 libsm6，
+          Arch: sudo pacman -S libice libsm（桌面发行版一般随 DE 装好了，缺了会启动即崩）。
+          中文课表需要一个含 CJK 的字体（noto-fonts-cjk / fonts-noto-cjk 等），否则中文渲染成方框。
+
+          数据目录：~/.config/TJDesktopTimetable/（settings.json / timetable.json / credentials.json）
+          卸载：删掉本目录；想清干净就把数据目录一并删掉。
+          桌面集成（可选）：把仓库里的 dotnet/Tjt.Linux/packaging/tjt-linux.desktop 拷到
+          ~/.local/share/applications/，再把 Exec= 指向解压目录下的 Tjt.Linux、Icon= 指向
+          Assets/app-256.png，然后 update-desktop-database 刷新。
+
+          已知限制见仓库 README。
+          EOF
+          tar -czf "${name}.tar.gz" -C publish .
+          echo "打包完成：${name}.tar.gz"
+          ls -l "${name}.tar.gz"
+          tar -tzf "${name}.tar.gz" | head -20
+
+      - name: 创建/更新 Release 并上传资产
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "${TAG#v}" = "$TAG" ]; then
+            echo "不是 v* tag 触发（ref=$TAG），跳过发布"
+            exit 0
+          fi
+          version=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' dotnet/Directory.Build.props | head -1)
+          asset=$(ls TJDesktopTimetable-v*-linux-x64.tar.gz | head -1)
+          notes="docs/releases/${TAG}.md"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在（win 工作流先建的），直接上传 Linux 资产"
+          else
+            ghArgs=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "TJDesktopTimetable $TAG" --verify-tag)
+            if [ -f "$notes" ]; then ghArgs+=(--notes-file "$notes"); else ghArgs+=(--generate-notes); fi
+            # 与 win 工作流并发时可能撞车：创建失败但 Release 已存在，就当成功继续上传
+            gh "${ghArgs[@]}" || gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          fi
+          gh release upload "$TAG" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY"
