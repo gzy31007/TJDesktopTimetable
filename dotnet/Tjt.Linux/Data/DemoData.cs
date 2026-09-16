@@ -20,7 +20,7 @@ internal static class DemoData
               "courseCode": "90000000001",
               "courseName": "示例高等数学（工科类）",
               "teachClassId": 9000000000000001,
-              "teachClassCode": "9000000000001",
+              "teachClassCode": "9000000000000001",
               "times": [
                 { "timeStart": 1, "timeEnd": 2, "dayOfWeek": 1, "weeks": [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
                   "teacherCode": "10001", "teacherCodeI18n": "张三", "roomIdI18n": "南101" }
@@ -32,7 +32,7 @@ internal static class DemoData
               "courseCode": "90000000002",
               "courseName": "示例大学物理",
               "teachClassId": 9000000000000002,
-              "teachClassCode": "9000000000002",
+              "teachClassCode": "9000000000000002",
               "times": [
                 { "timeStart": 1, "timeEnd": 2, "dayOfWeek": 1, "weeks": [1,3,5,7,9,11,13,15],
                   "teacherCode": "10002", "teacherCodeI18n": "李四", "roomIdI18n": "北201" }
@@ -44,7 +44,7 @@ internal static class DemoData
               "courseCode": "90000000003",
               "courseName": "示例大学英语",
               "teachClassId": 9000000000000003,
-              "teachClassCode": "9000000000003",
+              "teachClassCode": "9000000000000003",
               "times": [
                 { "timeStart": 1, "timeEnd": 2, "dayOfWeek": 1, "weeks": [2,4,6,8,10,12,14,16],
                   "teacherCode": "10003", "teacherCodeI18n": "王五", "roomIdI18n": "南305" }
@@ -56,7 +56,7 @@ internal static class DemoData
               "courseCode": "90000000004",
               "courseName": "示例跨节实践（部分重叠）",
               "teachClassId": 9000000000000004,
-              "teachClassCode": "9000000000004",
+              "teachClassCode": "9000000000000004",
               "times": [
                 { "timeStart": 1, "timeEnd": 3, "dayOfWeek": 1, "weeks": [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
                   "teacherCode": "10004", "teacherCodeI18n": "赵六", "roomIdI18n": "实验楼" }
@@ -68,7 +68,7 @@ internal static class DemoData
               "courseCode": "90000000005",
               "courseName": "示例并行交替甲",
               "teachClassId": 9000000000000005,
-              "teachClassCode": "9000000000005",
+              "teachClassCode": "9000000000000005",
               "times": [
                 { "timeStart": 5, "timeEnd": 6, "dayOfWeek": 3, "weeks": [1,2,3,4,5,6,7,8],
                   "teacherCode": "10005", "teacherCodeI18n": "孙七", "roomIdI18n": "南102" },
