@@ -49,7 +49,7 @@ internal sealed class ImportWindow : Window
 
         _requestBox = new TextBox
         {
-            PlaceholderText = "浏览器 F12 → Network → 右键课表请求 → Copy → Copy as cURL，整段粘贴到这里",
+            PlaceholderText = "浏览器 F12 → Network → 右键课表请求 → Copy → Copy as PowerShell，整段粘贴到这里",
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 110,
@@ -104,7 +104,7 @@ internal sealed class ImportWindow : Window
         };
         _fetchButton.Click += OnFetch;
 
-        return BuildSection("从 1 系统获取", "粘贴一条浏览器请求（F12 → Copy as cURL），程序照原样请求一次。请求只存本机，不上传。", new Control[]
+        return BuildSection("从学校系统获取", "粘贴一条浏览器请求（F12 → Copy as PowerShell，同济 / 交大通用），程序只发这一次请求。请求只存本机，不上传。", new Control[]
         {
             _requestBox,
             _fetchButton,

@@ -143,7 +143,7 @@ install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
 
 **A. 内置登录（推荐）**
 
-这个窗口只有两个触发点：**设置窗口「导入」页 → 登录并获取课表**（同济 / 交大各一个按钮，手动），
+这个窗口只有两个触发点：**设置窗口「导入」页 → 选学校（同济 / 交大下拉框）→ 点「登录并获取课表」**（手动），
 以及命令行 `--login`（学校由 `--login-school` 定）。
 挂件 `⋯` 菜单与托盘里不设这一项 —— 换课表本来就要进「导入」页。
 
@@ -173,6 +173,7 @@ install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
 
 **同济：** 浏览器登录 [1 系统](https://1.tongji.edu.cn/)，打开"我的课表"页面。
 2. F12 → **Network** → 刷新页面 → 找到**返回 200 且内容是课程列表**的那条请求 → 右键 → **Copy → Copy as cURL**。
+   - 复制方式：右键 → **Copy as PowerShell**（`Copy as cURL` 也支持）。
    - 课表页现在调的是 `GET /api/electionservice/reportManagement/findStudentTimetab?calendarId=…&studentCode=…`
      （研究生页是 `findSchoolTimetab2`）；旧接口 `…/student/xxxx/getDataBk` 同样支持。
    - 复制错请求（例如 `schoolCalendar/detail`——那是**校历**、里面没有课程）时，程序会在探测行里如实告诉你
@@ -182,7 +183,7 @@ install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
 4. 程序照原样请求一次（请求里自带 Cookie 与 `x-token`）→ 解析 → 立即应用到桌面挂件；
    学期 id 直接从请求 URL 的 `calendarId` 取，所以"当前第几周"也是准的。
 
-**交大：** 浏览器登录 `j.sjtu.edu.cn` 打开课表页，F12 里**复制任意一条**课表请求
+**交大：** 浏览器登录 `j.sjtu.edu.cn` 打开课表页，F12 里右键 → Copy as PowerShell，**复制任意一条**课表请求
 （`/app/stu/lesson/listBySemester` 或按周的 `listByWeek`）即可。程序只从里面取 `year`/`semester`
 与 Cookie，然后自己去取**整学期课表 + 教务日历** —— 因为按周那条响应不带周次信息，
 照它建出来的课表只会剩本周有课。请求只会打到 `j.sjtu.edu.cn`（粘错地址也不会把登录态发去别处）。

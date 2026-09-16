@@ -2,7 +2,7 @@ namespace Tjt.App.Data;
 
 /// <summary>
 /// 内置样例课表：**虚构的演示数据**（课程名都以「示例」开头，教师 / 教室都是编的），
-/// 覆盖周一到周五、1-10 节，并保留三种值得肉眼核对的场景：并排分列、单双周交替、跨节重叠。
+/// 覆盖周一到周五、1-10 节，并保留两种值得肉眼核对的场景：同格并排分列、单双周交替。
 ///
 /// <para>它是"没有导入过课表"时挂件上显示的东西。刻意**不**用 <c>dotnet/fixtures/</c> 里的
 /// 黄金数据当回退：那是真实抓包（脱敏但不虚构），拿它当演示会让用户以为"程序怎么有我的课表"。
@@ -53,18 +53,6 @@ internal static class DemoData
               "times": [
                 { "timeStart": 1, "timeEnd": 2, "dayOfWeek": 1, "weeks": [2,4,6,8,10,12,14,16],
                   "teacherCode": "10003", "teacherCodeI18n": "王五", "roomIdI18n": "南305" }
-              ]
-            }
-          },
-          {
-            "course": {
-              "courseCode": "90000000004",
-              "courseName": "示例跨节实践（部分重叠）",
-              "teachClassId": 9000000000000004,
-              "teachClassCode": "9000000000000004",
-              "times": [
-                { "timeStart": 1, "timeEnd": 3, "dayOfWeek": 1, "weeks": [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
-                  "teacherCode": "10004", "teacherCodeI18n": "赵六", "roomIdI18n": "实验楼" }
               ]
             }
           },

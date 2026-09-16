@@ -84,8 +84,8 @@ internal static class ImportPage
             FontFamily = new FontFamily("Consolas"),
             FontSize = 12,
             PlaceholderText =
-                "在这里粘贴从浏览器复制的请求（F12 → Network → 右键该请求 → Copy → Copy as cURL）。\n"
-                + "也支持 PowerShell 的 Invoke-WebRequest 片段。整条请求自带登录态，程序只做这一次请求。",
+                "在这里粘贴从浏览器复制的请求（F12 → Network → 右键该请求 → Copy → Copy as PowerShell）。\n"
+                + "也支持 Copy as cURL / 直接贴一条 URL。整条请求自带登录态，程序只做这一次请求。",
         };
 
         // 主操作放在卡片标题行右侧：不用滚动就能看见（放输入框下面会掉到首屏之外，截图实测过）
@@ -102,54 +102,60 @@ internal static class ImportPage
             TextWrapping = TextWrapping.Wrap,
             Text =
                 "怎么复制这条请求？（一次即可，课表变了再重来一次）\n"
-                + "1. 浏览器登录 1.tongji.edu.cn，打开「我的课表」页面。\n"
+                + "1. 浏览器登录学校课表页：同济 1.tongji.edu.cn（点开「我的课表」）或交大 j.sjtu.edu.cn（课表页）。\n"
                 + "2. 按 F12 → Network → 刷新页面。\n"
-                + "3. 找到返回 200、内容是课程列表的那条 —— 课表页现在调的是\n"
-                + "    /api/electionservice/reportManagement/findStudentTimetab?calendarId=…&studentCode=…\n"
-                + "    （旧接口 /api/electionservice/student/xxxx/getDataBk 同样支持），右键 → Copy → Copy as cURL。\n"
-                + "    别复制成校历那条 /api/baseresservice/schoolCalendar/detail —— 那只是学期起止，里面没有课程。\n"
-                + "4. 粘贴到上面的框里 → 点「获取我的课表」。学期 id 会从请求里的 calendarId 自动取，"
-                + "所以「现在第几周」也是准的。\n"
-                + "上海交通大学：登录 j.sjtu.edu.cn 打开课表页，F12 里复制任意一条 listBySemester / listByWeek\n"
-                + "    请求即可 —— 程序会只取其中的学期参数，改用登录态取整学期课表与教务日历（按周那条不带周次信息）。\n"
+                + "3. 找到返回 200、内容是课程列表的那条 → 右键 → Copy → Copy as PowerShell，整段粘贴到上面的框里。\n"
+                + "   · 同济：课表页现在调的是 /api/electionservice/reportManagement/findStudentTimetab?calendarId=…&studentCode=…\n"
+                + "     （旧接口 /api/electionservice/student/xxxx/getDataBk 同样支持）；别复制成校历那条\n"
+                + "     /api/baseresservice/schoolCalendar/detail —— 那只是学期起止，里面没有课程。\n"
+                + "   · 交大：任意一条 listBySemester / listByWeek 都行 —— 程序只取其中的学期参数，\n"
+                + "     改用登录态取整学期课表与教务日历（课表页默认那条按周请求不带周次信息）。\n"
+                + "   · PowerShell 那份把登录态放在 $session.Cookies.Add(...) 行里，连请求一起复制过来即可；\n"
+                + "     只复制了地址（没有 cookie）时程序会明确提示你。\n"
+                + "4. 点「获取我的课表」。同济的学期 id 从请求里的 calendarId 自动取，所以「现在第几周」也是准的。\n"
                 + "粘贴内容只保存在本机 " + ImportService.DataDirectory + "\\credentials.json，不上传、不进日志。",
         };
 
         var fetchStatus = StatusPanel();
 
-        // ── 推荐路径：内置登录窗口（不用去浏览器抓请求，也不用关 Edge / 读别人的 cookie）
+        // ── 推荐路径：内置登录窗口（选学校 → 一个按钮；不用去浏览器抓请求，也不读别人的 cookie）
+        // 学校用下拉框选，而不是每个学校一个按钮：按钮写死校名，再加一所学校就要再加一个按钮 + 一列回调。
+        var schoolCombo = new ComboBox { MinWidth = 220, SelectedIndex = 0 };
+        schoolCombo.Items.Add("同济大学（1 系统）");
+        schoolCombo.Items.Add("上海交通大学（学在交大）");
+
         var loginButton = new Button
         {
-            Content = "登录同济并获取课表",
-            MinWidth = 168,
+            Content = "登录并获取课表",
+            MinWidth = 148,
             Style = AccentButtonStyle(),
-            IsEnabled = openLogin is not null,
+            IsEnabled = openLogin is not null || openSjtuLogin is not null,
         };
-        loginButton.Click += (_, _) => openLogin?.Invoke();
-
-        // 交大：同一个登录窗口，只是起始页与捕获策略不同（见 LoginSchool）——
-        // 它拿登录态主动取"整学期课表 + 教务日历"，因为课表页默认的按周接口不带周次信息
-        var sjtuLoginButton = new Button
+        loginButton.Click += (_, _) =>
         {
-            Content = "登录交大并获取课表",
-            MinWidth = 168,
-            IsEnabled = openSjtuLogin is not null,
+            if (schoolCombo.SelectedIndex == 1) openSjtuLogin?.Invoke();
+            else openLogin?.Invoke();
         };
-        sjtuLoginButton.Click += (_, _) => openSjtuLogin?.Invoke();
 
-        var loginRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        var loginRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        loginRow.Children.Add(schoolCombo);
         loginRow.Children.Add(loginButton);
-        loginRow.Children.Add(sjtuLoginButton);
-        loginRow.Children.Add(new TextBlock
+
+        // ⚠️ 这段说明**不能**塞进上面那个水平 StackPanel：水平 StackPanel 用无限宽度测量子元素，
+        // TextWrapping 直接失效，窗口一窄文字就横着溢出（2026-09-17 用户实测"提示没有折叠"）。
+        var loginHint = new TextBlock
         {
-            Text = "在应用自己的窗口里登录学校系统（同济含短信验证 / 交大走 jAccount），课表随即自动抓取导入。\n"
-                 + "还没有真实课表时，挂件启动也会自动打开同济那个窗口。",
+            Text = "在应用自己的窗口里打开所选学校的登录页（同济统一身份认证含短信 / 交大 jAccount），"
+                 + "课表随即自动抓取导入 —— 本应用不接触你的密码。",
             FontSize = StatusFontSize,
             Opacity = 0.66,
-            VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 520,
-        });
+            MaxWidth = 640,
+        };
+
+        var loginStack = new StackPanel { Spacing = 8 };
+        loginStack.Children.Add(loginRow);
+        loginStack.Children.Add(loginHint);
 
         var advanced = new TextBlock
         {
@@ -161,7 +167,7 @@ internal static class ImportPage
         };
 
         var fetchBody = new StackPanel { Spacing = 10 };
-        fetchBody.Children.Add(loginRow);
+        fetchBody.Children.Add(loginStack);
         fetchBody.Children.Add(advanced);
         fetchBody.Children.Add(requestBox);
         fetchBody.Children.Add(fetchStatus);
@@ -194,7 +200,7 @@ internal static class ImportPage
             FontSize = 12,
             PlaceholderText =
                 "把课表接口的响应 JSON 直接粘贴到这里，或点「选择 JSON 文件…」。\n"
-                + "支持：同济 1 系统个人课表 / 课表预览页 HTML / 通用 JSON（courses[].sessions[]）。",
+                + "支持：同济 1 系统 / 上海交大课表 / 课表预览页 HTML / 通用 JSON（courses[].sessions[]）。",
         };
 
         var pick = new Button { Content = "选择 JSON 文件…", MinWidth = 132 };

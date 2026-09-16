@@ -175,7 +175,7 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   - 名称截断按实际宽度（`BoardVisualBuilder.ShortenName`）：由块宽定字号 → 按色块内可用宽度逐字估宽（西文 0.55 em、其余 1.0 em；可用宽 = 块宽 − 14 = 边框 2 + 内边距 12），省略号**先占位**再定截几个字。40 DIP 窄块由"2 字 + …"变"1 字 + …"（旧版第三个字本来也会被 `TextTrimming` 吃掉）。
   - **截图坑**（`.tools/shot-top.ps1`）：挂件贴桌面层，`CopyFromScreen` 会抓到压在上面的窗口（实测抓到聊天窗）。正解：`EnumWindows` 按 **PID** 找 HWND（`MainWindowHandle` 对 no-activate 不可靠）→ `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)` 脉冲 → 截图。脚本另有 `-X/-Y`（截前移窗口，避免出屏）、`-Now`、`-Material`、`ClassAt()` 下方窗口探针。
   - 同轮修的真 bug：自动登录窗口触发条件原写成 `origin != Imported` → `--fixture`（Explicit）也会弹窗；现在只认 `Fixture` / `Demo`。
-- **内置示例课表**（`Data/DemoData.cs`，两端同构）：**虚构**演示数据 —— 10 门课（课名都以"示例"开头）覆盖周一到周五 / 1-10 节，并保留三种可用于肉眼核对的场景（周一 1-2 节三块并排 + 1-3 节跨节重叠、周三 5-6 节单双周交替）。它是"还没导入课表"时挂件上的内容，也是首启引导的依据（`Origin = Demo`）。改课程数据不影响 `LayoutTests`（那份测试用同形状的内联构造课程）。
+- **内置示例课表**（`Data/DemoData.cs`，两端同构）：**虚构**演示数据 —— 9 门课（课名都以"示例"开头）覆盖周一到周五 / 1-10 节，保留两种可肉眼核对的场景：周一 1-2 节三块并排、周三 5-6 节单双周交替。⚠️ 别再往里加"跨节重叠"那种示范课（用户实测反馈显示难看）。它是"还没导入课表"时挂件上的内容，也是首启引导的依据（`Origin = Demo`）。改课程数据不影响 `LayoutTests`（那份测试用同形状的内联构造课程）。
 - **课表导入**：入口三处（设置「导入」页、托盘「导入课表…」、挂件 `⋯` 菜单「导入课表…」）都落到同一页；功能对齐 Electron 侧导入面板（粘请求抓取 / 粘或选 JSON / 适配器探测 / 探测行与诊断 / 清空 / 重新载入 / 打开数据目录）。
   - 分层：纯逻辑进 `TjtCore`（有 Linux 单测）——`HttpRequest.cs`（粘贴请求解析 = `http-request.ts` 移植）、`TimetableJson.cs`（课表 ↔ JSON）、`TongjiResponseProbe.cs`（= `looksLikeTimetable` 移植）；文件 IO / 网络 / 编排在 `Tjt.App/Data`——`TimetableStore`、`CredentialsStore`、`TongjiFetcher`、`ImportService`；UI 在 `Rendering/ImportPage.cs`。
   - 实现细节（`ImportService` 三回调与"窗口还没建"兜底、落盘两端同形、`Term.Label` 的 `[JsonIgnore]`、STJ 缺字段补空集合）：见 [`docs/import.md`](docs/import.md)。
@@ -193,7 +193,7 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   - 为什么让页面自己发请求：报表接口要 `studentCode`（前端加密 uid、随发版变）→ **不猜算法、不读浏览器 cookie 库**。
   - 兜底 cookie 重发：`GetContentAsync()` 能读 GET 响应体，POST（旧 `getDataBk`）读不到 → `CoreWebView2.CookieManager.GetCookiesAsync(url)` 取 cookie，经 `TongjiWebCapture.CookieHeader` 拼头，交给 `TongjiFetcher.FetchSpecAsync` 重发 GET。cookie 只进请求头、日志只记条数。
   - WebView2 独立 profile `%APPDATA%\TJDesktopTimetable\WebView2`（与 Edge 隔离；登录态留在那里 → 下次仍登录）；关 DevTools / 右键 / 密码保存与自动填充；`NewWindowRequested` 在当前窗口内继续导航；`WindowCloseRequested` 关窗。
-  - 触发点两个：① 设置「导入」页的按钮 —— 「登录同济并获取课表」/「登录交大并获取课表」（`SettingsHost.OpenLogin` / `OpenSjtuLogin` → `ImportPage.Build(..., openLogin, openSjtuLogin)`）；② `--login` 显式要求（学校取 `--login-school`，默认同济）。
+  - 触发点两个：① 设置「导入」页 —— **下拉框选学校**（同济大学 / 上海交通大学）+ 同一个「登录并获取课表」按钮（`ImportPage.Build(..., openLogin, openSjtuLogin)`，按选中项调 `SettingsHost.OpenLogin` / `OpenSjtuLogin`；别再把学校做成两个并排按钮 —— 加一所学校就要加一个按钮 + 一列回调）；② `--login` 显式要求（学校取 `--login-school`，默认同济）。
     ⚠️ **启动时"还没有真实课表"不再自动开这个窗口**（2026-09-17 用户实测反馈：会把交大用户直接塞进同济登录页）：`OnLaunched` 判 `loaded.Origin is TimetableOrigin.Demo` → 打开**设置窗口「导入」页**（`ShowSettings(..., PageImport)`，日志 `[settings] 还没有真实课表（origin=Demo）：打开「导入」页让用户选择学校`），由用户自己选学校。`--fixture` 是显式指定，不弹任何窗口。自检 / 诊断模式（`--smoke` / `--fetch-check` / `--login-check`）一律不自动弹；窗口单例（已开着就 `Activate`）。验收 `.tools/verify-auto-login.ps1`（A 例钉这条）。
   - 验收 `.tools/verify-auto-login.ps1`：A 删掉 `timetable.json` 启动 → 日志有 `[login] …hwnd=0x…`；B 先 `--import <fixture>` 再启动 → 无 `[login]`（脚本备份 / 还原真实 `timetable.json`）。
   - CLI：`--login`（启动即开，同济）、`--login-school tongji|sjtu`（选学校；验收脚本指向本地合成服务时主机名看不出学校）、`--login-check <url>`（开真窗口导航 → 捕获 → 写日志 → `Environment.Exit`，退出码表成败；60 秒看门狗）。
