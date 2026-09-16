@@ -50,14 +50,14 @@ docs/                   desktop-layer.md · winui-build.md · winui-lessons.md �
 
 **Windows**
 
-1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.2.0-win-x64.zip`（自包含：**不需要**预装 .NET 或 Windows App Runtime）。
+1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.0-win-x64.zip`（自包含：**不需要**预装 .NET 或 Windows App Runtime）。
 2. 解压到任意**本地磁盘**目录（别放在 `\\wsl.localhost\...` 这类 UNC 路径下）。
 3. 双击 `Tjt.App.exe`。首次启动会打开设置窗口的「导入课表」页，按下一节导入一次即可。
 
 **Linux**
 
-1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.2.0-linux-x64.tar.gz`（自包含单文件：**不需要**预装 .NET）。
-2. `tar -xzf TJDesktopTimetable-v1.2.0-linux-x64.tar.gz -C ~/.local/opt/TJDesktopTimetable`。
+1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.0-linux-x64.tar.gz`（自包含单文件：**不需要**预装 .NET）。
+2. `tar -xzf TJDesktopTimetable-v1.3.0-linux-x64.tar.gz -C ~/.local/opt/TJDesktopTimetable`。
 3. 运行 `~/.local/opt/TJDesktopTimetable/Tjt.Linux`。首次启动没有课表时会打开导入窗口。
    > 依赖：X11 / XWayland，以及 `libICE` / `libSM`（Debian/Ubuntu：`sudo apt install libice6 libsm6`）；
    > 中文课表需要 CJK 字体。详见下面 [Linux 版](#linux-版tjtlinux)。
@@ -215,6 +215,8 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
 - [x] **v1.1.0** · 内置登录窗口 + 「显示周末」开关（外加遮挡误拖、表头呼吸位、窗口图标三项修复）
 - [x] **v1.2.0** · Linux 版（Avalonia 壳）首发；视觉收口（时间列 64 DIP / 深色色块提亮 / 名称按宽度截断）+
       时间线按节次分段、画布贴顶、材质四档对齐 DeskBox
+- [x] **v1.3.0** · 开机自启 + **新版本提示**（启动后查一次 GitHub 最新发布：托盘与设置「关于」页提示，
+      可关、可跳过某个版本）
 - [ ] 新学期自动取校历（不再依赖内置学期表）
 - [ ] 周次过滤（只看单周 / 双周）
 - [ ] ICS / 图片导出
