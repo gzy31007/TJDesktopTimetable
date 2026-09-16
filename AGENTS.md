@@ -145,6 +145,13 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
   - 时机两处：① `App.OnLaunched` 交互路径启动时对一次账（自检 / 诊断 `--smoke` / `--fetch-check` / `--login-check` 都已提前 return，**不碰真实系统状态**）；② `MainWindow.ApplySettings` 里设置一变即同步。
   - 验收 `.tools/verify-autostart.ps1`（纯 ASCII）：A 开 → Run 值 = `"<exe>"`；B 关 → 值被删；C 塞一个错的旧值 → 下次启动被纠正；跑完还原 `settings.json` 与注册表。
   - ⚠️ 脚本写 `settings.json` 必须用 **UTF-8 无 BOM**（`New-Object System.Text.UTF8Encoding($false)`）：STJ 拒绝带 BOM 的 JSON → 应用回落到默认设置 → A 用例假 FAIL。
+- **新版本提示**（DeskBox 同款机制，只做到"提示 + 打开下载页"）：
+  - 分层：纯逻辑 `TjtCore/UpdateCheck.cs`（单测 `UpdateCheckTests.cs`）—— tag 解析（允许 `v` 前缀 / 预发布后缀，比较只看前三段）、只认正式 Release（`prerelease` / `draft` 一律不提示）、跳过语义（`Skipped` 只压住被跳过的那个版本）、资产匹配（`-win-x64.zip`）、`DownloadUrlFor`（没匹配到资产就退回 Release 页）；网络在 `Tjt.App/Data/UpdateChecker.cs`（`HttpClient` 超时 20s、UA `TJDesktopTimetable/<版本>`、**失败一律静默**只记 `[update] …`）。
+  - 时机：交互模式启动后**后台线程延迟 12 秒**查一次（DeskBox 是 45s —— 别跟启动抢资源）；**没有时间去重**（DeskBox 同款：每次启动一次，未认证限流 60/h 对单机够用）。设置项 `WidgetSettings.CheckUpdates`（默认 true，设置「常规」页可关）+ `SkippedVersion`（「关于」页「跳过此版本」写入）。
+  - 提示落点两处、**同一份** `MainWindow.CurrentUpdate`：托盘菜单项「发现新版本 vX」+ 托盘 Tooltip、设置「关于」页那一行（有更新时多出「下载」「跳过此版本」按钮）。分发都走 `App.ApplyUpdateResult` —— 加第三个入口必须从它走，否则会出现"设置页说有新版、托盘没有"。
+  - CLI：`--update-check`（查一次 → 写日志 → 退出码表成败；不建窗口、不落盘）、`--update-api <url>`（覆盖 API 地址，验收脚本指向本地合成服务，整条链路因此不依赖真网络）。
+  - 验收 `.tools/verify-update-check.ps1`（A 有新版 / B 已最新 / C 响应非法 / D 网络失败 / E 跳过 / F 关于页构建）：本地 `HttpListener` 假扮 GitHub API，payload 变化靠改文件（job 里读不到脚本变量）。
+  - ⚠️ 口径已改：README 的「离线」→「**离线优先**」，唯一联网行为就是这一次版本查询（用户明确定的口径：启动自动查 + 给开关 + 不做镜像回退）。改这条之前先想清楚。
 - **真机验收脚本**（`.tools/`，纯 ASCII）：`live-check.ps1`（启动 + owner / 可见性 + Win+D 后再读）；`verify-move.ps1`（`SetWindowPos` → `WM_EXITSIZEMOVE` → 落盘 → 重启恢复）；`verify-converge.ps1`（连跑 3 次不漂移）；`verify-topology.ps1`（`WM_DISPLAYCHANGE` → `[layer] 静息 display-change`）。⚠️ 脚本单引号里只放 ASCII（中文会让 PowerShell 5 解析崩）。
 - **入口与设置界面**：
   - **顶部条**（`Rendering/BoardRenderer.cs`）：左图标 + 学期 + 「第 N 周 · 今日 N 节」；右 **刷新** + **⋯ 图标**（`Rendering/IconGlyph.cs`，Segoe Fluent Icons）。`⋯` 菜单：设置 / 导入课表… / 重新载入课表 / 恢复默认位置 / 贴桌面层勾选 / 显示周末勾选 / 隐藏 / 退出。动作经 `WidgetActions`（渲染层只发意图，逻辑在 `MainWindow.BuildActions()`）。
