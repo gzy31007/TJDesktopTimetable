@@ -126,6 +126,9 @@ install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
 - **X11 / XWayland only**：Avalonia 稳定线没有原生 Wayland 后端；KWin 对 XWayland 窗口完整支持
   keep-below / DOCK（实测「显示桌面」后挂件仍可见）。其他 WM（GNOME/Mutter 等）行为未验证，
   不生效时可用 WM 自身的窗口规则兜底。
+- **运行期改窗口类型仅 KWin 实测**：DOCK 属性是在窗口 map 之后才改的（切回 NORMAL 同理），
+  EWMH 客户消息要求 WM 订阅 `SubstructureRedirectMask`——没有 WM 接收时日志会记
+  `[x11] … 没有被任何 WM 接收` 而不是静默"成功"。
 - 内置登录窗口是 WebView2 专属能力，Linux 用「粘贴一条浏览器请求」路径（功能等价）。
 - 没有托盘图标与设置窗口；「贴桌面层 / 显示周末」等开关在挂件 `⋯` 菜单里。
 - KWin 重启后贴桌面层状态会丢（Windows 版有 owner 巡检兜底，Linux 版暂未做），重开一次应用即可。
