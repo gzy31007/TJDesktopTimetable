@@ -14,6 +14,8 @@ namespace Tjt.Linux;
 /// <param name="ImportPath">启动时先把这份 JSON 走导入管线落盘，再照常启动。</param>
 /// <param name="FetchCheckPath">只做一次抓取诊断（<c>--fetch-check</c>），写日志后退出，不落盘。</param>
 /// <param name="OpenImportWindow">启动时直接打开导入窗口（<c>--import-window</c>）。</param>
+/// <param name="SuppressImportWindow">抑制"首次启动自动弹导入窗口"（<c>--no-import-window</c>）；
+/// 脚本 / Xvfb 下要确定首屏时用。</param>
 internal sealed record AppStartupOptions(
     bool? DesktopLayer = null,
     bool? Weekend = null,
@@ -24,13 +26,14 @@ internal sealed record AppStartupOptions(
     int? Height = null,
     string? ImportPath = null,
     string? FetchCheckPath = null,
-    bool OpenImportWindow = false)
+    bool OpenImportWindow = false,
+    bool SuppressImportWindow = false)
 {
     /// <summary>
     /// 解析命令行。支持的形态：<c>--desktop-layer</c> / <c>--no-desktop-layer</c>、
     /// <c>--weekend</c> / <c>--no-weekend</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>、<c>--import &lt;path&gt;</c>、
-    /// <c>--fetch-check &lt;path&gt;</c>、<c>--import-window</c>。
+    /// <c>--fetch-check &lt;path&gt;</c>、<c>--import-window</c>、<c>--no-import-window</c>。
     /// </summary>
     public static AppStartupOptions Parse(string[] args)
     {
@@ -44,6 +47,7 @@ internal sealed record AppStartupOptions(
         string? importPath = null;
         string? fetchCheck = null;
         var openImport = false;
+        var suppressImport = false;
 
         for (var i = 0; i < args.Length; i += 1)
         {
@@ -59,6 +63,7 @@ internal sealed record AppStartupOptions(
             else if (Matches(arg, "import") && i + 1 < args.Length) importPath = args[++i];
             else if (Matches(arg, "fetch-check") && i + 1 < args.Length) fetchCheck = args[++i];
             else if (Matches(arg, "import-window")) openImport = true;
+            else if (Matches(arg, "no-import-window")) suppressImport = true;
             else if (Matches(arg, "size") && i + 1 < args.Length && TryParseSize(args[i + 1], out var w, out var h))
             {
                 width = w;
@@ -77,7 +82,8 @@ internal sealed record AppStartupOptions(
             Height: height,
             ImportPath: importPath,
             FetchCheckPath: fetchCheck,
-            OpenImportWindow: openImport);
+            OpenImportWindow: openImport,
+            SuppressImportWindow: suppressImport);
     }
 
     /// <summary>支持 <c>--flag</c> / <c>-flag</c> / <c>/flag</c> 三种前缀。</summary>

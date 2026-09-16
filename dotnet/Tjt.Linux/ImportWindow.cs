@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
+using Tjt.Core.Adapters;
 using Tjt.Linux.Data;
 
 namespace Tjt.Linux;
@@ -23,19 +24,19 @@ internal sealed class ImportWindow : Window
     private static readonly Color OkGreen = Color.FromRgb(0x1B, 0x7F, 0x3B);
     private static readonly Color FailRed = Color.FromRgb(0xC3, 0x36, 0x28);
 
-    private readonly MainWindow _owner;
     private readonly ImportService _service;
     private readonly CancellationTokenSource _cancel = new();
     private readonly TextBox _requestBox;
     private readonly TextBox _jsonBox;
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap };
     private readonly StackPanel _probes = new() { Spacing = 2 };
+    private readonly StackPanel _diagnostics = new() { Spacing = 6 };
+    private Control _diagnosticsSection = new Control();
     private readonly TextBlock _currentLine = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.75 };
     private Button? _fetchButton;
 
     public ImportWindow(MainWindow owner, ImportService service)
     {
-        _owner = owner;
         _service = service;
 
         Title = "导入课表 · TJDesktopTimetable";
@@ -67,7 +68,11 @@ internal sealed class ImportWindow : Window
         Content = BuildLayout();
         RefreshCurrentLine();
 
-        Closed += (_, _) => _cancel.Cancel();
+        Closed += (_, _) =>
+        {
+            _cancel.Cancel();
+            _cancel.Dispose();
+        };
     }
 
     private Control BuildLayout()
@@ -76,6 +81,7 @@ internal sealed class ImportWindow : Window
         panel.Children.Add(BuildFetchSection());
         panel.Children.Add(BuildJsonSection());
         panel.Children.Add(BuildProbesSection());
+        panel.Children.Add(BuildDiagnosticsSection());
         panel.Children.Add(BuildManageSection());
 
         return new ScrollViewer
@@ -131,6 +137,17 @@ internal sealed class ImportWindow : Window
     private Control BuildProbesSection()
     {
         return BuildSection("探测结果", "最近一次抓取的请求 / 状态 / 数据识别。", new Control[] { _probes });
+    }
+
+    private Control BuildDiagnosticsSection()
+    {
+        _diagnosticsSection = BuildSection(
+            "适配器诊断",
+            "学期 / 节次解析的告警 —— 导入「看起来成功」但学期或节次不对时，先看这里。",
+            new Control[] { _diagnostics });
+        // 没有诊断时不占版面（与 Windows 版 ImportPage 的口径一致）
+        _diagnosticsSection.IsVisible = false;
+        return _diagnosticsSection;
     }
 
     private Control BuildManageSection()
@@ -287,8 +304,31 @@ internal sealed class ImportWindow : Window
             });
         }
 
+        // 诊断（tongji.term.unknown / tongji.schedule.missing …）是"导入看似成功、
+        // 其实学期或节次解析不对"的唯一提示：不渲染不落日志的话，Linux 用户永远看不到。
+        _diagnostics.Children.Clear();
+        _diagnosticsSection.IsVisible = outcome.Diagnostics.Count > 0;
+        foreach (var diagnostic in outcome.Diagnostics)
+        {
+            AppLog.Line($"[import] 诊断 {diagnostic.Level} {diagnostic.Code}：{diagnostic.Message}");
+            _diagnostics.Children.Add(new TextBlock
+            {
+                Text = $"[{Level(diagnostic.Level)}] {diagnostic.Code}：{diagnostic.Message}",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+                Foreground = diagnostic.Level == DiagnosticLevel.Error ? new SolidColorBrush(FailRed) : null,
+            });
+        }
+
         RefreshCurrentLine();
     }
+
+    private static string Level(DiagnosticLevel level) => level switch
+    {
+        DiagnosticLevel.Error => "错误",
+        DiagnosticLevel.Warn => "警告",
+        _ => "提示",
+    };
 
     private void SetMessage(bool? ok, string message)
     {

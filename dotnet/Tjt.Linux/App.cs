@@ -28,7 +28,12 @@ internal sealed class App : Application
 
             // 没有"真实课表"（只有黄金数据 / 内置样例）时自动开导入窗口，
             // 对齐上游"首次启动引导导入"的行为；--import-window 可强制打开。
-            if (main.LoadedOrigin != TimetableOrigin.Imported || App.Startup.OpenImportWindow)
+            // --fixture（Explicit）是显式自检/截图路径，不该被导入窗口盖住（与 Windows 线同口径）；
+            // --no-import-window 一律不弹（脚本 / Xvfb 下要确定首屏）。
+            var shouldOpenImport =
+                (main.LoadedOrigin is TimetableOrigin.Fixture or TimetableOrigin.Demo || App.Startup.OpenImportWindow)
+                && !App.Startup.SuppressImportWindow;
+            if (shouldOpenImport)
             {
                 AppLog.Line("[startup] 没有已导入的课表：自动打开导入窗口");
                 main.OpenImportWindow();
