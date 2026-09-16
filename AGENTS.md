@@ -67,7 +67,7 @@ docs/                 desktop-layer（层级层结论）· winui-build（DeskBox
 
 - 仓库 Public：fixtures / 文档不得出现学号、姓名、cookie、token 等凭据。
 - 登录态两条路（都**不**破解浏览器数据）：① 内置登录窗口（`TongjiLoginWindow` + WebView2）：用户在学校页面登录，课表页面接口响应被旁路接住；② 粘一条浏览器请求（`Data/TongjiFetcher.cs`），Cookie 存 `credentials.json`。**不做**读 Edge/Chrome Cookies 库：Edge 153 独占锁 + App-Bound 加密（`Local State` 里 `app_bound_encrypted_key` 前缀 `APPB`），解 v20 要调 IElevator COM = 绕过浏览器安全机制。**任何日志不得打印 Cookie 内容**（只记长度 / 条数）。
-- 窗口默认「桌面层 + 静息」：Owner = 桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见）；`wallpaper`（WorkerW 子窗口）与纯置底作为可切换 / 回退模式保留，切换失败必须回退、不能黑屏。
+- 窗口默认「桌面层 + 静息」：Owner = 桌面图标视图 `SHELLDLL_DefView`（Win+D 后仍可见）；挂载前存档原 owner、写入后**读回校验**，失败即还原；宿主解析不到时回退成"无 owner 置底"（日志 `[layer] 桌面宿主不可用，回退为无 owner 置底`），不能黑屏。⚠️ **没有** `wallpaper` 模式：`SetParent` 到 WorkerW 子窗口会被桌面图标压住、拖动坐标错乱，发 `0x052C` 催生 WorkerW 还会在登录期与 Explorer 抢时序、打乱桌面图标布局（`Win32/DesktopHost.cs` 头注释）—— 别再把它当"可选 / 回退模式"实现（旧 Electron 线的 `mode: desktop | wallpaper` 已随该线删除）。
 - 拖动 / 缩放自实现（`Win32/WindowDrag.cs` / `Win32/WindowEdgeResize.cs`），**起手先校验指针归属**（`PointerTarget`）；静息态**不戴** `WS_EX_NOACTIVATE`（戴上拖不动）；交互期"临时浮起 + 结束后重新落点"。
 
 ## C# / WinUI 线（2026-09-15 起）
@@ -139,6 +139,12 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
 - **设置持久化** `%APPDATA%\TJDesktopTimetable\settings.json`：尺寸口径 = **期望尺寸**，实测值只用来算 `FrameCorrection`（存 snap 后的实测值会"每拖一次变大一点"）。只有真的拖 / 缩过（`WM_EXITSIZEMOVE`）才存实测外框，否则存期望外框；`WM_EXITSIZEMOVE` 对纯移动也触发 → 必须加"用户真的改了尺寸"判断。三次连续运行收敛 `1080x700`。
   - 冒烟**不写**设置（短命进程落盘会污染真实配置）。
   - 位置不在任何显示器上 → 回退右下角（`DisplayArea.GetFromPoint`；WASDK 1.8 **没有** `DisplayArea.FindAll()`，构造 `DisplayId` 投影类型也不稳）。
+- **开机自启**：设置项 `WidgetSettings.LaunchAtLogin` → 落点 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的值 `TJDesktopTimetable`（值名沿用已删除 Electron 线的 `productName`，所以新版天然**接管**旧配置，不会留两条自启项）。
+  - 纯逻辑在 `TjtCore/StartupEntry.cs`（单测 `StartupEntryTests.cs`）：exe 路径**总是**加引号（含空格/中文时会被截断成"开机什么也不发生"）、比较忽略大小写与首尾空白、关掉时 `DesiredValue` 返回 `null` = **必须删干净**（只改设置不删注册表 = "关了但没关"）。
+  - 读写与同步在 `Tjt.App/Data/AutoStart.cs`：`Sync(bool)` **幂等**（值已对上就不写），只碰 HKCU（不需要管理员）；只管 `Environment.ProcessPath`，失败只记 `[startup] …` 日志、不拖垮启动。
+  - 时机两处：① `App.OnLaunched` 交互路径启动时对一次账（自检 / 诊断 `--smoke` / `--fetch-check` / `--login-check` 都已提前 return，**不碰真实系统状态**）；② `MainWindow.ApplySettings` 里设置一变即同步。
+  - 验收 `.tools/verify-autostart.ps1`（纯 ASCII）：A 开 → Run 值 = `"<exe>"`；B 关 → 值被删；C 塞一个错的旧值 → 下次启动被纠正；跑完还原 `settings.json` 与注册表。
+  - ⚠️ 脚本写 `settings.json` 必须用 **UTF-8 无 BOM**（`New-Object System.Text.UTF8Encoding($false)`）：STJ 拒绝带 BOM 的 JSON → 应用回落到默认设置 → A 用例假 FAIL。
 - **真机验收脚本**（`.tools/`，纯 ASCII）：`live-check.ps1`（启动 + owner / 可见性 + Win+D 后再读）；`verify-move.ps1`（`SetWindowPos` → `WM_EXITSIZEMOVE` → 落盘 → 重启恢复）；`verify-converge.ps1`（连跑 3 次不漂移）；`verify-topology.ps1`（`WM_DISPLAYCHANGE` → `[layer] 静息 display-change`）。⚠️ 脚本单引号里只放 ASCII（中文会让 PowerShell 5 解析崩）。
 - **入口与设置界面**：
   - **顶部条**（`Rendering/BoardRenderer.cs`）：左图标 + 学期 + 「第 N 周 · 今日 N 节」；右 **刷新** + **⋯ 图标**（`Rendering/IconGlyph.cs`，Segoe Fluent Icons）。`⋯` 菜单：设置 / 导入课表… / 重新载入课表 / 恢复默认位置 / 贴桌面层勾选 / 显示周末勾选 / 隐藏 / 退出。动作经 `WidgetActions`（渲染层只发意图，逻辑在 `MainWindow.BuildActions()`）。
