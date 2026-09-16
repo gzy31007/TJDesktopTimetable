@@ -6,9 +6,9 @@
 > 早期的 Electron + Vue 实现（`apps/desktop/` + `packages/core/`）**已于 2026-09-16 删除** ——
 > 它的黄金 fixture 搬到了 `dotnet/fixtures/`，历史代码见 git 历史（`git log --diff-filter=D -- '*apps/desktop*'`）。
 
-> **本 fork 新增 Linux 线**：`dotnet/Tjt.Linux/`（Avalonia 壳，`dotnet/TjtTimetable.Linux.slnx`），
+> **新增 Linux 线**：`dotnet/Tjt.Linux/`（Avalonia 壳，`dotnet/TjtTimetable.Linux.slnx`），
 > 复用同一套 TjtCore / Tjt.Widget，在 Linux 桌面（X11 / XWayland，KDE 实测）上提供同款挂件，
-> 详见下文 [Linux 版](#linux-版tjtlinux本-fork-新增)。
+> 详见下文 [Linux 版](#linux-版tjtlinux)。
 
 ## 特性
 
@@ -54,7 +54,7 @@ docs/                   desktop-layer.md · winui-build.md · winui-lessons.md �
 > 想彻底清干净就一并删掉。
 > 开发机上重新构建后启动：`C:\tjt-tools\TjtApp.cmd`（普通窗口）/ `TjtApp-desktop.cmd`（显式贴桌面层）/ `TjtApp-nobackdrop.cmd`（跳过材质）。
 
-## Linux 版（Tjt.Linux，本 fork 新增）
+## Linux 版（Tjt.Linux）
 
 用 [Avalonia](https://avaloniaui.net/) 写的 Linux 壳，与 Windows 版**同一套核心**
 （TjtCore 解析 / Tjt.Widget 算坐标与染色，渲染层照数字摆控件）。在 KDE Plasma（Wayland 会话走
@@ -66,7 +66,7 @@ XWayland）上实测通过。
 |---|---|---|
 | 贴桌面层（显示桌面后仍可见） | Owner = `SHELLDLL_DefView` | X11 `_NET_WM_WINDOW_TYPE_DOCK` + `_NET_WM_STATE_BELOW` |
 | 拖动 / 八热区缩放 | Win32 自实现轮询 | Avalonia `BeginMoveDrag` / `BeginResizeDrag`（热区几何仍走 `CursorZones`/`ResizePolicy`） |
-| 位置尺寸记忆 | `settings.json`（DIP） | 同一文件、同一口径，可与 Windows 互拷 |
+| 位置尺寸记忆 | `settings.json`（**外框** DIP + `FrameCorrection`） | `settings.json`（**客户区** DIP）；文件同名同形可互拷，但尺寸会差一圈窗口边框，且 Linux 回写不带 Windows 专属字段 |
 | 主题 | Mica / Acrylic / 实色 | 固定半透明壳（合成器真透明 + 圆角），跟随系统深浅色 |
 | 导入 | 内置登录（WebView2）/ 粘贴请求 / JSON | **粘贴请求 / JSON**（内置登录是 WebView2 专属，Linux 无对应） |
 | 托盘 / 设置窗口 | 有 | 暂无（挂件 `⋯` 菜单承载全部入口） |
@@ -76,6 +76,11 @@ XWayland）上实测通过。
 需要 .NET 10 SDK（Arch：`sudo pacman -S dotnet-sdk`；其他发行版见
 [官方文档](https://learn.microsoft.com/dotnet/core/install/linux)）与 X11 或 XWayland（KDE/GNOME
 Wayland 会话自带）。
+
+运行时还需要 Avalonia X11 后端的系统库 **`libICE` / `libSM`**（Debian/Ubuntu：`sudo apt install libice6 libsm6`；
+Arch：`sudo pacman -S libice libsm`）—— 桌面发行版一般都随 DE 装好了，但精简环境/容器里缺了会**启动即崩**
+（`DllNotFoundException: libICE.so.6`）。另外中文课表要有一个含 CJK 的字体
+（`noto-fonts-cjk` / `fonts-noto-cjk` 等），否则中文会渲染成方框 —— 字体回退链只保证"拿得到一个默认字体"。
 
 ```bash
 # 测试（平台无关，与上游同一条命令）
