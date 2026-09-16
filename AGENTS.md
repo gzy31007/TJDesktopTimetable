@@ -17,6 +17,7 @@ Windows 桌面小组件：把同济课表以半透明色块网格固定在桌面
 dotnet/TjtCore/       平台无关核心（net10.0）：模型/周次/冲突/布局/时间/适配器
 dotnet/Tjt.Widget/    挂件视觉层（net10.0，纯计算，不引 WinUI/Win32）
 dotnet/Tjt.App/       WinUI 外壳（net10.0-windows）：窗口/材质/Win32/托盘/设置
+dotnet/Tjt.Linux/     Avalonia Linux 外壳（net10.0，fork 新增）：窗口/渲染/X11 贴桌面层/导入编排
 dotnet/TjtCore.Tests/ 平台无关单测（TjtCore + Tjt.Widget 都测这里）
 dotnet/fixtures/      脱敏后的真实抓包数据（黄金测试基准，禁止放入学号、姓名等个人信息）
 docs/                 desktop-layer（层级层结论）· winui-build（DeskBox 参考事实 + 构建环境）
@@ -192,3 +193,26 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
 - **拖动 / 缩放 / 指针相关碎片**：`NotePressedGrip` `PointerMoved` `PointerPressed` `ResizeGrip` `SetCursor` `WindowDrag` `_pressedGrip`
 - **图标相关碎片**：`ApplicationIcon` `Assets/app-blue.ico` `LoadImage` `app.ico`
 - **其余碎片（被删句子的 inline code）**：`(0,0,0,0)` `--border-color` `--corner` `--dark` `--dark` `--fixture/--log/--no-backdrop/--desktop-layer/--weekend/--now HH:mm` `--light` `--material acrylic-thin` `--now` `--size` `--smoke` `-1` `.refs/DeskBox` `.tools/` `.tools/shot-top.ps1 -Now 13:00` `.tools/verify-resize.ps1` `.widget-bar` `/mnt/c` `/static/js/app.<hash>.js` `0.07 × intensity` `12 · 18:30` `40x40` `677,428 1320x900` `819×535` `880x600 DIP` `941×719` `:hover` `<c>WM_DISPLAYCHANGE</c>` `Activated` `Application.Exit()` `BackdropHelper` `Bind` `BoardRenderer` `BoardRenderer` `Bootstrap` `C:\tjt-tools\work` `CalculateMica` `CanvasWidth/CanvasHeight` `Copy-Item` `Dispose` `FetchAsync` `FileOpenPicker` `FrameCorrection` `GetAsyncKeyState` `GetWindowLongPtrW` `GetWindowRect` `IDC_SIZEWE 0x10011` `IOException` `IsActive` `IsInputActive` `Layout.BuildBoard` `LuminosityOpacity = 0.5f` `MainWindow.ApplySettings` `MaterialMode.AcrylicThin` `MicaController` `MicaController.FallbackColor` `NavigationView` `NowLineTop` `OnWindowActivated` `Permission denied` `Render` `RowDefinition Height="4"` `RowHeight × 0.24` `SHELLDLL_DefView` `ScrollViewer.VerticalContentAlignment = Top` `SetMaterial` `SetResult(1)` `SetWindowPos` `SetWindowPos` `SettingsWindow` `ShowWeekend` `Start-Process` `Stop-Process` `TermId` `TintColor` `TintColor = #202020` `TintOpacity = 0.6f` `TintOpacity = 0.8` `Tjt.Widget` `TjtTimetable.slnx` `WM_SETCURSOR` `WM_SETCURSOR` `WidgetWindowBase.Backdrop` `WidgetWindowBase.Backdrop` `WidgetWindowBase.Backdrop` `WidgetWindowBase.Backdrop` `Window.Activated` `XamlRoot` `[backdrop] mode=` `[import] adapter=tongji-student 14 门课程 / 19 条上课安排…applied=True` `[login] WebView2 已就绪(profile=…)` `[login] 捕获成功：…，34354 字节，calendarId=122` `[login] 撞上课表接口：报表接口 findStudentTimetab（HTTP 200）` `[settings] 显示周末 → …` `acrylic` `acrylic-controller` `acrylic-controller` `acrylic-controller` `acrylic-thin-controller` `capture=True` `client` `cmd /c` `cmd copy` `conflict.ts` `correction=0,0` `correction=0,0` `delta 0x0` `delta 0x0` `docs/desktop-layer.md` `docs/winui-lessons.md` `dotnet test` `dy=120/400/700` `dy=30/120/400/700` `frame=0,0` `in_progress` `initialPage` `measured` `mica` `mica-alt` `mica-controller` `mica-controller(alt)` `outer` `return` `robocopy` `roomIdI18n` `root.Background = Magenta` `row0` `scale=0.239` `scale=1.5` `select_preview.html` `solid` `solid` `timetable/major` `touch /mnt/c/...` `transparent: true` `useAlt=false` `⋯`
+
+## Linux 线（Avalonia，fork 新增，2026-09-16）
+
+`dotnet/Tjt.Linux/`（Avalonia 12，net10.0）= 本 fork 在 Windows 主线之外新增的 Linux 外壳，构建入口 `dotnet/TjtTimetable.Linux.slnx`。分层硬约束原样继承：壳里只放"必须在 Linux 桌面上跑"的事（Avalonia 窗口 / X11 互操作 `X11/X11KeepBelow.cs` / 文件与网络 IO，`Data/` = `Tjt.App/Data` 的移植），业务逻辑进 `TjtCore`、视觉计算进 `Tjt.Widget`；**不要把 `Tjt.Linux` 并进 `TjtTimetable.slnx`**（与 `Tjt.App` 同一条禁令）。`Rendering/BoardRenderer.cs` 是 WinUI 版的同构移植（"照数字摆控件"），**不新增视觉规则**；改观感改 `Tjt.Widget`（两端一起变），别在壳里自作主张。
+
+### 与 Windows 版的关键差异（改代码前先读）
+
+- **贴桌面层** = X11 `_NET_WM_WINDOW_TYPE_DOCK`（改属性）+ `_NET_WM_STATE_BELOW`（EWMH 客户消息）；**两件一起做**：真机实测 KWin 的「显示桌面」会把 keep-below 的普通窗口一起藏掉，DOCK 类型才留下来（conky / 桌面挂件的通行做法）。
+- **拖动 / 缩放走 Avalonia 原生循环**（`BeginMoveDrag` / `BeginResizeDrag`）：热区几何、方向、最小尺寸仍用 `Tjt.Widget` 的 `CursorZones` / `ResizePolicy` 纯函数。Windows 版那套 16ms 光标轮询是 WinUI 指针捕获缺陷逼出来的补丁，Avalonia 不需要，**别照搬**。
+- **字体**：Avalonia 12 默认 Inter，多数发行版没装（直接抛 glyphTypeface）→ 启动时用 `fc-match sans-serif` 解析真实默认字体（`Program.ResolveDefaultFontFamily`）。
+- **数据目录**：`Environment.SpecialFolder.ApplicationData` 在 Linux 上映射 XDG（`~/.config`），`settings.json` / `timetable.json` / `credentials.json` 与 Windows 版同构、可互拷。
+- **内置登录窗口是 WebView2 专属**，Linux 不做；「粘贴一条浏览器请求」（`TongjiFetcher`）就是主路径。
+- 位置尺寸持久化是 DIP 口径（物理像素 ÷ RenderScaling），恢复用主屏缩放近似 + 屏内校验兜底（多屏异缩放接受近似，与 Windows 版 `FrameCorrection` 的取舍同源）。
+
+### 开发（Linux 本机）
+
+```bash
+dotnet test dotnet/TjtTimetable.slnx          # 平台无关单测（推送前必跑）
+dotnet run --project dotnet/Tjt.Linux         # 跑挂件
+dotnet build dotnet/TjtTimetable.Linux.slnx   # 只编译
+```
+
+GUI 行为验收（贴桌面层 / 显示桌面可见性 / 拖缩）需真机；KWin 会话可用 `qdbus6 org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component.invokeShortcut "Show Desktop"` 触发「显示桌面」做自动化截图对比（注意：`org.kde.KWin /KWin showDesktop(bool)` 那个 DBus 方法**不生效**，必须走快捷键；快捷键名是 "Show Desktop" 带空格）。

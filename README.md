@@ -6,6 +6,10 @@
 > 早期的 Electron + Vue 实现（`apps/desktop/` + `packages/core/`）**已于 2026-09-16 删除** ——
 > 它的黄金 fixture 搬到了 `dotnet/fixtures/`，历史代码见 git 历史（`git log --diff-filter=D -- '*apps/desktop*'`）。
 
+> **新增 Linux 线**：`dotnet/Tjt.Linux/`（Avalonia 壳，`dotnet/TjtTimetable.Linux.slnx`），
+> 复用同一套 TjtCore / Tjt.Widget，在 Linux 桌面（X11 / XWayland，KDE 实测）上提供同款挂件，
+> 详见下文 [Linux 版](#linux-版tjtlinux)。
+
 ## 特性
 
 - **贴桌面**：窗口挂到桌面图标层（Owner = `SHELLDLL_DefView`）——浮在桌面图标之上、被普通窗口正常覆盖，**按 Win+D 显示桌面后依然可见**；不抢焦点。
@@ -49,6 +53,71 @@ docs/                   desktop-layer.md · winui-build.md · winui-lessons.md �
 > 卸载 = 删目录；数据在 `%APPDATA%\TJDesktopTimetable\`（`settings.json` / `timetable.json` / `credentials.json`），
 > 想彻底清干净就一并删掉。
 > 开发机上重新构建后启动：`C:\tjt-tools\TjtApp.cmd`（普通窗口）/ `TjtApp-desktop.cmd`（显式贴桌面层）/ `TjtApp-nobackdrop.cmd`（跳过材质）。
+
+## Linux 版（Tjt.Linux）
+
+用 [Avalonia](https://avaloniaui.net/) 写的 Linux 壳，与 Windows 版**同一套核心**
+（TjtCore 解析 / Tjt.Widget 算坐标与染色，渲染层照数字摆控件）。在 KDE Plasma（Wayland 会话走
+XWayland）上实测通过。
+
+### 功能对齐情况
+
+| 能力 | Windows 版 | Linux 版 |
+|---|---|---|
+| 贴桌面层（显示桌面后仍可见） | Owner = `SHELLDLL_DefView` | X11 `_NET_WM_WINDOW_TYPE_DOCK` + `_NET_WM_STATE_BELOW` |
+| 拖动 / 八热区缩放 | Win32 自实现轮询 | Avalonia `BeginMoveDrag` / `BeginResizeDrag`（热区几何仍走 `CursorZones`/`ResizePolicy`） |
+| 位置尺寸记忆 | `settings.json`（**外框** DIP + `FrameCorrection`） | `settings.json`（**客户区** DIP）；文件同名同形可互拷，但尺寸会差一圈窗口边框，且 Linux 回写不带 Windows 专属字段 |
+| 主题 | Mica / Acrylic / 实色 | 固定半透明壳（合成器真透明 + 圆角），跟随系统深浅色 |
+| 导入 | 内置登录（WebView2）/ 粘贴请求 / JSON | **粘贴请求 / JSON**（内置登录是 WebView2 专属，Linux 无对应） |
+| 托盘 / 设置窗口 | 有 | 暂无（挂件 `⋯` 菜单承载全部入口） |
+
+### 构建与运行
+
+需要 .NET 10 SDK（Arch：`sudo pacman -S dotnet-sdk`；其他发行版见
+[官方文档](https://learn.microsoft.com/dotnet/core/install/linux)）与 X11 或 XWayland（KDE/GNOME
+Wayland 会话自带）。
+
+运行时还需要 Avalonia X11 后端的系统库 **`libICE` / `libSM`**（Debian/Ubuntu：`sudo apt install libice6 libsm6`；
+Arch：`sudo pacman -S libice libsm`）—— 桌面发行版一般都随 DE 装好了，但精简环境/容器里缺了会**启动即崩**
+（`DllNotFoundException: libICE.so.6`）。另外中文课表要有一个含 CJK 的字体
+（`noto-fonts-cjk` / `fonts-noto-cjk` 等），否则中文会渲染成方框 —— 字体回退链只保证"拿得到一个默认字体"。
+
+```bash
+# 测试（平台无关，与上游同一条命令）
+dotnet test dotnet/TjtTimetable.slnx
+
+# 运行挂件
+dotnet run --project dotnet/Tjt.Linux
+
+# 自包含发布（单文件 + Skia 原生库 + fixtures，免装 .NET）
+dotnet publish dotnet/Tjt.Linux/Tjt.Linux.csproj -c Release -r linux-x64 \
+  --self-contained /p:PublishSingleFile=true /p:DebugType=embedded
+```
+
+常用开关：`--dark` / `--light`（主题）、`--size 880x600`、`--fixture <path>`、
+`--weekend` / `--no-weekend`、`--no-desktop-layer`、`--import <json>`（启动即导入落盘）、
+`--fetch-check <请求文件>`（抓取自检，退出码表成败）、`--log <path>`。
+
+### 桌面集成
+
+```bash
+install -Dm644 dotnet/Tjt.Linux/packaging/tjt-linux.desktop ~/.local/share/applications/
+install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
+# 然后编辑 .desktop 里的 Exec= 与 Icon= 指向实际路径
+```
+
+数据目录：`~/.config/TJDesktopTimetable/`（`settings.json` / `timetable.json` / `credentials.json`，
+与 Windows 版同构）。首次启动没有导入过课表时会自动打开导入窗口。
+
+### 已知限制
+
+- **X11 / XWayland only**：Avalonia 稳定线没有原生 Wayland 后端；KWin 对 XWayland 窗口完整支持
+  keep-below / DOCK（实测「显示桌面」后挂件仍可见）。其他 WM（GNOME/Mutter 等）行为未验证，
+  不生效时可用 WM 自身的窗口规则兜底。
+- 内置登录窗口是 WebView2 专属能力，Linux 用「粘贴一条浏览器请求」路径（功能等价）。
+- 没有托盘图标与设置窗口；「贴桌面层 / 显示周末」等开关在挂件 `⋯` 菜单里。
+- KWin 重启后贴桌面层状态会丢（Windows 版有 owner 巡检兜底，Linux 版暂未做），重开一次应用即可。
+
 
 ## 课表数据从哪来
 
