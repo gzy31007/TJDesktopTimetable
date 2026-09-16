@@ -229,3 +229,14 @@ dotnet build dotnet/TjtTimetable.Linux.slnx   # 只编译
 ```
 
 GUI 行为验收（贴桌面层 / 显示桌面可见性 / 拖缩）需真机；KWin 会话可用 `qdbus6 org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component.invokeShortcut "Show Desktop"` 触发「显示桌面」做自动化截图对比（注意：`org.kde.KWin /KWin showDesktop(bool)` 那个 DBus 方法**不生效**，必须走快捷键；快捷键名是 "Show Desktop" 带空格）。
+
+### X11 贴桌面层的真机验收（本机已有环境）
+
+`.tools/verify-x11-desktop-layer.sh`：在 **Xvfb + openbox**（真实 X server + 真 EWMH WM）里跑一遍 —— `xprop` 读窗口属性、`_NET_CLIENT_LIST_STACKING` 验层级、`xdotool` 合成拖动（X11 内合成指针**是真实有效的**，与 Windows 侧被挡不同）。2026-09-16 实测 **10/10 全绿**：DESKTOP 类型写入 / `_NET_WM_STATE_BELOW` 被 WM 接受（= 客户消息掩码正确）/ 日志走成功分支 / 挂件在普通窗口之下 / 拖动生效并落盘 / `--no-desktop-layer` 回 NORMAL 且移除 BELOW。
+
+- 本机依赖（已装）：`apt-get install -y --no-install-recommends xvfb x11-utils openbox xdotool`（37 包；`kwin-x11` 要 779 包，别装）。
+- **Xvfb 必须能写 `/var/lib/xkb`**（键盘描述，写不了就是 `Failed to activate virtual core keyboard` 直接退出）—— 沙箱下默认拒绝，本机已软链到工作区：`/var/lib/xkb -> /root/TJDesktopTimetable/.cache/xkb`。另外 Xvfb 要用 `-listen tcp -nolisten unix`：`/tmp/.X11-unix` 是只读的（里面是 WSLg 的 `X0`）。
+- **WSLg 的 `:0` 不能用来验这个**：那里的 WM 是 Weston xwm，`_NET_SUPPORTED` 只有 7 条、**不支持 `_NET_WM_STATE_BELOW`**（openbox 也抢不过来）。
+- **脚本里的 `HOME` 必须指向存在的目录**：.NET 的 `GetFolderPath(ApplicationData)` 在家目录不存在时返回空串 → 数据落到相对路径 `./TJDesktopTimetable/…`（踩过，还把工作区污染过一次）。
+- openbox 冷启动要几秒 —— 脚本轮询 `_NET_SUPPORTED` 直到 >10 条再断言，否则误判成"WM 不支持 EWMH"。
+- **覆盖不到**：KWin 特有行为（KWin 5 `layerForDock()` vs KWin 6 `belongsToLayer()` 的层策略）与「显示桌面」快捷键（需要真实 Plasma / kglobalaccel）—— 这两条仍需在真实 KDE 会话人工确认。
