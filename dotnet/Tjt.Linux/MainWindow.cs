@@ -13,7 +13,7 @@ using Tjt.Widget;
 namespace Tjt.Linux;
 
 /// <summary>
-/// 挂件主窗口：无边框 + 半透明圆角 + 贴桌面层（X11 keep-below）。
+/// 挂件主窗口：无边框 + 半透明圆角 + 贴桌面层（X11 DESKTOP 类型 + keep-below）。
 ///
 /// <para>窗口行为对应 Windows 版的自实现那套，但走 Avalonia 原生循环：
 /// 拖动 = 顶部条 <c>BeginMoveDrag</c>，缩放 = 八块热区 <c>BeginResizeDrag</c>
