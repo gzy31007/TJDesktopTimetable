@@ -20,7 +20,10 @@ namespace Tjt.Linux.X11;
 internal static class X11KeepBelow
 {
     private const int ClientMessage = 33;
-    private const long EventMask = (1L << 18) | (1L << 19); // SubstructureNotify | SubstructureRedirect
+    // EWMH：客户端向根窗口发 _NET_WM_STATE 客户消息，事件掩码必须是
+    // SubstructureRedirectMask(1<<20) | SubstructureNotifyMask(1<<19)。
+    // （1<<18 是 ResizeRedirectMask —— 只选 SubstructureRedirect 的 WM 会因此收不到这条消息。）
+    private const long EventMask = (1L << 20) | (1L << 19);
     private const int PropModeReplace = 0;
 
     /// <summary>给 X11 窗口加上（或移除）贴桌面层。</summary>
@@ -43,7 +46,10 @@ internal static class X11KeepBelow
             var windowType = XInternAtom(display, "_NET_WM_WINDOW_TYPE", onlyIfExists: false);
             var typeValue = XInternAtom(display, below ? "_NET_WM_WINDOW_TYPE_DOCK" : "_NET_WM_WINDOW_TYPE_NORMAL", onlyIfExists: false);
             var atomType = XInternAtom(display, "ATOM", onlyIfExists: true);
-            XChangeProperty(display, x11Window, windowType, atomType, 32, PropModeReplace, [typeValue], 1);
+            if (XChangeProperty(display, x11Window, windowType, atomType, 32, PropModeReplace, [typeValue], 1) == 0)
+            {
+                AppLog.Error($"[x11] XChangeProperty(_NET_WM_WINDOW_TYPE={(below ? "DOCK" : "NORMAL")}) 失败：类型属性没写进去（window=0x{x11Window:x}）");
+            }
 
             // ── 2. keep-below 状态：EWMH 客户消息（经根窗口转给窗口管理器）
             var root = XDefaultRootWindow(display);
@@ -62,9 +68,17 @@ internal static class X11KeepBelow
                 Data1 = belowAtom,
             };
 
-            XSendEvent(display, root, propagate: false, EventMask, ref message);
+            // 返回 0 = 根窗口上没有进程订阅 SubstructureRedirect（无 WM，或 WM 不支持）→ BELOW 不会生效
+            var sent = XSendEvent(display, root, propagate: false, EventMask, ref message);
             XFlush(display);
-            AppLog.Line($"[x11] 贴桌面层 {(below ? "开启" : "关闭")}：WINDOW_TYPE={(below ? "DOCK" : "NORMAL")} + _NET_WM_STATE_BELOW {(below ? "ADD" : "REMOVE")}（window=0x{x11Window:x}）");
+            if (sent == 0)
+            {
+                AppLog.Error($"[x11] _NET_WM_STATE 客户消息没有被任何 WM 接收（无人订阅 SubstructureRedirect），keep-below 大概率未生效（window=0x{x11Window:x}）");
+            }
+            else
+            {
+                AppLog.Line($"[x11] 贴桌面层 {(below ? "开启" : "关闭")}：WINDOW_TYPE={(below ? "DOCK" : "NORMAL")} + _NET_WM_STATE_BELOW {(below ? "ADD" : "REMOVE")}（window=0x{x11Window:x}）");
+            }
         }
         finally
         {
