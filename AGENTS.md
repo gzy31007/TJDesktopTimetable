@@ -40,6 +40,29 @@ docs/                 desktop-layer（层级层结论）· winui-build（DeskBox
 - 代理：只推 GitHub / 拉 GitHub 资源时用 `export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`。
   NuGet 走 `.tools/nuget`（WSL）/ `C:\tjt-tools\nuget`（Windows）。
 
+## 安装包（Inno Setup，2026-09-17 起）
+
+脚本**入库**在 `installer/TJDesktopTimetable.iss`（CI 要用，别放 `.tools/`）；本机编译走
+`.tools/build-installer.ps1`（它先把 .iss 镜像到 `C:\tjt-tools\work\installer\`，再用本地路径调 ISCC）。
+
+- **规格（与用户逐条确认，别自己改）**：per-machine 装 Program Files（`PrivilegesRequired=admin`，一次 UAC）；
+  向导四个勾选（开始菜单 / 桌面快捷方式 / 开机自启 / 装完启动，默认全勾）；没有 WebView2 只提示不阻止；
+  卸载**保留** `%APPDATA%\TJDesktopTimetable` 并在完成页打印路径；**不做代码签名**（定位是"只给熟人发"）。
+- 开机自启写 `HKCU\...\Run` 的 `TJDesktopTimetable`，与设置窗口里那个开关**同一个值名、同一格式**
+  （exe 路径总带引号）→ 两边不会打架。`AppId` 一旦发布就不能改（升级 / 卸载靠它认人）。
+- 覆盖安装时挂件在跑：`CloseApplications=yes`（Restart Manager）+ `[Code] PrepareToInstall` 兜底
+  （taskkill 之前先问一句）。**实测有效** —— 运行中的挂件被关掉，安装继续成功。
+- 验收 `.tools/verify-installer.ps1`（纯 ASCII，21 项）：装 / 启动 / 覆盖升级 / **运行中安装** / 卸载，
+  并断言 `%APPDATA%` 数据 hash 前后不变。自动化用 `/CURRENTUSER`（配合 iss 里的
+  `PrivilegesRequiredOverridesAllowed=commandline`）装到 `%LOCALAPPDATA%\Programs` 以**免 UAC**；
+  真装 Program Files 那条要人在场点 UAC。
+- 体积：216 MB 解压 → **59 MB** 的 setup.exe（LZMA2 固实压缩，比 zip 的 84 MB 还小 25 MB）。
+- ⚠️ 两个坑：① **ISCC 读不了 `\\wsl.localhost\...` UNC 路径**（报"系统找不到指定的路径"）→ 先镜像到本地；
+  ② `.iss` 必须存成 **UTF-8 with BOM**，否则 Inno 6 按 ANSI 读、中文描述全乱码。
+- CI（`release-winui.yml`）：`choco install innosetup` → ISCC 编译 → Release 同时挂 `-setup.exe` 与
+  `-win-x64.zip`（zip 给想手动解压的人）。「新版本提示」优先给 setup.exe
+  （`UpdateCheck.WindowsPackageSuffixes`；Windows 专属，Linux 仍认 tar.gz）。
+
 ## 易错知识点
 
 - **已移除**「专业培养计划适配器」与「教学班勾选」：只支持个人课表导入即用。误把培养计划数据（同课多教学班）导进来会异常；**没有** `tongji.looksLikePlan` 这类标识（旧文档不准）。真正诊断码：`tongji.personal` / `tongji.report` / `tongji.flat` / `tongji.noSchedule` / `tongji.schedule.missing` / `tongji.term.unknown` / `tongji.term.startDate` / `tongji.summary`。

@@ -153,4 +153,70 @@ public class UpdateCheckTests
         Assert.Equal("TJDesktopTimetable/1.2.0", UpdateCheck.UserAgent("1.2.0"));
         Assert.Equal("https://github.com/gzy31007/TJDesktopTimetable", UpdateCheck.RepoUrl);
     }
+
+    // ── 安装包优先（2026-09-17 起 Release 同时传 zip 与 setup.exe）──────────────────
+
+    /// <summary>两个资产都在时，「发现新版本」给的下载链接应当是双击就能装的安装包。</summary>
+    [Fact]
+    public void 有安装包时优先给安装包链接()
+    {
+        const string json = """
+        {
+          "tag_name": "v9.9.9",
+          "html_url": "https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v9.9.9",
+          "prerelease": false,
+          "draft": false,
+          "assets": [
+            { "name": "TJDesktopTimetable-v9.9.9-win-x64.zip", "browser_download_url": "https://example.invalid/win.zip" },
+            { "name": "TJDesktopTimetable-v9.9.9-setup.exe", "browser_download_url": "https://example.invalid/setup.exe" }
+          ]
+        }
+        """;
+
+        var result = UpdateCheck.Evaluate("1.3.1", json);
+
+        Assert.Equal(UpdateStatus.UpdateAvailable, result.Status);
+        Assert.Equal("https://example.invalid/setup.exe", UpdateCheck.DownloadUrlFor(result));
+    }
+
+    /// <summary>安装包是后来才有的资产：老 Release 只有 zip，那条路不能断。</summary>
+    [Fact]
+    public void 只有zip时退回zip链接()
+    {
+        const string json = """
+        {
+          "tag_name": "v9.9.9",
+          "html_url": "https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v9.9.9",
+          "prerelease": false,
+          "draft": false,
+          "assets": [
+            { "name": "TJDesktopTimetable-v9.9.9-win-x64.zip", "browser_download_url": "https://example.invalid/win.zip" }
+          ]
+        }
+        """;
+
+        Assert.Equal("https://example.invalid/win.zip", UpdateCheck.DownloadUrlFor(UpdateCheck.Evaluate("1.3.1", json)));
+    }
+
+    /// <summary>Linux 那条路不受影响：即便 Release 里有 setup.exe，也要挑 tar.gz。</summary>
+    [Fact]
+    public void Linux仍按tar_gz后缀挑包()
+    {
+        const string json = """
+        {
+          "tag_name": "v9.9.9",
+          "html_url": "https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v9.9.9",
+          "prerelease": false,
+          "draft": false,
+          "assets": [
+            { "name": "TJDesktopTimetable-v9.9.9-setup.exe", "browser_download_url": "https://example.invalid/setup.exe" },
+            { "name": "TJDesktopTimetable-v9.9.9-linux-x64.tar.gz", "browser_download_url": "https://example.invalid/linux.tar.gz" }
+          ]
+        }
+        """;
+
+        var result = UpdateCheck.Evaluate("1.3.1", json, packageSuffix: UpdateCheck.LinuxPackageSuffix);
+
+        Assert.Equal("https://example.invalid/linux.tar.gz", UpdateCheck.DownloadUrlFor(result));
+    }
 }

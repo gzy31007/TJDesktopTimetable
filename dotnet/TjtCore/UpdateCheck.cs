@@ -67,6 +67,18 @@ public static class UpdateCheck
     /// <summary>Windows 资产的命名后缀（发布工作流生成的自包含 zip）。</summary>
     public const string WindowsPackageSuffix = "-win-x64.zip";
 
+    /// <summary>Windows 安装包的命名后缀（Inno Setup 生成的 setup.exe）。</summary>
+    public const string WindowsInstallerSuffix = "-setup.exe";
+
+    /// <summary>
+    /// Windows 平台按优先级尝试的资产后缀：**安装包优先于 zip**。
+    ///
+    /// <para>2026-09-17 起 Release 两个资产都传（zip 给想手动解压的人，setup.exe 给普通用户），
+    /// 而"发现新版本"那个按钮应该给普通人最容易用的那个 —— 双击就能装完的安装包。</para>
+    /// </summary>
+    public static IReadOnlyList<string> WindowsPackageSuffixes { get; } =
+        [WindowsInstallerSuffix, WindowsPackageSuffix];
+
     /// <summary>Linux 资产的命名后缀（本 fork 的 tar.gz；Windows 版不做提示，留着备用）。</summary>
     public const string LinuxPackageSuffix = "-linux-x64.tar.gz";
 
@@ -147,6 +159,24 @@ public static class UpdateCheck
         }
     }
 
+    /// <summary>
+    /// 挑本平台的包：Windows 上先找安装包（setup.exe）、再退到 zip；其它平台按传入的单一后缀。
+    /// 都找不到返回 <c>null</c>，调用方退回 Release 页面。
+    /// </summary>
+    private static ReleaseAsset? ChoosePlatformPackage(LatestRelease release, string packageSuffix)
+    {
+        var suffixes = packageSuffix == WindowsPackageSuffix
+            ? WindowsPackageSuffixes
+            : new[] { packageSuffix };
+        foreach (var suffix in suffixes)
+        {
+            var asset = ChoosePackage(release, suffix);
+            if (asset is not null) return asset;
+        }
+
+        return null;
+    }
+
     /// <summary>按资产名后缀挑出本平台的包（找不到返回 <c>null</c>，调用方退回 Release 页面）。</summary>
     public static ReleaseAsset? ChoosePackage(LatestRelease release, string suffix)
     {
@@ -205,7 +235,7 @@ public static class UpdateCheck
             Normalize(current),
             normalizedLatest,
             release,
-            ChoosePackage(release, packageSuffix));
+            ChoosePlatformPackage(release, packageSuffix));
     }
 
     /// <summary>

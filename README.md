@@ -48,11 +48,24 @@ docs/                   desktop-layer.md · winui-build.md · winui-lessons.md �
 
 ## 安装
 
-**Windows**
+**Windows（推荐：安装包）**
 
-1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.1-win-x64.zip`（自包含：**不需要**预装 .NET 或 Windows App Runtime）。
+1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.1-setup.exe`（约 59 MB）。
+2. 双击安装 → 装到 `Program Files`，向导里可以勾选**开始菜单 / 桌面快捷方式 / 开机自启 / 装完启动**。
+3. 首次启动会打开设置窗口的「导入课表」页，按下一节导入一次即可。
+
+> - 安装包同样是自包含的：**不需要**预装 .NET 或 Windows App Runtime。
+> - 目前没有代码签名，SmartScreen 可能提示"未知发布者"——点「更多信息 → 仍要运行」即可。
+> - 卸载：控制面板「应用和功能」里卸载；**你的课表与登录信息会保留**在
+>   `%APPDATA%\TJDesktopTimetable\`，卸载完成页会告诉你路径。
+> - 如果机器上没有 WebView2 Runtime（登录窗口的依赖），安装时会提示一次 —— 不影响安装，
+>   也不影响"粘贴一条浏览器请求"那条导入路径（Win11 自带；Win10 可从 Microsoft 官网免费装）。
+
+**Windows（备选：绿色 zip）**
+
+1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.1-win-x64.zip`。
 2. 解压到任意**本地磁盘**目录（别放在 `\\wsl.localhost\...` 这类 UNC 路径下）。
-3. 双击 `Tjt.App.exe`。首次启动会打开设置窗口的「导入课表」页，按下一节导入一次即可。
+3. 双击 `Tjt.App.exe`。（这一份同样自包含。）
 
 **Linux**
 
@@ -62,7 +75,7 @@ docs/                   desktop-layer.md · winui-build.md · winui-lessons.md �
    > 依赖：X11 / XWayland，以及 `libICE` / `libSM`（Debian/Ubuntu：`sudo apt install libice6 libsm6`）；
    > 中文课表需要 CJK 字体。详见下面 [Linux 版](#linux-版tjtlinux)。
 
-> Windows 卸载 = 删目录；数据在 `%APPDATA%\TJDesktopTimetable\`（`settings.json` / `timetable.json` / `credentials.json`），
+> 无论哪种安装方式，数据都在 `%APPDATA%\TJDesktopTimetable\`（`settings.json` / `timetable.json` / `credentials.json`）；
 > 想彻底清干净就一并删掉。Linux 数据目录为 `~/.config/TJDesktopTimetable/`。
 > 开发机上重新构建后启动：`C:\tjt-tools\TjtApp.cmd`（普通窗口）/ `TjtApp-desktop.cmd`（显式贴桌面层）/ `TjtApp-nobackdrop.cmd`（跳过材质）。
 
@@ -239,6 +252,7 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
 - [x] **v1.2.0** · Linux 版（Avalonia 壳）首发；视觉收口（时间列 64 DIP / 深色色块提亮 / 名称按宽度截断）+
       时间线按节次分段、画布贴顶、材质四档对齐 DeskBox
 - [x] 上海交大「学在交大」课表：`sjtu-student` 适配器 + 整学期抓取（含教务日历）+ 内置登录窗口
+- [x] **Windows 安装包**（Inno Setup）：装到 Program Files、四个安装勾选、卸载保留数据、CI 随 Release 一起产出
 - [x] **v1.3.0** · 开机自启 + **新版本提示**（启动后查一次 GitHub 最新发布：托盘与设置「关于」页提示，
       可关、可跳过某个版本）
 - [x] **v1.3.1** · Linux 壳六项修复（紧凑布局与 Windows 同口径、X11 事件掩码修正、导入诊断链路打通、

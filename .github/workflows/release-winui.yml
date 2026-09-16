@@ -6,8 +6,14 @@ name: Release (WinUI)
 # 对"下载一个 zip 就能用"来说太贵。`WindowsAppSDKSelfContained=true` + `--self-contained` 把两者
 # 都打进产物，代价只是 zip 大一些。
 #
+# 每个 Release 挂两个 Windows 资产（2026-09-17 起）：
+#   TJDesktopTimetable-v<版本>-setup.exe         ← Inno Setup 安装包，普通人双击就能装（推荐）
+#   TJDesktopTimetable-v<版本>-win-x64.zip       ← 自包含 zip，给想手动解压的人
+# 「新版本提示」优先给 setup.exe（`UpdateCheck.WindowsPackageSuffixes`），找不到才退回 zip。
+#
 # 只做构建与发布，**不跑运行时冒烟**：GitHub runner 上 WASDK 引导路径会挂住且无输出（见 build-csharp.yml
-# 里的说明），运行时验证走本机 `.tools/build-winui.ps1 -RunSmoke` + `verify-import.ps1`。
+# 里的说明），运行时验证走本机 `.tools/build-winui.ps1 -RunSmoke` + `verify-import.ps1` +
+# `verify-installer.ps1`（后者覆盖装/启动/卸载/覆盖升级/运行中安装四个场景）。
 
 on:
   push:
@@ -64,6 +70,20 @@ jobs:
           Write-Host "打包完成：$name.zip"
           Get-ChildItem "$name.zip" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
 
+      - name: 安装 Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: 构建安装包（Inno Setup）
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
+          $version = (Select-String -Path 'dotnet\Directory.Build.props' -Pattern '<Version>([^<]+)</Version>').Matches[0].Groups[1].Value
+          # SourceDir 指向上面 publish 出来的自包含产物；OutputDir 是仓库根，好让上传步骤直接找得到
+          & $iscc "/Qp" "/DSourceDir=$($PWD.Path)\publish" "/DMyAppVersion=$version" "/DOutputDir=$($PWD.Path)" 'installer\TJDesktopTimetable.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit=$LASTEXITCODE)" }
+          Get-ChildItem 'TJDesktopTimetable-*-setup.exe' | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+
       - name: 创建/更新 Release 并上传资产
         shell: pwsh
         env:
@@ -72,6 +92,8 @@ jobs:
           $tag = '${{ github.ref_name }}'
           $version = (Select-String -Path 'dotnet\Directory.Build.props' -Pattern '<Version>([^<]+)</Version>').Matches[0].Groups[1].Value
           $zip = Get-ChildItem 'TJDesktopTimetable-v*-win-x64.zip' | Select-Object -First 1
+          $setup = Get-ChildItem 'TJDesktopTimetable-v*-setup.exe' | Select-Object -First 1
+          if (-not $zip) { throw "没有 zip 产物" }
           if (-not $tag.StartsWith('v')) { throw "不是 tag 触发（ref=$tag），跳过发布" }
           $notes = "docs/releases/$tag.md"
           gh release view $tag --repo '${{ github.repository }}' 2>$null
@@ -86,5 +108,7 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "创建 Release $tag 失败（既没建出来也读不到）" }
             }
           }
-          gh release upload $tag $zip.FullName --repo '${{ github.repository }}' --clobber
+          $assets = @($zip.FullName)
+          if ($setup) { $assets += $setup.FullName } else { Write-Warning '没有 setup.exe 产物：本次只上传 zip' }
+          gh release upload $tag @assets --repo '${{ github.repository }}' --clobber
           gh release view $tag --repo '${{ github.repository }}'
