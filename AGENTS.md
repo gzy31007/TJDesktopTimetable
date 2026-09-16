@@ -314,6 +314,22 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     - **现行取值**（`ApplyMicaTint`，只作用于深色档）：Base → `TintColor #202226` + `TintOpacity 0.25f`
       + `LuminosityOpacity 0.86f`；BaseAlt → 0.55f / 0.53f。实测同区域采样 **`#461F1A` (70,31,26)**
       vs DeskBox 面板 **`#4B241F` (75,36,31)** —— 同一档且不再发灰。
+  - ④ **Acrylic 两档：系统 Acrylic 在本机不可用，"轻薄"改用 Mica 的低 tint 档（2026-09-16）**。
+    新增 `MaterialMode.AcrylicThin`（设置页「轻薄亚克力（Acrylic Thin）」、CLI `--material acrylic-thin`；
+    **枚举只能追加在末尾** —— settings.json 按数字存）。三条路径全试过（同窗口、同区域、深色壁纸）：
+    - WinUI `DesktopAcrylicController`（Base 与 Thin 都试）+ 显式 `TintColor`/`FallbackColor`/`TintOpacity`/`LuminosityOpacity`
+      → 只出 FallbackColor `#222325` / `#232324`（纯灰，壁纸完全透不出来），**两档无差别**；
+    - 内置 `Window.SystemBackdrop = new DesktopAcrylicBackdrop()` → `#2C2C2C`（同样纯灰）；
+    - Win32 `SetWindowCompositionAttribute` + `ACCENT_ENABLE_ACRYLICBLURBEHIND`（DeskBox 的机制，
+      照机制自己写过一版 `Win32/AcrylicAccent.cs`）→ `#08141A` 近黑、两档仍无差别 ——
+      **WinUI 3 的合成层把 DWM 的 accent blur 挡掉了**。该文件已删。
+    - 结论：**这套窗口形态下只有 Mica 控制器真能出材质**，所以 Acrylic 两档也用 Mica 控制器，只换参数；
+      日志 mode 如实写 `acrylic-mica` / `acrylic-thin-mica`（不假装是 Acrylic 合成）。
+    - 四档参数表（深色）：Mica `#202226 / 0.25 / 0.86`、MicaAlt `#202226 / 0.55 / 0.53`、
+      Acrylic `#2E2624 / 0.42 / 0.74`、**轻薄 `#3A2E2A / 0.45 / 0.70`**。
+    - 对齐结果（1100×760 同位置采样）：轻薄 **`#57352F` (87,53,47)** vs DeskBox 面板 `#5C3530` (92,53,48)。
+    - **规律（省下次试错）**：Mica 的 tint 是"叠色"，当 tint 色比该区域壁纸更亮时**提高 TintOpacity 会提亮**；
+      中性灰 tint 只能做到"亮但发灰"，要暖必须把 **TintColor 本身调暖**（`#3A2E2A` 这类）。
   - 对比方法（可复用）：拿用户的桌面截图直接采样像素 —— DeskBox 面板空白处 vs 挂件 gutter 空白处，
     同图同区域最公平；只截自己窗口容易把"位置不同导致壁纸色不同"误判成材质问题（先把窗口
     `SetWindowPos` 挪到面板同一区域再比，`.tools/shot-top.ps1 -X -Y`）。

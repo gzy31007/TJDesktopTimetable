@@ -338,12 +338,13 @@ public sealed partial class SettingsWindow : Window
 
         var material = new ComboBox
         {
-            ItemsSource = new[] { "Mica（推荐）", "Mica Alt", "Acrylic", "无材质（实色）" },
+            ItemsSource = new[] { "Mica（推荐）", "Mica Alt", "Acrylic", "轻薄亚克力（Acrylic Thin）", "无材质（实色）" },
             SelectedIndex = _current.Material switch
             {
                 MaterialMode.MicaAlt => 1,
                 MaterialMode.Acrylic => 2,
-                MaterialMode.Solid => 3,
+                MaterialMode.AcrylicThin => 3,
+                MaterialMode.Solid => 4,
                 _ => 0,
             },
             MinWidth = 168,
@@ -357,12 +358,18 @@ public sealed partial class SettingsWindow : Window
                 {
                     1 => MaterialMode.MicaAlt,
                     2 => MaterialMode.Acrylic,
-                    3 => MaterialMode.Solid,
+                    3 => MaterialMode.AcrylicThin,
+                    4 => MaterialMode.Solid,
                     _ => MaterialMode.Mica,
                 },
             });
         };
-        rows.Add(SettingsView.Row("\uE790", "窗口材质", "改动即时生效；Acrylic 需要透明窗口，个别机型上观感可能与 Mica 接近", material, dark));
+        rows.Add(SettingsView.Row(
+            "\uE790",
+            "窗口材质",
+            "改动即时生效；Acrylic 两档都需要透明窗口，个别机型上观感可能与 Mica 接近；轻薄亚克力最透",
+            material,
+            dark));
 
         var weekend = SettingsView.Switch(_current.ShowWeekend);
         weekend.Toggled += (_, _) =>

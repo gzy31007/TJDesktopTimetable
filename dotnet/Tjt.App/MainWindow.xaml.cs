@@ -290,9 +290,12 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            // 材质主题**必须跟窗口主题走**（不设就跟随系统，浅色模式下会得到深底）
-            _backdrop = BackdropHelper.Apply(this, _settings.Material, IsDark());
-            AppLog.Line($"[backdrop] mode={_backdrop.Mode}");
+            // 材质主题**必须跟窗口主题走**（不设就跟随系统，浅色模式下会得到深底）。
+            // `--material` 只覆盖本次运行（不落盘），供截图逐个材质对比。
+            var material = startup.Material ?? _settings.Material;
+            _backdrop = BackdropHelper.Apply(this, material, IsDark());
+            AppLog.Line($"[backdrop] mode={_backdrop.Mode}"
+                + (startup.Material is null ? string.Empty : $"（--material {material} 覆盖本次运行）"));
         }
 
         // 2) 显式给了 --size 就精确设成它（用于验证自适应）；否则用窗口系统给的默认尺寸

@@ -12,6 +12,10 @@ namespace Tjt.App;
 /// <c>null</c> = 用系统时钟。存在的理由：时间线的几何取决于真实时间，而课间 / 午休那些分支
 /// 不可能等到点上再去截图验证（见 <c>BoardVisualTests</c> 的同名用例）。
 /// </param>
+/// <param name="Material">
+/// 覆盖窗口材质（<c>--material mica|mica-alt|acrylic|acrylic-thin|solid</c>），只影响本次运行、不落盘。
+/// 为的是能用截图逐个材质对比（设置页也能切，但脚本点不到下拉）。
+/// </param>
 /// <param name="NoBackdrop">跳过系统材质（无 GPU 的 CI runner 上 D3D 合成会挂住）。</param>
 /// <param name="LogPath">日志文件路径（WinExe 不附加控制台，CI 只能靠文件拿输出）。</param>
 /// <param name="FixturePath">显式指定要导入的课表 JSON；为空时按约定位置探测。</param>
@@ -41,6 +45,7 @@ internal sealed record AppStartupOptions(
     bool? DesktopLayer = null,
     bool? Weekend = null,
     int? NowMinutes = null,
+    Data.MaterialMode? Material = null,
     bool NoBackdrop = false,
     string? LogPath = null,
     string? FixturePath = null,
@@ -69,6 +74,7 @@ internal sealed record AppStartupOptions(
         bool? desktopLayer = null;
         bool? weekend = null;
         int? nowMinutes = null;
+        Data.MaterialMode? material = null;
         var noBackdrop = false;
         string? logPath = null;
         var dark = (bool?)null;
@@ -103,6 +109,11 @@ internal sealed record AppStartupOptions(
                 settingsPage = page;
                 i += 1;
             }
+            else if (Matches(arg, "material") && i + 1 < args.Length && ParseMaterial(args[i + 1]) is { } parsedMaterial)
+            {
+                material = parsedMaterial;
+                i += 1;
+            }
             else if (Matches(arg, "now") && i + 1 < args.Length && Tjt.Core.Time.ToMinutes(args[i + 1]) is { } minutes)
             {
                 nowMinutes = minutes;
@@ -121,6 +132,7 @@ internal sealed record AppStartupOptions(
             DesktopLayer: desktopLayer,
             Weekend: weekend,
             NowMinutes: nowMinutes,
+            Material: material,
             NoBackdrop: noBackdrop,
             LogPath: logPath,
             FixturePath: fixture,
@@ -139,6 +151,17 @@ internal sealed record AppStartupOptions(
         string.Equals(arg, $"--{name}", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(arg, $"-{name}", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(arg, $"/{name}", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>材质名 → 枚举（认 <c>acrylic-thin</c> / <c>acrylicthin</c> / <c>thin</c> 三种写法；不认识返回 null）。</summary>
+    private static Data.MaterialMode? ParseMaterial(string text) => text.ToLowerInvariant() switch
+    {
+        "solid" => Data.MaterialMode.Solid,
+        "mica" => Data.MaterialMode.Mica,
+        "mica-alt" or "micaalt" or "alt" => Data.MaterialMode.MicaAlt,
+        "acrylic" => Data.MaterialMode.Acrylic,
+        "acrylic-thin" or "acrylicthin" or "thin" => Data.MaterialMode.AcrylicThin,
+        _ => null,
+    };
 
     private static bool TryParseSize(string text, out int width, out int height)
     {

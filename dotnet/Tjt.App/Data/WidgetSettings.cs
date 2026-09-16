@@ -29,6 +29,15 @@ internal enum MaterialMode
 
     /// <summary>Acrylic：更"玻璃"，但需要 <c>transparent: true</c>，代价是拿不到 DWM 圆角。</summary>
     Acrylic,
+
+    /// <summary>
+    /// 轻薄亚克力（<c>DesktopAcrylicKind.Thin</c>）：比 Acrylic 更薄更透，壁纸几乎原样透出来
+    /// （DeskBox 的文件夹 / 待办窗口就是这一档观感）。
+    ///
+    /// <para>⚠️ **必须追加在末尾**：枚举值直接落进 <c>settings.json</c>（STJ 默认按数字序列化），
+    /// 插在中间会让老配置的材质整体错位。</para>
+    /// </summary>
+    AcrylicThin,
 }
 
 /// <summary>
