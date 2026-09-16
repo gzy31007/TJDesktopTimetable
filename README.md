@@ -50,7 +50,7 @@ docs/                   desktop-layer.md · winui-build.md · winui-lessons.md �
 
 **Windows（推荐：安装包）**
 
-1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.1-setup.exe`（约 59 MB）。
+1. 从 [Releases](../../releases) 下载最新正式版的 `TJDesktopTimetable-v<版本>-setup.exe`（约 59 MB）。
 2. 双击安装 → 装到 `Program Files`，向导里可以勾选**开始菜单 / 桌面快捷方式 / 开机自启 / 装完启动**。
 3. 首次启动会打开设置窗口的「导入课表」页，按下一节导入一次即可。
 
@@ -63,14 +63,14 @@ docs/                   desktop-layer.md · winui-build.md · winui-lessons.md �
 
 **Windows（备选：绿色 zip）**
 
-1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.1-win-x64.zip`。
+1. 从 [Releases](../../releases) 下载最新正式版的 `TJDesktopTimetable-v<版本>-win-x64.zip`。
 2. 解压到任意**本地磁盘**目录（别放在 `\\wsl.localhost\...` 这类 UNC 路径下）。
 3. 双击 `Tjt.App.exe`。（这一份同样自包含。）
 
 **Linux**
 
-1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.1-linux-x64.tar.gz`（自包含单文件：**不需要**预装 .NET）。
-2. `tar -xzf TJDesktopTimetable-v1.3.1-linux-x64.tar.gz -C ~/.local/opt/TJDesktopTimetable`。
+1. 从 [Releases](../../releases) 下载最新正式版的 `TJDesktopTimetable-v<版本>-linux-x64.tar.gz`（自包含单文件：**不需要**预装 .NET）。
+2. `tar -xzf TJDesktopTimetable-v<版本>-linux-x64.tar.gz -C ~/.local/opt/TJDesktopTimetable`。
 3. 运行 `~/.local/opt/TJDesktopTimetable/Tjt.Linux`。首次启动没有课表时会打开导入窗口。
    > 依赖：X11 / XWayland，以及 `libICE` / `libSM`（Debian/Ubuntu：`sudo apt install libice6 libsm6`）；
    > 中文课表需要 CJK 字体。详见下面 [Linux 版](#linux-版tjtlinux)。

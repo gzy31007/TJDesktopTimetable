@@ -94,6 +94,8 @@ jobs:
             echo "Release $TAG 已存在（win 工作流先建的），直接上传 Linux 资产"
           else
             ghArgs=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "TJDesktopTimetable $TAG" --verify-tag)
+            # 预发布 tag 显式标 prerelease，别再让 beta 出现在 /releases/latest 里（同 win 工作流）
+            if [[ "$TAG" == *-* ]]; then ghArgs+=(--prerelease); fi
             if [ -f "$notes" ]; then ghArgs+=(--notes-file "$notes"); else ghArgs+=(--generate-notes); fi
             # 与 win 工作流并发时可能撞车：创建失败但 Release 已存在，就当成功继续上传
             gh "${ghArgs[@]}" || gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
