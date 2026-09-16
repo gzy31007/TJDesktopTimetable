@@ -22,6 +22,7 @@ Windows 桌面小组件：把同济大学课表以半透明色块网格固定在
 dotnet/TjtCore/       平台无关核心（net10.0）：模型/周次/冲突/布局/时间/适配器
 dotnet/Tjt.Widget/    挂件视觉层（net10.0，纯计算，不引 WinUI/Win32）
 dotnet/Tjt.App/       WinUI 外壳（net10.0-windows）：窗口/材质/Win32/托盘/设置
+dotnet/Tjt.Linux/     Avalonia Linux 外壳（net10.0，fork 新增）：窗口/渲染/X11 贴桌面层/导入编排
 dotnet/TjtCore.Tests/ 平台无关单测（TjtCore + Tjt.Widget 都测这里）
 dotnet/fixtures/      脱敏后的真实抓包数据（黄金测试基准，禁止放入学号、姓名等个人信息）
 docs/                 desktop-layer（层级层结论）· winui-build（DeskBox 参考事实 + 构建环境）
@@ -494,3 +495,44 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
 - **应用自己写日志文件**（`--log <path>`，见 `AppLog.cs`）：本地 `Start-Process` 重定向 stdout 能拿到输出，
   但 GUI 子系统进程在别的宿主下可能拿不到 —— 文件通道是唯一可靠的，且**进程被强杀也保留最后阶段**。
   自检另有 45 秒看门狗（超时即打印最后阶段并非零退出），避免 CI/脚本悬着。
+
+## Linux 线（fork 新增，2026-09-16）
+
+`dotnet/Tjt.Linux/`（Avalonia 12，net10.0）是本 fork 在 Windows 主线之外新增的 Linux 外壳，
+构建入口 `dotnet/TjtTimetable.Linux.slnx`。分层硬约束原样继承：
+
+1. `Tjt.Linux` 只做"必须在 Linux 桌面上跑"的事：Avalonia 窗口、X11 互操作（`X11/X11KeepBelow.cs`）、
+   文件与网络 IO（`Data/` 是 Tjt.App/Data 的移植）；业务逻辑进 TjtCore、视觉计算进 Tjt.Widget，
+   **不得**反向引用。
+2. **不要把 `Tjt.Linux` 并进 `TjtTimetable.slnx`**（那是平台无关的测试解决方案，与 Tjt.App 同一条禁令）。
+3. 渲染层 `Rendering/BoardRenderer.cs` 是 WinUI 版的同构移植："照数字摆控件"，不新增视觉规则；
+   想改观感改 `Tjt.Widget`（两端一起变），别在壳里自作主张。
+
+### 与 Windows 版的关键差异（改代码前先读）
+
+- **贴桌面层** = X11 `_NET_WM_WINDOW_TYPE_DOCK`（改属性）+ `_NET_WM_STATE_BELOW`（EWMH 客户消息）。
+  **DOCK 类型是必须的**：真机实测 KWin 的「显示桌面」会把 keep-below 的普通窗口一起藏掉，
+  DOCK 类型才留下来（conky / 桌面挂件的通行做法）。两件一起做，别只留一件。
+- **拖动/缩放走 Avalonia 原生循环**（`BeginMoveDrag` / `BeginResizeDrag`）：热区几何、方向、
+  最小尺寸仍用 `Tjt.Widget` 的 `CursorZones`/`ResizePolicy` 纯函数；Windows 版那套 16ms 光标轮询是
+  WinUI 指针捕获缺陷逼出来的补丁，Avalonia 不需要，**别照搬**。
+- **字体**：Avalonia 12 默认 Inter，多数发行版没装（直接抛 glyphTypeface）；
+  启动时用 `fc-match sans-serif` 解析真实默认字体（`Program.ResolveDefaultFontFamily`）。
+- **数据目录**：`Environment.SpecialFolder.ApplicationData` 在 Linux 上映射 XDG（~/.config），
+  `settings.json` / `timetable.json` / `credentials.json` 与 Windows 版同构可互拷。
+- **内置登录窗口是 WebView2 专属**，Linux 不做；「粘贴一条浏览器请求」（`TongjiFetcher`）就是主路径。
+- 位置尺寸持久化是 DIP 口径（物理像素 ÷ RenderScaling），恢复用主屏缩放近似 + 屏内校验兜底
+  （多屏异缩放场景接受近似，与 Windows 版 FrameCorrection 的取舍同源）。
+
+### 开发（Linux 本机）
+
+```bash
+dotnet test dotnet/TjtTimetable.slnx          # 平台无关单测（推送前必跑）
+dotnet run --project dotnet/Tjt.Linux         # 跑挂件
+dotnet build dotnet/TjtTimetable.Linux.slnx   # 只编译
+```
+
+GUI 行为验收（贴桌面层 / 显示桌面可见性 / 拖缩）需真机；KWin 会话可用
+`qdbus6 org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component.invokeShortcut "Show Desktop"`
+触发「显示桌面」做自动化截图对比（注意：`org.kde.KWin /KWin showDesktop(bool)` 那个 DBus 方法
+**不生效**，必须走快捷键；快捷键名是 "Show Desktop" 带空格）。

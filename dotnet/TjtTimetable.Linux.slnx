@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Tjt.Linux/Tjt.Linux.csproj" />
+  <Project Path="TjtCore/TjtCore.csproj" />
+  <Project Path="Tjt.Widget/Tjt.Widget.csproj" />
+</Solution>

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=TJ Desktop Timetable
+Name[zh_CN]=同济桌面课表
+Comment=Desktop timetable widget for Tongji University (Linux / Avalonia)
+Comment[zh_CN]=同济大学课表桌面小组件（Linux 版）
+# 安装时把 Exec 改成 Tjt.Linux 的绝对路径（或把它放进 $PATH），Icon 改成安装的图标路径
+Exec=Tjt.Linux
+Icon=io.github.little-red-stone.TJDesktopTimetable
+Terminal=false
+Categories=Utility;Education;
+StartupWMClass=Tjt.Linux

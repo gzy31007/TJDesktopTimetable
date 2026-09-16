@@ -1,10 +1,12 @@
 # C# 线的构建与测试。
 #
-# 两个解决方案刻意分开，因为平台要求不同：
+# 三个解决方案刻意分开，因为平台要求不同：
 # - `dotnet/TjtTimetable.slnx`：平台无关的核心库 + 挂件视觉层（Tjt.Widget），
 #   Linux 与 Windows 都能 `dotnet test`；
 # - `dotnet/TjtTimetable.Windows.slnx`：WinUI 3 外壳（Tjt.App），**只能**在 Windows 上编译。
 #   不要把它并进上面那个 slnx，否则 Linux 上的构建整片失败。
+# - `dotnet/TjtTimetable.Linux.slnx`：Avalonia Linux 外壳（Tjt.Linux，fork 新增），
+#   只在 Linux 上构建；Windows runner 上不跑。
 #
 # WinUI 外壳在这里做两件事：编译 + 跑一次 `--smoke` 自检（建窗口、渲染课表、校验布局）。
 name: csharp
@@ -69,3 +71,27 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: dotnet/Tjt.App/bin/Release/net10.0-windows10.0.22621.0/win-x64/
+
+  linux-shell:
+    # Avalonia Linux 外壳（Tjt.Linux）：ubuntu 上编译 + 自包含发布。
+    # 只做编译门禁与产物上传；GUI 运行时行为（贴桌面层 / 显示桌面可见性）需真机验收。
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore（Linux 外壳）
+        run: dotnet restore dotnet/TjtTimetable.Linux.slnx
+      - name: Build（Linux 外壳）
+        run: dotnet build dotnet/TjtTimetable.Linux.slnx --configuration Release --no-restore
+      - name: Publish（linux-x64 自包含）
+        run: dotnet publish dotnet/Tjt.Linux/Tjt.Linux.csproj -c Release -r linux-x64 --self-contained /p:PublishSingleFile=true /p:DebugType=embedded
+      - name: Upload（Linux 外壳产物）
+        uses: actions/upload-artifact@v4
+        with:
+          name: tjt-linux-x64
+          if-no-files-found: error
+          retention-days: 14
+          path: dotnet/Tjt.Linux/bin/Release/net10.0/linux-x64/publish/
