@@ -40,6 +40,14 @@ namespace Tjt.App;
 /// 等它捕获到课表 → 写日志 → 退出（退出码表成败）。给验收脚本指向本地合成服务用，
 /// 这样不必拿真账号去登录（详见 <c>.tools/verify-login.ps1</c>）。
 /// </param>
+/// <param name="UpdateCheck">
+/// 启动即查一次新版本、把结论写日志后退出（<c>--update-check</c>）。**不建挂件窗口、不落盘**，
+/// 退出码表"有没有查到"（查到=0，网络/解析失败=1）—— 给验收脚本用。
+/// </param>
+/// <param name="UpdateApiUrl">
+/// 覆盖更新检查的 API 地址（<c>--update-api &lt;url&gt;</c>）：验收脚本指向本地合成服务，
+/// 不必真的去打 GitHub（也不受网络环境影响）。<c>null</c> = 真 GitHub。
+/// </param>
 internal sealed record AppStartupOptions(
     bool Smoke = false,
     bool? DesktopLayer = null,
@@ -56,7 +64,9 @@ internal sealed record AppStartupOptions(
     string? FetchCheckPath = null,
     int? SettingsPage = null,
     bool Login = false,
-    string? LoginCheckUrl = null)
+    string? LoginCheckUrl = null,
+    bool UpdateCheck = false,
+    string? UpdateApiUrl = null)
 {
     /// <summary>
     /// 解析命令行。
@@ -65,7 +75,7 @@ internal sealed record AppStartupOptions(
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>（不传就用窗口系统给的默认尺寸，传了就精确设成它，
     /// 便于验证自适应）、<c>--now HH:mm</c>（覆盖"当前时刻"，只为验证时间线，见 <c>NowMinutes</c>）、
     /// <c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>、
-    /// <c>--login</c>、<c>--login-check &lt;url&gt;</c>。
+    /// <c>--login</c>、<c>--login-check &lt;url&gt;</c>、<c>--update-check</c>、<c>--update-api &lt;url&gt;</c>。
     /// 未知参数被忽略（不崩在 CLI 上）。
     /// </summary>
     public static AppStartupOptions Parse(string[] args)
@@ -86,6 +96,8 @@ internal sealed record AppStartupOptions(
         int? settingsPage = null;
         var login = false;
         string? loginCheck = null;
+        var updateCheck = false;
+        string? updateApi = null;
 
         for (var i = 0; i < args.Length; i += 1)
         {
@@ -104,6 +116,8 @@ internal sealed record AppStartupOptions(
             else if (Matches(arg, "fetch-check") && i + 1 < args.Length) fetchCheck = args[++i];
             else if (Matches(arg, "login")) login = true;
             else if (Matches(arg, "login-check") && i + 1 < args.Length) loginCheck = args[++i];
+            else if (Matches(arg, "update-check")) updateCheck = true;
+            else if (Matches(arg, "update-api") && i + 1 < args.Length) updateApi = args[++i];
             else if (Matches(arg, "settings-page") && i + 1 < args.Length && int.TryParse(args[i + 1], out var page))
             {
                 settingsPage = page;
@@ -143,7 +157,9 @@ internal sealed record AppStartupOptions(
             FetchCheckPath: fetchCheck,
             SettingsPage: settingsPage,
             Login: login,
-            LoginCheckUrl: loginCheck);
+            LoginCheckUrl: loginCheck,
+            UpdateCheck: updateCheck,
+            UpdateApiUrl: updateApi);
     }
 
     /// <summary>支持 <c>--flag</c> / <c>-flag</c> / <c>/flag</c> 三种前缀。</summary>

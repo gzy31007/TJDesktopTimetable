@@ -36,6 +36,9 @@ public partial class App : Application
         Import = 6,
         Exit = 7,
         ToggleWeekend = 8,
+
+        /// <summary>「发现新版本 vX」——打开下载页（只有查到新版本时这一项才在菜单里）。</summary>
+        OpenUpdate = 9,
     }
 
     private readonly List<MainWindow> _windows = [];
@@ -109,6 +112,15 @@ public partial class App : Application
                 SmokePassed = false;
             }
 
+            // 0d) 更新检查自检（--update-check）：查一次最新 Release、把结论写日志、退出。
+            //     **不建窗口、不落盘**；`--update-api <url>` 可把地址指向本地合成服务
+            //     （验收脚本因此不受网络环境影响，见 .tools/verify-update-check.ps1）。
+            if (options.UpdateCheck)
+            {
+                SmokePassed = RunUpdateCheck(options.UpdateApiUrl);
+                return;
+            }
+
             // 0c) 登录窗口自检（--login-check <url>）：开一个真窗口、跑完整捕获链路、用完即走。
             //     刻意**不建挂件窗口** —— 验收脚本只关心"页面发出的课表请求能不能被接住并落盘"，
             //     少一个窗口就少一处干扰；落盘走 ImportService 的兜底分支（TimetableStore.Save）。
@@ -140,6 +152,10 @@ public partial class App : Application
             // 只在交互模式做：自检 / 诊断路径（--smoke / --fetch-check / --login-check）都已提前 return，
             // 那些会反复启动的验收流程不该动真实系统状态（同"冒烟不写设置"的理由）。
             AutoStart.Sync(window.CurrentSettings.LaunchAtLogin);
+
+            // 新版本检查：后台线程 + 延迟 12 秒（DeskBox 同款思路 —— 别跟启动抢资源），
+            // 失败静默、只记日志。走的是"交互模式"这条路径，所以自检 / 诊断都不会触发。
+            ScheduleUpdateCheck(window);
 
             window.ShowWidget();
             _tray = BuildTray(window);
@@ -175,7 +191,7 @@ public partial class App : Application
             // 自检与抓取诊断都是"跑完即走"的短命进程：一律**硬退出**。
             // 实测 Application.Exit() 在"窗口从未激活"的路径上会让进程挂住（退出消息投给消息循环，
             // 而循环在窗口激活前不推进），CI 上表现为 job 无限期 in_progress。
-            if (options.Smoke || options.FetchCheckPath is not null)
+            if (options.Smoke || options.FetchCheckPath is not null || options.UpdateCheck)
             {
                 Environment.Exit(SmokePassed ? 0 : 1);
             }
@@ -258,6 +274,164 @@ public partial class App : Application
         }
     }
 
+    /* ---------------------------------------------------------- 新版本检查（DeskBox 同款） */
+
+    /// <summary>启动后延迟多久查一次：DeskBox 是 45 秒，我们启动开销小，12 秒足够错开启动高峰。</summary>
+    private static readonly TimeSpan UpdateCheckDelay = TimeSpan.FromSeconds(12);
+
+    /// <summary>
+    /// 后台查一次新版本：**失败静默**（只记日志），结论交给 <see cref="ApplyUpdateResult"/> 分发。
+    /// </summary>
+    private void ScheduleUpdateCheck(MainWindow widget)
+    {
+        if (!widget.CurrentSettings.CheckUpdates)
+        {
+            AppLog.Line("[update] 设置里关掉了「检查新版本」，本次不查");
+            return;
+        }
+
+        var apiUrl = Startup.UpdateApiUrl;
+        var skipped = widget.CurrentSettings.SkippedVersion;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(UpdateCheckDelay).ConfigureAwait(false);
+                var result = await UpdateChecker.CheckAsync(apiUrl, skipped).ConfigureAwait(false);
+                if (result is null) return;
+                widget.DispatcherQueue.TryEnqueue(() => ApplyUpdateResult(widget, result));
+            }
+            catch (Exception ex)
+            {
+                AppLog.Line($"[update] 后台检查异常（静默）：{ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>手动查一次（设置页「关于」的按钮）；<paramref name="onDone"/> 在 UI 线程回调，用来重画那一页。</summary>
+    private void CheckUpdatesNow(MainWindow widget, Action? onDone = null)
+    {
+        var apiUrl = Startup.UpdateApiUrl;
+        var skipped = widget.CurrentSettings.SkippedVersion;
+        _ = Task.Run(async () =>
+        {
+            var result = await UpdateChecker.CheckAsync(apiUrl, skipped).ConfigureAwait(false);
+            widget.DispatcherQueue.TryEnqueue(() =>
+            {
+                // result 为 null = 没查到（网络失败）：保留上一次结论，只把 UI 刷新回去
+                if (result is not null) ApplyUpdateResult(widget, result);
+                onDone?.Invoke();
+            });
+        });
+    }
+
+    /// <summary>结论分发：挂件（状态）→ 托盘（菜单项 + 提示）→ 设置窗口（重画关于页）。</summary>
+    private void ApplyUpdateResult(MainWindow widget, UpdateCheckResult result)
+    {
+        widget.ApplyUpdateResult(result);
+        _tray?.SetMenu(1, BuildTrayMenu(widget));
+        UpdateTrayTooltip(widget);
+        RefreshSettingsWindows();
+    }
+
+    /// <summary>让所有开着的设置窗口重画当前页（检查更新是异步的，状态会变）。</summary>
+    private void RefreshSettingsWindows()
+    {
+        foreach (var window in _settingsWindows) window.RefreshCurrentPage();
+    }
+
+    /// <summary>「跳过此版本」：记住版本号（落盘）→ 撤掉提示 → 刷新托盘与设置页。</summary>
+    private void SkipUpdate(MainWindow widget)
+    {
+        if (widget.CurrentUpdate?.Latest is not { } latest) return;
+        widget.SkipUpdateVersion($"{latest.Major}.{latest.Minor}.{latest.Build}");
+        _tray?.SetMenu(1, BuildTrayMenu(widget));
+        UpdateTrayTooltip(widget);
+        RefreshSettingsWindows();
+    }
+
+    /// <summary>
+    /// 设置窗口的回调集合（两个构造点共用：自检建页、用户真的打开）。
+    ///
+    /// <para>新版本那一行统一读同一个 <paramref name="widget"/> 的结论，所以两个入口
+    /// （托盘 / 设置页）不会说两套话；`ShowSettings` 的 `current` / `dark` 参数只用于回显。</para>
+    /// </summary>
+    private SettingsWindow.SettingsHost BuildSettingsHost(MainWindow widget) => new(
+        Apply: next => widget.ApplySettings(next),
+        ResetPosition: () => widget.BuildActions().ResetPosition?.Invoke(),
+        ReloadTimetable: () => widget.ReloadTimetable(),
+        Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化"),
+        OpenLogin: () => ShowTongjiLogin(widget.CurrentIsDark),
+        DescribeUpdate: () => DescribeUpdate(widget),
+        CheckUpdates: () => CheckUpdatesNow(widget, RefreshSettingsWindows),
+        OpenUpdatePage: () => OpenUpdatePage(widget),
+        SkipUpdate: () => SkipUpdate(widget),
+        HasUpdate: widget.CurrentUpdate is { HasUpdate: true });
+
+    /// <summary>「关于」页那一行的文本（与托盘提示同源：都读 <c>widget.CurrentUpdate</c>）。</summary>
+    private static string DescribeUpdate(MainWindow widget)
+    {
+        if (widget.CurrentUpdate is not { } result) return "还没检查（启动后会自动查一次）";
+        return result.Status switch
+        {
+            UpdateStatus.UpdateAvailable => $"有新版本 v{result.Latest}（当前 {result.Current}）",
+            UpdateStatus.Skipped => $"已跳过 v{result.Latest}；更高的版本仍会提示",
+            UpdateStatus.UpToDate => $"已是最新（当前 {result.Current}）",
+            _ => "检查失败（网络或响应异常，已静默处理）",
+        };
+    }
+
+    /// <summary>托盘提示文字：有更新时带上版本号（不打开菜单也能看见）。</summary>
+    private void UpdateTrayTooltip(MainWindow widget)
+    {
+        var tooltip = "同济课表挂件";
+        if (widget.CurrentUpdate is { HasUpdate: true, Latest: { } latest })
+        {
+            tooltip += $"（有新版本 v{latest}）";
+        }
+        _tray?.UpdateTooltip(tooltip);
+    }
+
+    /// <summary>打开下载页：优先给本平台的包，没有对应资产时退回 Release 页面。</summary>
+    private static void OpenUpdatePage(MainWindow widget)
+    {
+        var url = widget.CurrentUpdate is { } result ? UpdateCheck.DownloadUrlFor(result) : UpdateCheck.RepoUrl;
+        try
+        {
+            AppLog.Line($"[update] 打开下载页：{url}");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Line($"[update] 打开下载页失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// <c>--update-check</c>：查一次、把结论写日志、用退出码表成败（**不建窗口、不落盘**）。
+    /// 给验收脚本用，配合 <c>--update-api</c> 指向本地合成服务。
+    /// </summary>
+    private static bool RunUpdateCheck(string? apiUrl)
+    {
+        try
+        {
+            var settings = SettingsStore.Load();
+            AppLog.Line($"[update-check] 本机版本 {UpdateChecker.CurrentVersion()}，API {apiUrl ?? UpdateCheck.LatestReleaseApiUrl}");
+            // 诊断路径阻塞等待（与 --fetch-check 同口径）：跑完即走，没有"卡住 UI"的问题
+            var result = UpdateChecker.CheckAsync(apiUrl, settings.SkippedVersion).GetAwaiter().GetResult();
+            if (result is null) return false;
+            AppLog.Line(
+                $"[update-check] status={result.Status} latest={result.Latest?.ToString() ?? "?"} "
+                + $"package={result.Package?.Name ?? "-"} url={UpdateCheck.DownloadUrlFor(result)}");
+            return result.Status != UpdateStatus.InvalidResponse;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"[update-check] 失败：{ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>
     /// <c>--settings-page &lt;n&gt;</c> 在自检模式下的对应检查：把那一页真的建出来并量一遍。
     /// </summary>
@@ -269,12 +443,7 @@ public partial class App : Application
 
         try
         {
-            var window = new SettingsWindow(widget.CurrentSettings, widget.CurrentIsDark, new SettingsWindow.SettingsHost(
-                Apply: next => widget.ApplySettings(next),
-                ResetPosition: () => widget.BuildActions().ResetPosition?.Invoke(),
-                ReloadTimetable: () => widget.ReloadTimetable(),
-                Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化"),
-                OpenLogin: () => ShowTongjiLogin(widget.CurrentIsDark)), page);
+            var window = new SettingsWindow(widget.CurrentSettings, widget.CurrentIsDark, BuildSettingsHost(widget), page);
             _settingsWindows.Add(window);
             // 两个都要：VerifyPage 量一遍布局，shown 确认"打开时真的停在这一页"
             var built = window.VerifyPage(page);
@@ -308,12 +477,8 @@ public partial class App : Application
             return current;
         }
 
-        var window = new SettingsWindow(current, dark, new SettingsWindow.SettingsHost(
-            Apply: next => _windows.FirstOrDefault()?.ApplySettings(next),
-            ResetPosition: () => _windows.FirstOrDefault()?.BuildActions().ResetPosition?.Invoke(),
-            ReloadTimetable: () => _windows.FirstOrDefault()?.ReloadTimetable(),
-            Imports: _imports ?? throw new InvalidOperationException("导入编排尚未初始化"),
-            OpenLogin: () => ShowTongjiLogin(dark)), page);
+        var window = new SettingsWindow(current, dark, BuildSettingsHost(
+            _windows.FirstOrDefault() ?? throw new InvalidOperationException("挂件窗口还没建，设置窗口不该在这里打开")), page);
         _settingsWindows.Add(window);
         window.Closed += (_, _) => _settingsWindows.Remove(window);
         window.Activate();
@@ -415,19 +580,30 @@ public partial class App : Application
     }
 
     /// <summary>托盘菜单（每次弹出前重建，好让两个开关的勾选状态是最新的）。</summary>
-    private List<TrayMenuItem> BuildTrayMenu(MainWindow widget) =>
-    [
-        new TrayMenuItem((uint)TrayCommand.Show, "显示挂件"),
-        new TrayMenuItem((uint)TrayCommand.Settings, "设置…"),
-        new TrayMenuItem((uint)TrayCommand.Import, "导入课表…"),
-        new TrayMenuItem(null, string.Empty),
-        new TrayMenuItem((uint)TrayCommand.Refresh, "重新载入课表"),
-        new TrayMenuItem((uint)TrayCommand.ResetPosition, "恢复默认位置"),
-        new TrayMenuItem((uint)TrayCommand.ToggleDesktopLayer, "贴桌面层", widget.LayerEnabled),
-        new TrayMenuItem((uint)TrayCommand.ToggleWeekend, "显示周末", widget.WeekendEnabled),
-        new TrayMenuItem(null, string.Empty),
-        new TrayMenuItem((uint)TrayCommand.Exit, "退出"),
-    ];
+    private List<TrayMenuItem> BuildTrayMenu(MainWindow widget)
+    {
+        var items = new List<TrayMenuItem>
+        {
+            new((uint)TrayCommand.Show, "显示挂件"),
+            new((uint)TrayCommand.Settings, "设置…"),
+            new((uint)TrayCommand.Import, "导入课表…"),
+            new(null, string.Empty),
+            new((uint)TrayCommand.Refresh, "重新载入课表"),
+            new((uint)TrayCommand.ResetPosition, "恢复默认位置"),
+            new((uint)TrayCommand.ToggleDesktopLayer, "贴桌面层", widget.LayerEnabled),
+            new((uint)TrayCommand.ToggleWeekend, "显示周末", widget.WeekendEnabled),
+            new(null, string.Empty),
+            new((uint)TrayCommand.Exit, "退出"),
+        };
+
+        // 有新版本时在最上面插一项（点了直接打开下载页）；没有更新时菜单和以前一模一样
+        if (widget.CurrentUpdate is { HasUpdate: true, Latest: { } latest })
+        {
+            items.Insert(1, new TrayMenuItem((uint)TrayCommand.OpenUpdate, $"发现新版本 v{latest}"));
+        }
+
+        return items;
+    }
 
     private void OnTrayCommand(MainWindow widget, uint command)
     {
@@ -455,6 +631,9 @@ public partial class App : Application
             case TrayCommand.ToggleWeekend:
                 widget.BuildActions().ToggleShowWeekend?.Invoke();
                 _tray?.SetMenu(1, BuildTrayMenu(widget));
+                break;
+            case TrayCommand.OpenUpdate:
+                OpenUpdatePage(widget);
                 break;
             case TrayCommand.Exit:
                 Exit();

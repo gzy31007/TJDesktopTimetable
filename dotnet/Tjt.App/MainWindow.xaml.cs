@@ -49,6 +49,9 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private bool HasExplicitSize => _options.Width is not null && _options.Height is not null;
     private WidgetSettings _settings = new();
+
+    /// <summary>最近一次新版本检查的结论（见 <see cref="CurrentUpdate"/>）。</summary>
+    private UpdateCheckResult? _update;
     private DesktopLayer? _layer;
     private WindowBounds _targetBounds = new(0, 0, DefaultWidth, DefaultHeight);
     private bool _userSizedRecently;
@@ -825,6 +828,39 @@ public sealed partial class MainWindow : Window
 
     /// <summary>最近一次静息落点（冒烟自检 / 真机日志用）。</summary>
     internal string LastDisposition => _layer?.LastDisposition ?? "none";
+
+    /// <summary>
+    /// 最近一次新版本检查的结论（<c>null</c> = 还没查到 / 查失败 / 被跳过）。
+    ///
+    /// <para>由 <see cref="App"/> 在后台查完后经 <see cref="ApplyUpdateResult"/> 灌进来；
+    /// 托盘菜单项与设置窗口「关于」页都读它，保证两个入口说的是同一件事。</para>
+    /// </summary>
+    internal UpdateCheckResult? CurrentUpdate => _update;
+
+    /// <summary>是否已经用到「跳过此版本」（跳过之后不再提示，直到出现更高的版本）。</summary>
+    internal bool UpdateSkipped => _update is { Status: UpdateStatus.Skipped };
+
+    /// <summary>
+    /// 收下一次检查结论（<paramref name="result"/> 为 <c>null</c> = 没查到，保留上一次的结论）。
+    /// </summary>
+    internal void ApplyUpdateResult(UpdateCheckResult? result)
+    {
+        if (result is null) return;
+        _update = result;
+        AppLog.Line(
+            $"[update] 应用结论 {result.Status}：本机 {result.Current} / 线上 {result.Latest?.ToString() ?? "?"}"
+            + (result.Package is null ? "" : $" / 包 {result.Package.Name}"));
+    }
+
+    /// <summary>
+    /// 记住「跳过此版本」：写进设置（落盘），并立刻撤掉当前提示。
+    /// </summary>
+    internal void SkipUpdateVersion(string version)
+    {
+        AppLog.Line($"[update] 跳过版本 {version}");
+        ApplySettings(_settings with { SkippedVersion = version });
+        _update = null;
+    }
 
     /// <summary>客户区尺寸（DIP）。</summary>
     private (double Width, double Height) ClientSizeDip(nint handle)

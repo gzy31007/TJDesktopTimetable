@@ -66,7 +66,22 @@ public sealed partial class SettingsWindow : Window
         Action ResetPosition,
         Action ReloadTimetable,
         ImportService Imports,
-        Action? OpenLogin = null);
+        Action? OpenLogin = null,
+
+        /// <summary>「关于」页那一行新版本状态的文本（外壳提供，设置窗口不认识网络）。</summary>
+        Func<string>? DescribeUpdate = null,
+
+        /// <summary>点「检查更新」；查完由外壳回头调 <see cref="RefreshCurrentPage"/>。</summary>
+        Action? CheckUpdates = null,
+
+        /// <summary>打开下载页（优先本平台的包，没有资产时退回 Release 页面）。</summary>
+        Action? OpenUpdatePage = null,
+
+        /// <summary>「跳过此版本」：外壳负责记住被跳过的版本号并更新两个入口。</summary>
+        Action? SkipUpdate = null,
+
+        /// <summary>构造这一页时"是否真的有新版本"（决定要不要显示下载 / 跳过按钮）。</summary>
+        bool HasUpdate = false);
 
     /// <summary>构造设置窗口。</summary>
     /// <param name="current">当前设置（用来回显）。</param>
@@ -253,6 +268,12 @@ public sealed partial class SettingsWindow : Window
     internal int ShownPageIndex => _shownPage;
 
     /// <summary>
+    /// 重画当前页：检查更新是个异步动作，查完状态会变（比如多出「下载 / 跳过此版本」按钮），
+    /// 由外壳回调这里。
+    /// </summary>
+    internal void RefreshCurrentPage() => Select(_shownPage);
+
+    /// <summary>
     /// 从外面切页（托盘「导入课表…」要直接落在导入页）。
     ///
     /// 走导航项的选中状态而不是直接 <c>Select</c>：否则左侧高亮与右侧内容会不一致
@@ -324,6 +345,19 @@ public sealed partial class SettingsWindow : Window
             Apply(_current with { LaunchAtLogin = launchAtLogin.IsOn });
         };
         rows.Add(SettingsView.Row("\uE7E8", "开机自启", "登录 Windows 后自动启动挂件（写当前用户的 Run 项；关掉时会删干净）", launchAtLogin, dark));
+
+        var checkUpdates = SettingsView.Switch(_current.CheckUpdates);
+        checkUpdates.Toggled += (_, _) =>
+        {
+            if (_loading) return;
+            Apply(_current with { CheckUpdates = checkUpdates.IsOn });
+        };
+        rows.Add(SettingsView.Row(
+            "\uE896",
+            "检查新版本",
+            "启动后查一次 GitHub 上的最新发布（只读取版本号，不上传任何本机数据；关掉后应用完全不联网）",
+            checkUpdates,
+            dark));
 
         var desktopLayer = SettingsView.Switch(_current.DesktopLayer);
         desktopLayer.Toggled += (_, _) =>
@@ -400,10 +434,46 @@ public sealed partial class SettingsWindow : Window
         var rows = new List<FrameworkElement>
         {
             SettingsView.InfoRow("版本", Version(), dark),
+            BuildUpdateRow(dark),
             SettingsView.InfoRow("当前课表", _host.Imports.DescribeCurrent(), dark),
             SettingsView.InfoRow("数据目录", ImportService.DataDirectory + "（settings.json / timetable.json / credentials.json）", dark),
         };
         return Page("关于", rows, dark);
+    }
+
+    /// <summary>
+    /// 「关于」页的新版本一行：状态文本 + （有更新时）下载 / 跳过此版本。
+    ///
+    /// <para>状态与按钮能力都由外壳提供：设置窗口不认识网络、也不碰托盘 —— 两个入口说的是同一件事
+    /// （同一份 <c>UpdateCheckResult</c>），不会出现"设置页说有新版、托盘没有"。</para>
+    /// </summary>
+    private FrameworkElement BuildUpdateRow(bool dark)
+    {
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+
+        var check = new Button { Content = "检查更新", MinWidth = 96 };
+        check.Click += (_, _) =>
+        {
+            // 立刻给反馈：查完外壳会回调 RefreshCurrentPage 把这一页重画成新状态
+            check.IsEnabled = false;
+            check.Content = "检查中…";
+            _host.CheckUpdates?.Invoke();
+        };
+        buttons.Children.Add(check);
+
+        if (_host.HasUpdate)
+        {
+            var download = new Button { Content = "下载", MinWidth = 80 };
+            download.Click += (_, _) => _host.OpenUpdatePage?.Invoke();
+            buttons.Children.Add(download);
+
+            var skip = new Button { Content = "跳过此版本", MinWidth = 110 };
+            skip.Click += (_, _) => _host.SkipUpdate?.Invoke();
+            buttons.Children.Add(skip);
+        }
+
+        var text = _host.DescribeUpdate?.Invoke() ?? "还没检查过";
+        return SettingsView.Row("\uE896", "新版本", text, buttons, dark);
     }
 
     private static UIElement Page(string title, IEnumerable<FrameworkElement> rows, bool dark)

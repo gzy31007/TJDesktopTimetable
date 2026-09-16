@@ -63,6 +63,20 @@ internal sealed record WidgetSettings
     public bool LaunchAtLogin { get; init; }
 
     /// <summary>
+    /// 是否在启动时检查新版本（默认开）。
+    ///
+    /// <para>查询只做一次 GET（GitHub 的 <c>/releases/latest</c>），**不上传任何本机数据**；
+    /// 关掉之后应用就完全不联网（README 的「离线」口径据此改写）。</para>
+    /// </summary>
+    public bool CheckUpdates { get; init; } = true;
+
+    /// <summary>
+    /// 用户点过「跳过此版本」的那个版本号（如 <c>1.3.0</c>）。
+    /// 只压住它自己：更高的版本照样提示（语义见 <see cref="Tjt.Core.UpdateCheck.Evaluate"/>）。
+    /// </summary>
+    public string? SkippedVersion { get; init; }
+
+    /// <summary>
     /// 是否显示周末两列（周六 / 周日）。
     ///
     /// <para>默认 <c>true</c>（与历史行为一致）。关掉后课表只画周一到周五，周末的课**不占列**
