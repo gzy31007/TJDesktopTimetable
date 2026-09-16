@@ -47,9 +47,6 @@ internal sealed class ImportService
         _describe = describe ?? throw new ArgumentNullException(nameof(describe));
     }
 
-    /// <summary>可选的适配器（"自动探测"之外的下拉项）。</summary>
-    public IReadOnlyList<ISchoolAdapter> Adapters => AdapterRegistry.BuiltinAdapters;
-
     /// <summary>数据目录（导入窗口里展示，便于用户备份/排查）。</summary>
     public static string DataDirectory => SettingsStore.Directory;
 
