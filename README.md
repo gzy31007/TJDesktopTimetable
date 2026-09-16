@@ -50,14 +50,14 @@ docs/                   desktop-layer.md · winui-build.md · winui-lessons.md �
 
 **Windows**
 
-1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.0-win-x64.zip`（自包含：**不需要**预装 .NET 或 Windows App Runtime）。
+1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.1-win-x64.zip`（自包含：**不需要**预装 .NET 或 Windows App Runtime）。
 2. 解压到任意**本地磁盘**目录（别放在 `\\wsl.localhost\...` 这类 UNC 路径下）。
 3. 双击 `Tjt.App.exe`。首次启动会打开设置窗口的「导入课表」页，按下一节导入一次即可。
 
 **Linux**
 
-1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.0-linux-x64.tar.gz`（自包含单文件：**不需要**预装 .NET）。
-2. `tar -xzf TJDesktopTimetable-v1.3.0-linux-x64.tar.gz -C ~/.local/opt/TJDesktopTimetable`。
+1. 从 [Releases](../../releases) 下载 `TJDesktopTimetable-v1.3.1-linux-x64.tar.gz`（自包含单文件：**不需要**预装 .NET）。
+2. `tar -xzf TJDesktopTimetable-v1.3.1-linux-x64.tar.gz -C ~/.local/opt/TJDesktopTimetable`。
 3. 运行 `~/.local/opt/TJDesktopTimetable/Tjt.Linux`。首次启动没有课表时会打开导入窗口。
    > 依赖：X11 / XWayland，以及 `libICE` / `libSM`（Debian/Ubuntu：`sudo apt install libice6 libsm6`）；
    > 中文课表需要 CJK 字体。详见下面 [Linux 版](#linux-版tjtlinux)。
@@ -124,14 +124,14 @@ install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
 ### 已知限制
 
 - **X11 / XWayland only**：Avalonia 稳定线没有原生 Wayland 后端；KWin 对 XWayland 窗口完整支持
-  keep-below / DOCK（实测「显示桌面」后挂件仍可见）。其他 WM（GNOME/Mutter 等）行为未验证，
+  DESKTOP 类型 + keep-below（实测「显示桌面」后挂件仍可见）。其他 WM（GNOME/Mutter 等）行为未验证，
   不生效时可用 WM 自身的窗口规则兜底。
 - **运行期改窗口类型仅 KWin 实测**：DESKTOP 属性是在窗口 map 之后才改的（切回 NORMAL 同理），
   EWMH 客户消息要求 WM 订阅 `SubstructureRedirectMask`——没有 WM 接收时日志会记
   `[x11] … 没有被任何 WM 接收` 而不是静默"成功"。
 - **别再用 DOCK 类型**：KWin 5 的 `layerForDock()` 会把 keep-below 的 dock 压到 Normal 层（恰好可用），
   KWin 6 起 `belongsToLayer()` 直接 `isDock() → AboveLayer`（keepBelow 分支走不到）——DOCK 一开就置顶
-  （v6.7.5 实测，这也是 v1.2.0 短暂用过 DOCK 又改回 DESKTOP 的原因）。
+  （v6.7.5 实测；v1.2.0 发布的 Linux 版用的正是 DOCK，本版因此换成 DESKTOP）。
 - **DESKTOP 型窗口会被 KWin 压到 plasmashell 桌面容器（壁纸）之下**，开启贴桌面层时必须跟一个
   `XRaiseWindow`（客户端合法的 ConfigureRequest(Above)），否则挂件整个"消失"在壁纸后面。
 - 内置登录窗口是 WebView2 专属能力，Linux 用「粘贴一条浏览器请求」路径（功能等价）。
@@ -225,6 +225,8 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
       时间线按节次分段、画布贴顶、材质四档对齐 DeskBox
 - [x] **v1.3.0** · 开机自启 + **新版本提示**（启动后查一次 GitHub 最新发布：托盘与设置「关于」页提示，
       可关、可跳过某个版本）
+- [x] **v1.3.1** · Linux 壳六项修复（紧凑布局与 Windows 同口径、X11 事件掩码修正、导入诊断链路打通、
+      凭据权限 0600/0700、外壳健壮性）+ 贴桌面层换 `DESKTOP`（KWin 6 下不再被置顶）
 - [ ] 新学期自动取校历（不再依赖内置学期表）
 - [ ] 周次过滤（只看单周 / 双周）
 - [ ] ICS / 图片导出
