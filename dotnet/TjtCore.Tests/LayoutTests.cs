@@ -1,4 +1,5 @@
 using Tjt.Core;
+using Tjt.Widget;
 using Xunit;
 
 namespace Tjt.Core.Tests;
@@ -410,5 +411,44 @@ public class LayoutTests
             Assert.Equal(Time.IsoToWeekday(iso), board.Days.SingleOrDefault(d => d.IsToday)?.Day);
             Assert.Equal(Time.TermWeekAt(TestTerm, iso), board.CurrentWeek);
         }
+    }
+
+    [Fact]
+    public void 内置样例形状_TrimEmptySlots收窄到6行_不收窄退化到11行且滚动判定分叉()
+    {
+        // 两端外壳（Tjt.App / Tjt.Linux）都必须以 TrimEmptySlots = true 布局。
+        // 内置样例（DemoData，两端同构）最大 6 节 —— 黄金 fixture 恰好是 11 节，分叉与否看不出；
+        // 用样例形状就能钉住：收窄 = 1..6 行，不传退化为 Math.Max(11, maxSlot) = 11 行，
+        // 行高与纵向滚动判定跟着分叉。
+        var demoShaped = new Course(
+            Id: "demo",
+            Name: "示例课程",
+            Teachers: [],
+            Sessions:
+            [
+                new Session("d1", Weekday.Monday, 1, 2, All, "南101"),
+                new Session("d2", Weekday.Monday, 1, 3, All, "南101"),
+                new Session("d3", Weekday.Wednesday, 5, 6, All, "南102"),
+            ],
+            CourseCode: "DEMO");
+
+        var trimmed = Layout.BuildBoard([demoShaped], TestTerm, new BoardOptions { TrimEmptySlots = true, Today = "2026-09-14" });
+        var untrimmed = Layout.BuildBoard([demoShaped], TestTerm, new BoardOptions { Today = "2026-09-14" });
+
+        Assert.Equal(1, trimmed.Rows[0].Index);
+        Assert.Equal(6, trimmed.Rows[^1].Index);
+        Assert.Equal(6, trimmed.Rows.Count);
+        Assert.Equal(11, untrimmed.Rows.Count);
+
+        // 同一个 400 DIP 高的窗口（可按 BoardVisual 的口径扣掉顶部条/呼吸位/表头/底部：
+        // usable = 400-34-6-6 = 354）：6 行行高保持基座 52、铺得下不滚动；
+        // 11 行行高被钳到下限 34、374 > 354 → 出纵向滚动条。
+        var fit = BoardVisualBuilder.Build(trimmed, 880, dark: false, nowMinutes: null, minCellWidth: 72, availableHeight: 400);
+        var overflow = BoardVisualBuilder.Build(untrimmed, 880, dark: false, nowMinutes: null, minCellWidth: 72, availableHeight: 400);
+
+        Assert.Equal(52, fit.Geometry.RowHeight);
+        Assert.Equal(BoardVisualBuilder.MinRowHeight, overflow.Geometry.RowHeight);
+        Assert.False(fit.NeedsVerticalScroll);
+        Assert.True(overflow.NeedsVerticalScroll);
     }
 }
