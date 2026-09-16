@@ -774,7 +774,7 @@ public sealed class TongjiStudentAdapter : ISchoolAdapter
         diagnostics.Add(AdapterInput.Diagnostic(
             DiagnosticLevel.Warn,
             "tongji.term.unknown",
-            $"学期 {calendarId ?? "未知"} 不在内置学期表里：已按 16 教学周 + 内置节次时间解析，挂件不会显示\"当前第几周\"（可在设置里手动填开学日期）。"));
+            $"学期 {calendarId ?? "未知"} 不在内置学期表里：已按 16 教学周 + 内置节次时间解析，挂件不会显示\"当前第几周\"（若能一并导入校历响应，即可从 beginDay 补上开学日期）。"));
 
         return new Term(
             calendarId ?? "unknown",
