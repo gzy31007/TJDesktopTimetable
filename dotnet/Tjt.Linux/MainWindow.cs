@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -177,6 +176,9 @@ internal sealed class MainWindow : Window
 
         var state = Layout.BuildBoard(_loaded.Timetable.Courses, _loaded.Timetable.Term, new BoardOptions
         {
+            // 与 Windows 线同口径（Tjt.App/MainWindow.xaml.cs）：不收窄会画满 1..11 节，
+            // 行数 / 行高 / 纵向滚动判定都会与 Windows 分叉（黄金 fixture 最大 11 节所以之前没暴露）。
+            TrimEmptySlots = true,
             ShowWeekend = WeekendEnabled,
             Now = DateTimeOffset.UtcNow,
         });
@@ -340,17 +342,9 @@ internal sealed class MainWindow : Window
 
         try
         {
-            var info = new ProcessStartInfo("gsettings", "get org.gnome.desktop.interface color-scheme")
-            {
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-            };
-            using var process = Process.Start(info);
-            if (process is not null)
-            {
-                var output = process.StandardOutput.ReadToEnd();
-                if (output.Contains("dark", StringComparison.OrdinalIgnoreCase)) return true;
-            }
+            // 走带超时的 Subprocess：gsettings 挂住不能拖死窗口构造（这里在构造函数里）
+            var output = Subprocess.Output("gsettings", "get", "org.gnome.desktop.interface", "color-scheme");
+            if (output is not null && output.Contains("dark", StringComparison.OrdinalIgnoreCase)) return true;
         }
         catch (Exception)
         {
