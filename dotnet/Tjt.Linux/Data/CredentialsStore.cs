@@ -56,11 +56,31 @@ internal static class CredentialsStore
                 ? new Credentials()
                 : new Credentials { TongjiRequest = trimmed, SavedAt = DateTimeOffset.Now.ToString("o") };
             File.WriteAllText(FilePath, JsonSerializer.Serialize(payload, Options));
+            RestrictPermissions();
             AppLog.Line($"[credentials] 已保存 {FilePath}（{trimmed.Length} 字符）");
         }
         catch (Exception ex)
         {
             AppLog.Line($"[credentials] 保存失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 收紧落盘权限：文件 0600、数据目录 0700。Windows 侧的 %APPDATA% 天生按用户 ACL 保护，
+    /// Linux 的 ~/.config 默认 umask 下同机可读，而这份文件里是含 cookie 的整条请求。
+    /// 失败只记日志（收紧不了也不能把导入搞失败）。
+    /// </summary>
+    private static void RestrictPermissions()
+    {
+        try
+        {
+            File.SetUnixFileMode(FilePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            new DirectoryInfo(SettingsStore.Directory).UnixFileMode =
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Line($"[credentials] 收紧文件权限失败（{ex.GetType().Name}）");
         }
     }
 
