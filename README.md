@@ -74,7 +74,7 @@ XWayland）上实测通过。
 
 | 能力 | Windows 版 | Linux 版 |
 |---|---|---|
-| 贴桌面层（显示桌面后仍可见） | Owner = `SHELLDLL_DefView` | X11 `_NET_WM_WINDOW_TYPE_DOCK` + `_NET_WM_STATE_BELOW` |
+| 贴桌面层（显示桌面后仍可见） | Owner = `SHELLDLL_DefView` | X11 `_NET_WM_WINDOW_TYPE_DESKTOP` + `_NET_WM_STATE_BELOW` |
 | 拖动 / 八热区缩放 | Win32 自实现轮询 | Avalonia `BeginMoveDrag` / `BeginResizeDrag`（热区几何仍走 `CursorZones`/`ResizePolicy`） |
 | 位置尺寸记忆 | `settings.json`（**外框** DIP + `FrameCorrection`） | `settings.json`（**客户区** DIP）；文件同名同形可互拷，但尺寸会差一圈窗口边框，且 Linux 回写不带 Windows 专属字段 |
 | 主题 | Mica / Acrylic / 实色 | 固定半透明壳（合成器真透明 + 圆角），跟随系统深浅色 |
@@ -124,9 +124,14 @@ install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
 - **X11 / XWayland only**：Avalonia 稳定线没有原生 Wayland 后端；KWin 对 XWayland 窗口完整支持
   keep-below / DOCK（实测「显示桌面」后挂件仍可见）。其他 WM（GNOME/Mutter 等）行为未验证，
   不生效时可用 WM 自身的窗口规则兜底。
-- **运行期改窗口类型仅 KWin 实测**：DOCK 属性是在窗口 map 之后才改的（切回 NORMAL 同理），
+- **运行期改窗口类型仅 KWin 实测**：DESKTOP 属性是在窗口 map 之后才改的（切回 NORMAL 同理），
   EWMH 客户消息要求 WM 订阅 `SubstructureRedirectMask`——没有 WM 接收时日志会记
   `[x11] … 没有被任何 WM 接收` 而不是静默"成功"。
+- **别再用 DOCK 类型**：KWin 5 的 `layerForDock()` 会把 keep-below 的 dock 压到 Normal 层（恰好可用），
+  KWin 6 起 `belongsToLayer()` 直接 `isDock() → AboveLayer`（keepBelow 分支走不到）——DOCK 一开就置顶
+  （v6.7.5 实测，这也是 v1.2.0 短暂用过 DOCK 又改回 DESKTOP 的原因）。
+- **DESKTOP 型窗口会被 KWin 压到 plasmashell 桌面容器（壁纸）之下**，开启贴桌面层时必须跟一个
+  `XRaiseWindow`（客户端合法的 ConfigureRequest(Above)），否则挂件整个"消失"在壁纸后面。
 - 内置登录窗口是 WebView2 专属能力，Linux 用「粘贴一条浏览器请求」路径（功能等价）。
 - 没有托盘图标与设置窗口；「贴桌面层 / 显示周末」等开关在挂件 `⋯` 菜单里。
 - KWin 重启后贴桌面层状态会丢（Windows 版有 owner 巡检兜底，Linux 版暂未做），重开一次应用即可。

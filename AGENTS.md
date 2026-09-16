@@ -200,7 +200,7 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
 
 ### 与 Windows 版的关键差异（改代码前先读）
 
-- **贴桌面层** = X11 `_NET_WM_WINDOW_TYPE_DOCK`（改属性）+ `_NET_WM_STATE_BELOW`（EWMH 客户消息）；**两件一起做**：真机实测 KWin 的「显示桌面」会把 keep-below 的普通窗口一起藏掉，DOCK 类型才留下来（conky / 桌面挂件的通行做法）。
+- **贴桌面层** = X11 `_NET_WM_WINDOW_TYPE_DESKTOP`（改属性）+ `_NET_WM_STATE_BELOW`（EWMH 客户消息）+ **XRaiseWindow**（层内抬升），三件一起做：DESKTOP = EWMH 桌面层（比 Below 还低、被普通窗口覆盖、KWin「显示桌面」不隐藏，conky 桌面挂件在 KDE 的通行做法），BELOW 给不认 DESKTOP 的 WM 兜底。**DESKTOP 型窗口会被 KWin 压到 plasmashell 桌面容器（壁纸）之下**，不 XRaiseWindow 整个挂件不可见。**别用 DOCK 类型**：KWin 5 的 `layerForDock()` 把 keep-below 的 dock 压到 Normal 层恰好可用，KWin 6 起 `belongsToLayer()` 直接 `isDock() → AboveLayer`（keepBelow 走不到）——实测 v6.7.5 一开 DOCK 就置顶。
 - **拖动 / 缩放走 Avalonia 原生循环**（`BeginMoveDrag` / `BeginResizeDrag`）：热区几何、方向、最小尺寸仍用 `Tjt.Widget` 的 `CursorZones` / `ResizePolicy` 纯函数。Windows 版那套 16ms 光标轮询是 WinUI 指针捕获缺陷逼出来的补丁，Avalonia 不需要，**别照搬**。
 - **字体**：Avalonia 12 默认 Inter，多数发行版没装（直接抛 glyphTypeface）→ 启动时用 `fc-match sans-serif` 解析真实默认字体（`Program.ResolveDefaultFontFamily`）。
 - **数据目录**：`Environment.SpecialFolder.ApplicationData` 在 Linux 上映射 XDG（`~/.config`），`settings.json` / `timetable.json` / `credentials.json` 与 Windows 版同构、可互拷。

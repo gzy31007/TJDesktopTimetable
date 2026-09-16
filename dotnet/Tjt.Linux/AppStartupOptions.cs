@@ -4,7 +4,7 @@ namespace Tjt.Linux;
 /// 命令行选项（Tjt.App/AppStartupOptions.cs 的移植，去掉了 Windows 专属开关）。
 /// 未知参数被忽略（不崩在 CLI 上）。
 /// </summary>
-/// <param name="DesktopLayer">贴桌面层（X11 keep-below）；<c>null</c> = 用设置里的值（默认 true）。</param>
+/// <param name="DesktopLayer">贴桌面层（X11 DESKTOP 类型 + keep-below）；<c>null</c> = 用设置里的值（默认 true）。</param>
 /// <param name="Weekend">显示周末两列；<c>null</c> = 用设置里的值。只影响本次运行、不落盘。</param>
 /// <param name="LogPath">日志文件路径。</param>
 /// <param name="FixturePath">显式指定要导入的课表 JSON；为空时按约定位置探测。</param>
