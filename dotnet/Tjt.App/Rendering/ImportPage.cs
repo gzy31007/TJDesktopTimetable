@@ -263,7 +263,7 @@ internal static class ImportPage
             {
                 XamlRoot = root,
                 Title = "清空已保存的课表？",
-                Content = $"将删除 {TimetableStore.FilePath}，挂件回退到内置样例（再导入一次即替换）。",
+                Content = $"将删除 {TimetableStore.FilePath}，挂件回退到内置示例课表（再导入一次即替换）。",
                 PrimaryButtonText = "清空",
                 CloseButtonText = "取消",
                 DefaultButton = ContentDialogButton.Close,

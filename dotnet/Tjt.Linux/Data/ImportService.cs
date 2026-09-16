@@ -133,14 +133,14 @@ internal sealed class ImportService
         }
     }
 
-    /// <summary>清空已导入的课表：删文件 → 重新载入（回退到 fixtures / 内置样例）。</summary>
+    /// <summary>清空已导入的课表：删文件 → 重新载入（回退到内置示例课表）。</summary>
     public ImportOutcome ClearTimetable()
     {
         TimetableStore.Clear();
         var ok = _reload();
         return new ImportOutcome(
             ok,
-            ok ? "已清空导入的课表；挂件回退到内置样例（再导入一次即替换）" : "已删除课表文件，但重新载入失败（详见日志）",
+            ok ? "已清空导入的课表；挂件回退到内置示例课表（再导入一次即替换）" : "已删除课表文件，但重新载入失败（详见日志）",
             null,
             null,
             [],

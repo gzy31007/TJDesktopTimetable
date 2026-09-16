@@ -160,22 +160,23 @@ public partial class App : Application
             window.ShowWidget();
             _tray = BuildTray(window);
 
-            // 内置登录窗口只有两个触发点（**没有**菜单入口，见 ShowSchoolLogin 的说明）：
-            //   ① 用户在设置窗口「导入」页点按钮（SettingsHost.OpenLogin）
-            //   ② 启动时挂件上不是"用户自己导入的课表" —— 也就是**还没有真实课表**
-            // 走到这里的一定是交互模式：--smoke / --fetch-check / --login-check 都已提前 return。
+            // 启动时"还没有课表"的处理（走到这里一定是交互模式：--smoke / --fetch-check /
+            // --login-check 都已提前 return）：
+            //   ① `--login` 显式要求 → 直接开内置登录窗口，学校由 `--login-school` 定（默认同济）；
+            //   ② 挂件上只有内置示例课表（= 还没有真实课表）→ 打开设置窗口「导入」页，
+            //      **不替用户猜学校** —— 那一页有「登录同济」/「登录交大」两个按钮与说明。
+            // ⚠️ 别把它改回"自动弹同济登录窗口"：非同济用户第一次启动会被直接塞进同济登录页
+            //    （2026-09-17 用户实测反馈）。`--fixture` 是**显式**指定，也不该被任何窗口盖住。
             if (options.Login)
             {
-                AppLog.Line("[login] --login 显式要求：打开内置登录窗口");
-                ShowSchoolLogin(LoginSchool.Tongji, window.CurrentIsDark);
+                var school = options.School ?? LoginSchool.Tongji;
+                AppLog.Line($"[login] --login 显式要求：打开内置登录窗口（school={school}）");
+                ShowSchoolLogin(school, window.CurrentIsDark);
             }
-            else if (loaded.Origin is TimetableOrigin.Fixture or TimetableOrigin.Demo)
+            else if (options.SettingsPage is null && loaded.Origin is TimetableOrigin.Demo)
             {
-                // 只有"随应用分发的黄金数据 / 内置样例"才算"没有真实课表"。
-                // `--fixture <path>` 是**显式**指定（自检、截图、排查视觉时用），不该被登录窗口盖住 ——
-                // 早先这里写的是 `Origin != Imported`，`--fixture` 会被判成"没有课表"而弹窗（实测踩到）。
-                AppLog.Line($"[login] 启动时没有真实课表（origin={loaded.Origin}，source={loaded.Source}）：自动打开内置登录窗口");
-                ShowSchoolLogin(LoginSchool.Tongji, window.CurrentIsDark);
+                AppLog.Line($"[settings] 还没有真实课表（origin={loaded.Origin}）：打开「导入」页让用户选择学校");
+                ShowSettings(window.CurrentSettings, window.CurrentIsDark, SettingsWindow.PageImport);
             }
 
             // 启动就停在某一页（验证导入页/截图用；托盘与挂件菜单也会用它）
@@ -507,8 +508,10 @@ public partial class App : Application
     /// <para><b>触发点</b>（挂件 <c>⋯</c> 菜单与托盘里**没有**这一项了）：
     /// ① 用户在设置窗口「导入」页点「登录同济并获取课表」/「登录交大并获取课表」
     /// （<c>SettingsHost.OpenLogin</c> / <c>OpenSjtuLogin</c>）；
-    /// ② 启动时挂件上**没有真实课表**（<c>TimetableOrigin</c> 不是 <c>Imported</c>，
-    /// 也就是只有黄金 fixture 或内置样例）—— 见 <c>OnLaunched</c> 里那一段，那一条固定走同济。</para>
+    /// ② `--login` 显式要求（学校取 `--login-school`，默认同济）。</para>
+    ///
+    /// <para>⚠️ 启动时"还没有真实课表"**不再**自动开这个窗口（那样会把交大用户塞进同济登录页，
+    /// 2026-09-17 用户实测反馈）：那一条改成打开设置窗口「导入」页，让用户自己选学校。</para>
     /// </summary>
     /// <param name="school">服务哪所学校（同济 1 系统 / 交大学在交大）。</param>
     /// <param name="dark">当前是否深色主题（只影响这一个窗口）。</param>

@@ -26,12 +26,13 @@ internal sealed class App : Application
             desktop.MainWindow = main;
             main.Show();
 
-            // 没有"真实课表"（只有黄金数据 / 内置样例）时自动开导入窗口，
-            // 对齐上游"首次启动引导导入"的行为；--import-window 可强制打开。
+            // 没有"真实课表"（挂件上是内置示例课表）时自动开导入窗口 —— 首次启动的引导。
+            // Linux 没有内置登录窗口，导入窗口就是"粘贴一条浏览器请求"的入口（同济 / 交大通用），
+            // 所以这里不需要、也不该替用户选学校。--import-window 可强制打开。
             // --fixture（Explicit）是显式自检/截图路径，不该被导入窗口盖住（与 Windows 线同口径）；
             // --no-import-window 一律不弹（脚本 / Xvfb 下要确定首屏）。
             var shouldOpenImport =
-                (main.LoadedOrigin is TimetableOrigin.Fixture or TimetableOrigin.Demo || App.Startup.OpenImportWindow)
+                (main.LoadedOrigin is TimetableOrigin.Demo || App.Startup.OpenImportWindow)
                 && !App.Startup.SuppressImportWindow;
             if (shouldOpenImport)
             {

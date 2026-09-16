@@ -65,11 +65,6 @@
     <ProjectReference Include="..\Tjt.Widget\Tjt.Widget.csproj" />
   </ItemGroup>
 
-  <!--
-    脱敏黄金数据：**直接复用 TS 侧那一份**（单一真源），启动时读它当作"当前课表"，
-    找不到时退回内置样例（见 DemoData.cs）。`Link` + CopyToOutputDirectory 的用法与
-    TjtCore.Tests 一致，避免依赖运行时的工作目录。
-  -->
   <!-- 图标：都从输出目录**运行时**加载（不嵌资源，改图标不用改代码）
        - app.ico      白色版：托盘菜单与 SendTo/资源管理器看到的 exe 图标（ApplicationIcon）
        - app-blue.ico 课表同款蓝（#4CC2FF）：**窗口**图标（标题栏 / 任务栏 / Alt-Tab），
@@ -79,11 +74,12 @@
     <Content Include="Assets\app-blue.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="..\fixtures\tongji-2026-1-personal.json"
-             Link="fixtures\tongji-2026-1-personal.json"
-             CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+  <!--
+    这里**刻意不**复制 dotnet/fixtures/ 里的黄金数据到输出目录：那是脱敏后的真实抓包，
+    只服务于测试（TjtCore.Tests 有自己的 Content Link）与显式指定的 `fixture` 开关。
+    运行时"没有导入过课表"时显示的是虚构的内置示例（见 Data/DemoData.cs），
+    所以发布包里不该夹带任何真实课表数据。
+  -->
 
   <!--
     `dotnet publish` 会漏掉 XAML 编译产物与资源索引（2026-09-16 实测）：

@@ -20,7 +20,7 @@ internal static class TimetableStore
 
     /// <summary>
     /// 读取已导入的课表；没有文件 / 读坏了 / 里面没有课程时返回 <c>null</c>
-    /// （调用方据此回退到 fixtures 或内置样例）。
+    /// （调用方据此回退到内置示例课表）。
     /// </summary>
     public static Timetable? Load()
     {
@@ -73,7 +73,7 @@ internal static class TimetableStore
         }
     }
 
-    /// <summary>删掉已导入的课表（"清空"）：之后启动会回退到 fixtures / 内置样例。</summary>
+    /// <summary>删掉已导入的课表（"清空"）：之后启动会回退到内置示例课表。</summary>
     public static void Clear()
     {
         try
