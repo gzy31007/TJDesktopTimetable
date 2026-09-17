@@ -82,6 +82,19 @@ public static class UpdateCheck
     /// <summary>Linux 资产的命名后缀（本 fork 的 tar.gz；Windows 版不做提示，留着备用）。</summary>
     public const string LinuxPackageSuffix = "-linux-x64.tar.gz";
 
+    /// <summary>
+    /// 下载 / API 的代理前缀（<c>https://gh-proxy.org/&lt;原始 GitHub 地址&gt;</c>）。
+    ///
+    /// <para><b>为什么需要</b>：国内直连 <c>api.github.com</c> 与
+    /// <c>github.com/.../releases/download/...</c> 基本不通，而 gh-proxy 类镜像在国内可直连
+    /// （2026-09-17 实测：API JSON、Release 资产、Release 页、raw 文件都返回 200）。</para>
+    ///
+    /// <para><b>用途两处</b>：① 检查更新的 API 直连失败时的兜底（网络侧的
+    /// <c>Tjt.App/Data/UpdateChecker.cs</c> 里那一轮重试）；② 「发现新版本」给用户的下载链接
+    /// 本身就走镜像（国内点开就能下）。</para>
+    /// </summary>
+    public const string ProxyPrefix = "https://gh-proxy.org/";
+
     /// <summary>仓库主页（托盘 / 设置页里"打开项目页"用）。</summary>
     public static string RepoUrl => $"https://github.com/{Owner}/{Repo}";
 
@@ -239,12 +252,53 @@ public static class UpdateCheck
     }
 
     /// <summary>
-    /// 该给用户打开的链接：有本平台的包就直接给包的下载地址，否则退回 Release 页面。
+    /// 该给用户打开的链接：有本平台的包就直接给包的下载地址，否则退回 Release 页面；
+    /// **能走镜像的一律走镜像**（见 <see cref="ProxiedUrl"/>）。
     /// </summary>
     public static string DownloadUrlFor(UpdateCheckResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
-        return result.Package?.DownloadUrl ?? result.Release?.HtmlUrl ?? RepoUrl;
+        return ProxiedUrl(result.Package?.DownloadUrl ?? result.Release?.HtmlUrl ?? RepoUrl);
+    }
+
+    /// <summary>
+    /// 该地址能不能交给 gh-proxy 类镜像去取。
+    ///
+    /// <para>实测（2026-09-17）镜像只认这些形状：<c>api.github.com/**</c>、
+    /// <c>raw.githubusercontent.com/**</c>、<c>codeload.github.com/**</c>、
+    /// 以及 <c>github.com</c> 下带 <c>/releases/</c> 的地址（tag 页与资产都行）。
+    /// **仓库根 <c>https://github.com/owner/repo</c> 会被镜像回 404**，所以不能一律加前缀
+    /// （没匹配到资产时 <see cref="DownloadUrlFor"/> 会退回 <see cref="RepoUrl"/>，那条得留原样）。</para>
+    /// </summary>
+    public static bool CanProxy(string? url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return false;
+
+        return uri.Host.ToLowerInvariant() switch
+        {
+            "api.github.com" or "raw.githubusercontent.com" or "codeload.github.com" => true,
+            "github.com" => uri.AbsolutePath.Contains("/releases/", StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// 能走镜像的地址加上默认前缀（<see cref="ProxyPrefix"/>）；其余原样返回。
+    /// 给用户打开的下载链接与验收脚本之外的调用方用这个。
+    /// </summary>
+    public static string ProxiedUrl(string? url) =>
+        CanProxy(url) ? WithProxyPrefix(url!, ProxyPrefix) : url ?? string.Empty;
+
+    /// <summary>
+    /// 无条件加前缀（幂等：已经带前缀的地址原样返回）。给 <c>--update-proxy</c> 覆盖前缀
+    /// （验收脚本指向本地合成服务）与单测用 —— 它**不**做 <see cref="CanProxy"/> 判定。
+    /// </summary>
+    public static string WithProxyPrefix(string? url, string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(prefix)) return url ?? string.Empty;
+        var head = prefix.EndsWith('/') ? prefix : prefix + "/";
+        return url.StartsWith(head, StringComparison.OrdinalIgnoreCase) ? url : head + url;
     }
 
     private static string? ReadString(JsonElement element, string name) =>

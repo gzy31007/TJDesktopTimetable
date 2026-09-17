@@ -117,7 +117,7 @@ public partial class App : Application
             //     （验收脚本因此不受网络环境影响，见 .tools/verify-update-check.ps1）。
             if (options.UpdateCheck)
             {
-                SmokePassed = RunUpdateCheck(options.UpdateApiUrl);
+                SmokePassed = RunUpdateCheck(options.UpdateApiUrl, options.UpdateProxyUrl);
                 return;
             }
 
@@ -294,13 +294,14 @@ public partial class App : Application
         }
 
         var apiUrl = Startup.UpdateApiUrl;
+        var proxyUrl = Startup.UpdateProxyUrl;
         var skipped = widget.CurrentSettings.SkippedVersion;
         _ = Task.Run(async () =>
         {
             try
             {
                 await Task.Delay(UpdateCheckDelay).ConfigureAwait(false);
-                var result = await UpdateChecker.CheckAsync(apiUrl, skipped).ConfigureAwait(false);
+                var result = await UpdateChecker.CheckAsync(apiUrl, skipped, proxyUrl).ConfigureAwait(false);
                 if (result is null) return;
                 widget.DispatcherQueue.TryEnqueue(() => ApplyUpdateResult(widget, result));
             }
@@ -315,10 +316,11 @@ public partial class App : Application
     private void CheckUpdatesNow(MainWindow widget, Action? onDone = null)
     {
         var apiUrl = Startup.UpdateApiUrl;
+        var proxyUrl = Startup.UpdateProxyUrl;
         var skipped = widget.CurrentSettings.SkippedVersion;
         _ = Task.Run(async () =>
         {
-            var result = await UpdateChecker.CheckAsync(apiUrl, skipped).ConfigureAwait(false);
+            var result = await UpdateChecker.CheckAsync(apiUrl, skipped, proxyUrl).ConfigureAwait(false);
             widget.DispatcherQueue.TryEnqueue(() =>
             {
                 // result 为 null = 没查到（网络失败）：保留上一次结论，只把 UI 刷新回去
@@ -415,14 +417,16 @@ public partial class App : Application
     /// <c>--update-check</c>：查一次、把结论写日志、用退出码表成败（**不建窗口、不落盘**）。
     /// 给验收脚本用，配合 <c>--update-api</c> 指向本地合成服务。
     /// </summary>
-    private static bool RunUpdateCheck(string? apiUrl)
+    private static bool RunUpdateCheck(string? apiUrl, string? proxyUrl = null)
     {
         try
         {
             var settings = SettingsStore.Load();
-            AppLog.Line($"[update-check] 本机版本 {UpdateChecker.CurrentVersion()}，API {apiUrl ?? UpdateCheck.LatestReleaseApiUrl}");
+            AppLog.Line(
+                $"[update-check] 本机版本 {UpdateChecker.CurrentVersion()}，"
+                + $"API {apiUrl ?? UpdateCheck.LatestReleaseApiUrl}，兜底 {proxyUrl ?? UpdateCheck.ProxyPrefix}");
             // 诊断路径阻塞等待（与 --fetch-check 同口径）：跑完即走，没有"卡住 UI"的问题
-            var result = UpdateChecker.CheckAsync(apiUrl, settings.SkippedVersion).GetAwaiter().GetResult();
+            var result = UpdateChecker.CheckAsync(apiUrl, settings.SkippedVersion, proxyUrl).GetAwaiter().GetResult();
             if (result is null) return false;
             AppLog.Line(
                 $"[update-check] status={result.Status} latest={result.Latest?.ToString() ?? "?"} "

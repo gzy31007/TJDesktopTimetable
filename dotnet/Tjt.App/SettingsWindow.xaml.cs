@@ -357,7 +357,7 @@ public sealed partial class SettingsWindow : Window
         rows.Add(SettingsView.Row(
             "\uE896",
             "检查新版本",
-            "启动后查一次 GitHub 上的最新发布（只读取版本号，不上传任何本机数据；关掉后应用完全不联网）",
+            "启动后查一次 GitHub 上的最新发布（只读取版本号，不上传任何本机数据；直连不通时经 gh-proxy.org 镜像兜底；关掉后应用完全不联网）",
             checkUpdates,
             dark));
 

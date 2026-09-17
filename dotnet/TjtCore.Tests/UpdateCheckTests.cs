@@ -141,7 +141,73 @@ public class UpdateCheckTests
         var result = UpdateCheck.Evaluate("1.2.0.0", onlyLinux);
         Assert.Equal(UpdateStatus.UpdateAvailable, result.Status);
         Assert.Null(result.Package);
-        Assert.Equal("https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v1.3.0", UpdateCheck.DownloadUrlFor(result));
+        // Release 页也走镜像（实测镜像能取 tag 页），用户点开即到
+        Assert.Equal(
+            "https://gh-proxy.org/https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v1.3.0",
+            UpdateCheck.DownloadUrlFor(result));
+    }
+
+    // ── gh-proxy.org 兜底（2026-09-17）──────────────────────────────────────────
+
+    /// <summary>镜像只认这些形状（2026-09-17 实测）：API / raw / codeload / github.com 下带 releases 的地址。</summary>
+    [Theory]
+    [InlineData("https://api.github.com/repos/gzy31007/TJDesktopTimetable/releases/latest", true)]
+    [InlineData("https://github.com/gzy31007/TJDesktopTimetable/releases/download/v1.3.1/x-setup.exe", true)]
+    [InlineData("https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v1.3.1", true)]
+    [InlineData("https://raw.githubusercontent.com/gzy31007/TJDesktopTimetable/main/README.md", true)]
+    [InlineData("https://codeload.github.com/gzy31007/TJDesktopTimetable/zip/refs/heads/main", true)]
+    // 仓库根：镜像回 404，不能加前缀（没匹配到资产时 DownloadUrlFor 会退到它）
+    [InlineData("https://github.com/gzy31007/TJDesktopTimetable", false)]
+    // 非 https / 本地合成服务 / 其它站点：一律原样
+    [InlineData("http://api.github.com/repos/x/y/releases/latest", false)]
+    [InlineData("http://localhost:18777/releases/latest", false)]
+    [InlineData("https://example.invalid/win.zip", false)]
+    [InlineData("not a url", false)]
+    [InlineData(null, false)]
+    public void 只有镜像认识的地址才加前缀(string? url, bool proxyable)
+    {
+        Assert.Equal(proxyable, UpdateCheck.CanProxy(url));
+        var proxied = UpdateCheck.ProxiedUrl(url);
+        if (proxyable) Assert.Equal(UpdateCheck.ProxyPrefix + url, proxied);
+        else Assert.Equal(url ?? string.Empty, proxied);
+    }
+
+    /// <summary>「发现新版本」给的下载链接重定向到镜像：真 Release 资产 → gh-proxy.org。</summary>
+    [Fact]
+    public void 下载链接重定向到镜像()
+    {
+        const string json = """
+        {
+          "tag_name": "v9.9.9",
+          "html_url": "https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v9.9.9",
+          "prerelease": false,
+          "draft": false,
+          "assets": [
+            { "name": "TJDesktopTimetable-v9.9.9-setup.exe", "browser_download_url": "https://github.com/gzy31007/TJDesktopTimetable/releases/download/v9.9.9/TJDesktopTimetable-v9.9.9-setup.exe" }
+          ]
+        }
+        """;
+
+        var url = UpdateCheck.DownloadUrlFor(UpdateCheck.Evaluate("1.3.1", json));
+
+        Assert.Equal(
+            "https://gh-proxy.org/https://github.com/gzy31007/TJDesktopTimetable/releases/download/v9.9.9/TJDesktopTimetable-v9.9.9-setup.exe",
+            url);
+    }
+
+    /// <summary>加前缀是幂等的；<c>--update-proxy</c> 覆盖前缀时不做 GitHub 判定。</summary>
+    [Fact]
+    public void 加前缀幂等且覆盖前缀时不做判定()
+    {
+        const string asset = "https://github.com/o/r/releases/download/v1/x.zip";
+        var once = UpdateCheck.ProxiedUrl(asset);
+        Assert.Equal(once, UpdateCheck.ProxiedUrl(once));
+        // 前缀末尾没写斜杠也要能拼对
+        Assert.Equal("https://mirror.invalid/" + asset, UpdateCheck.WithProxyPrefix(asset, "https://mirror.invalid"));
+        // 覆盖前缀时不过滤：本地合成服务地址也照拼（--update-proxy 的验收用法）
+        Assert.Equal(
+            "http://localhost:18777/http://localhost:18778/releases/latest",
+            UpdateCheck.WithProxyPrefix("http://localhost:18778/releases/latest", "http://localhost:18777/"));
     }
 
     [Fact]
@@ -152,6 +218,7 @@ public class UpdateCheckTests
             UpdateCheck.LatestReleaseApiUrl);
         Assert.Equal("TJDesktopTimetable/1.2.0", UpdateCheck.UserAgent("1.2.0"));
         Assert.Equal("https://github.com/gzy31007/TJDesktopTimetable", UpdateCheck.RepoUrl);
+        Assert.Equal("https://gh-proxy.org/", UpdateCheck.ProxyPrefix);
     }
 
     // ── 安装包优先（2026-09-17 起 Release 同时传 zip 与 setup.exe）──────────────────
