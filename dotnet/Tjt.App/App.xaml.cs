@@ -47,6 +47,9 @@ public partial class App : Application
     private ImportService? _imports;
     private TongjiLoginWindow? _loginWindow;
 
+    /// <summary>本次运行已经弹过系统通知的版本（同一版本只提醒一次，见 <see cref="UpdateCheck.ShouldNotify"/>）。</summary>
+    private string? _notifiedUpdateVersion;
+
     /// <summary>
     /// 构造应用。
     ///
@@ -121,6 +124,16 @@ public partial class App : Application
                 return;
             }
 
+            // 0e) 系统通知自检（--update-notify）：查一次最新 Release，**有更新就把那条系统通知
+            //     真弹出来**，留几秒让人看见 / 截图，然后退出。同样不建挂件窗口、不落盘；
+            //     通知点击在自检模式下只写日志（没有挂件窗口可挂「关于」页）。
+            //     验收脚本 .tools/verify-update-notify.ps1 靠它跑"有更新 → 弹 / 无更新 → 不弹"。
+            if (options.UpdateNotify)
+            {
+                SmokePassed = RunUpdateNotifyCheck(options.UpdateApiUrl, options.UpdateProxyUrl);
+                return;
+            }
+
             // 0c) 登录窗口自检（--login-check <url>）：开一个真窗口、跑完整捕获链路、用完即走。
             //     刻意**不建挂件窗口** —— 验收脚本只关心"页面发出的课表请求能不能被接住并落盘"，
             //     少一个窗口就少一处干扰；落盘走 ImportService 的兜底分支（TimetableStore.Save）。
@@ -192,7 +205,7 @@ public partial class App : Application
             // 自检与抓取诊断都是"跑完即走"的短命进程：一律**硬退出**。
             // 实测 Application.Exit() 在"窗口从未激活"的路径上会让进程挂住（退出消息投给消息循环，
             // 而循环在窗口激活前不推进），CI 上表现为 job 无限期 in_progress。
-            if (options.Smoke || options.FetchCheckPath is not null || options.UpdateCheck)
+            if (options.Smoke || options.FetchCheckPath is not null || options.UpdateCheck || options.UpdateNotify)
             {
                 Environment.Exit(SmokePassed ? 0 : 1);
             }
@@ -330,13 +343,39 @@ public partial class App : Application
         });
     }
 
-    /// <summary>结论分发：挂件（状态）→ 托盘（菜单项 + 提示）→ 设置窗口（重画关于页）。</summary>
+    /// <summary>结论分发：挂件（状态）→ 托盘（菜单项 + 提示 + 系统通知）→ 设置窗口（重画关于页）。</summary>
     private void ApplyUpdateResult(MainWindow widget, UpdateCheckResult result)
     {
         widget.ApplyUpdateResult(result);
+        NotifyUpdate(result);
         _tray?.SetMenu(1, BuildTrayMenu(widget));
         UpdateTrayTooltip(widget);
         RefreshSettingsWindows();
+    }
+
+    /// <summary>
+    /// 查到新版本时弹一条系统通知（同一版本每个进程只弹一次）。
+    ///
+    /// <para>为什么不只靠托盘菜单项：挂件贴桌面层、托盘图标又常被折叠进"隐藏的图标"里，
+    /// 「发现新版本」很容易没人看见。通知是第四个落点，点击直达设置「关于」页。
+    /// 去重交给 <see cref="UpdateCheck.ShouldNotify"/>（手动点「检查新版本」不会重复弹）。</para>
+    /// </summary>
+    private void NotifyUpdate(UpdateCheckResult result)
+    {
+        if (!UpdateCheck.ShouldNotify(result, _notifiedUpdateVersion)) return;
+
+        _notifiedUpdateVersion = UpdateCheck.NotificationVersion(result);
+        var title = UpdateCheck.NotificationTitle(result);
+        var body = UpdateCheck.NotificationBody(result);
+
+        if (_tray is null)
+        {
+            AppLog.Line($"[notify-skip] 托盘还没建好，跳过这次通知：{title}");
+            return;
+        }
+
+        _tray.ShowNotification(title, body);
+        AppLog.Line($"[notify] 已弹出系统通知：{title}／{body}");
     }
 
     /// <summary>让所有开着的设置窗口重画当前页（检查更新是异步的，状态会变）。</summary>
@@ -436,6 +475,61 @@ public partial class App : Application
         catch (Exception ex)
         {
             AppLog.Error($"[update-check] 失败：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// <c>--update-notify</c>：查一次，**有更新就把系统通知真弹出来**（留 6 秒），再退出。
+    ///
+    /// <para>给验收脚本用（配合 <c>--update-api</c> 指向本地合成服务）：日志里有没有
+    /// <c>[notify] 已弹出系统通知</c> 就是"该不该弹"的判据；弹出来的样子仍需人眼 / 截图确认
+    /// （通知由系统托管，脚本抓不到它的窗口）。**不建挂件窗口、不落盘**。</para>
+    /// </summary>
+    /// <returns>查到结论（哪怕没有更新）为 <c>true</c>；网络 / 响应失败与通知发送失败为 <c>false</c>。</returns>
+    private static bool RunUpdateNotifyCheck(string? apiUrl, string? proxyUrl = null)
+    {
+        try
+        {
+            var settings = SettingsStore.Load();
+            AppLog.Line(
+                $"[notify-check] 本机版本 {UpdateChecker.CurrentVersion()}，"
+                + $"API {apiUrl ?? UpdateCheck.LatestReleaseApiUrl}，兜底 {proxyUrl ?? UpdateCheck.ProxyPrefix}");
+
+            var result = UpdateChecker.CheckAsync(apiUrl, settings.SkippedVersion, proxyUrl).GetAwaiter().GetResult();
+            if (result is null)
+            {
+                AppLog.Error("[notify-check] 没查到结论（网络或响应失败）");
+                return false;
+            }
+
+            AppLog.Line($"[notify-check] status={result.Status} latest={result.Latest?.ToString() ?? "?"}");
+            if (!UpdateCheck.ShouldNotify(result, null))
+            {
+                AppLog.Line("[notify-check] 无需通知：没有比本机更新的正式版本（或被跳过）");
+                // 响应不可用（不是 JSON / 缺字段）与"没有更新"都一样：没弹通知就不是成功路径
+                return result.Status != UpdateStatus.InvalidResponse;
+            }
+
+            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+            using var tray = TrayIcon.Create(
+                "同济课表挂件",
+                iconPath,
+                _ => { },
+                onNotificationClick: () => AppLog.Line("[notify-check] 通知被点击（自检模式：不打开设置窗口）"));
+
+            var title = UpdateCheck.NotificationTitle(result);
+            var body = UpdateCheck.NotificationBody(result);
+            tray.ShowNotification(title, body);
+            AppLog.Line($"[notify] 已弹出系统通知：{title}／{body}");
+
+            // 留几秒让通知真的显示出来（人眼 / 截图），随后 Dispose 会顺带移除托盘图标
+            Thread.Sleep(6000);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"[notify-check] 失败：{ex.Message}");
             return false;
         }
     }
@@ -593,14 +687,31 @@ public partial class App : Application
         watchdog.Start();
     }
 
-    /// <summary>建托盘图标：左键显示挂件，右键菜单给出常用动作。</summary>
+    /// <summary>建托盘图标：左键显示挂件，右键菜单给出常用动作，点系统通知回「关于」页。</summary>
     private TrayIcon BuildTray(MainWindow widget)
     {
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
-        var tray = TrayIcon.Create("同济课表挂件", iconPath, command => OnTrayCommand(widget, command), widget.ShowWidgetAgain);
+        var tray = TrayIcon.Create(
+            "同济课表挂件",
+            iconPath,
+            command => OnTrayCommand(widget, command),
+            widget.ShowWidgetAgain,
+            onNotificationClick: () => OpenAboutPage(widget));
         tray.SetMenu(1, BuildTrayMenu(widget));
         AppLog.Line($"[tray] 已创建（图标 {iconPath}）");
         return tray;
+    }
+
+    /// <summary>
+    /// 系统通知被点：打开设置窗口的「关于」页（那一页有版本状态 +「下载」/「跳过此版本」按钮）。
+    ///
+    /// <para>只走 <see cref="ShowSettings"/> —— 窗口已开着时它自己会 <c>Activate</c> + <c>SelectPage</c>，
+    /// 不会叠出第二个设置窗口。</para>
+    /// </summary>
+    private void OpenAboutPage(MainWindow widget)
+    {
+        AppLog.Line("[notify] 系统通知被点击：打开设置窗口「关于」页");
+        ShowSettings(widget.CurrentSettings, widget.CurrentIsDark, SettingsWindow.PageAbout);
     }
 
     /// <summary>托盘菜单（每次弹出前重建，好让两个开关的勾选状态是最新的）。</summary>

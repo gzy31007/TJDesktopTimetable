@@ -57,6 +57,10 @@ namespace Tjt.App;
 /// 覆盖更新检查的 API 地址（<c>--update-api &lt;url&gt;</c>）：验收脚本指向本地合成服务，
 /// 不必真的去打 GitHub（也不受网络环境影响）。<c>null</c> = 真 GitHub。
 /// </param>
+/// <param name="UpdateNotify">
+/// 系统通知自检（<c>--update-notify</c>）：查一次最新 Release，**有更新就把那条系统通知真弹出来**
+/// 并留几秒，然后退出（不建挂件窗口、不落盘）。给验收脚本用，配合 <c>--update-api</c>。
+/// </param>
 /// <param name="UpdateProxyUrl">
 /// 覆盖兜底用的代理前缀（<c>--update-proxy &lt;url&gt;</c>，如 <c>https://gh-proxy.org/</c>）：
 /// 给出它就强制启用"直连失败 → 镜像重试"这条路（验收脚本指向本地合成服务假扮镜像）；
@@ -83,7 +87,8 @@ internal sealed record AppStartupOptions(
     string? LoginCheckUrl = null,
     bool UpdateCheck = false,
     string? UpdateApiUrl = null,
-    string? UpdateProxyUrl = null)
+    string? UpdateProxyUrl = null,
+    bool UpdateNotify = false)
 {
     /// <summary>
     /// 解析命令行。
@@ -93,7 +98,7 @@ internal sealed record AppStartupOptions(
     /// 便于验证自适应）、<c>--now HH:mm</c>（覆盖"当前时刻"，只为验证时间线，见 <c>NowMinutes</c>）、
     /// <c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>、
     /// <c>--login</c>、<c>--login-school tongji|sjtu</c>、<c>--login-check &lt;url&gt;</c>、<c>--sjtu-host &lt;url&gt;</c>、
-    /// <c>--update-check</c>、<c>--update-api &lt;url&gt;</c>、<c>--update-proxy &lt;url&gt;</c>。
+    /// <c>--update-check</c>、<c>--update-notify</c>、<c>--update-api &lt;url&gt;</c>、<c>--update-proxy &lt;url&gt;</c>。
     /// 未知参数被忽略（不崩在 CLI 上）。
     /// </summary>
     public static AppStartupOptions Parse(string[] args)
@@ -117,6 +122,7 @@ internal sealed record AppStartupOptions(
         LoginSchool? loginSchool = null;
         string? loginCheck = null;
         var updateCheck = false;
+        var updateNotify = false;
         string? updateApi = null;
         string? updateProxy = null;
 
@@ -144,6 +150,7 @@ internal sealed record AppStartupOptions(
             }
             else if (Matches(arg, "login-check") && i + 1 < args.Length) loginCheck = args[++i];
             else if (Matches(arg, "update-check")) updateCheck = true;
+            else if (Matches(arg, "update-notify")) updateNotify = true;
             else if (Matches(arg, "update-api") && i + 1 < args.Length) updateApi = args[++i];
             else if (Matches(arg, "update-proxy") && i + 1 < args.Length) updateProxy = args[++i];
             else if (Matches(arg, "settings-page") && i + 1 < args.Length && int.TryParse(args[i + 1], out var page))
@@ -190,7 +197,8 @@ internal sealed record AppStartupOptions(
             LoginCheckUrl: loginCheck,
             UpdateCheck: updateCheck,
             UpdateApiUrl: updateApi,
-            UpdateProxyUrl: updateProxy);
+            UpdateProxyUrl: updateProxy,
+            UpdateNotify: updateNotify);
     }
 
     /// <summary>支持 <c>--flag</c> / <c>-flag</c> / <c>/flag</c> 三种前缀。</summary>

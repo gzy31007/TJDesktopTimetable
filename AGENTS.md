@@ -176,8 +176,14 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
     - `CanProxy` 是白名单**不是**「是 GitHub 就加」：`api.github.com` / `raw.githubusercontent.com` / `codeload.github.com` 全放行，`github.com` 只放行路径带 `/releases/` 的（**仓库根 `github.com/o/r` 走镜像回 404** —— 没匹配到资产时会退到 `RepoUrl`，那条必须留原样）。非 https / 本地地址一律原样。
     - `--update-api` 是诊断开关，**指哪打哪、不替它兜底**（否则 D 例那种「故意连不上」会去打真镜像、依赖真网络）；显式 `--update-proxy <url>` 才强制启用兜底（验收脚本用本地合成服务假扮镜像）。注意 `HttpClient.Timeout` 已设成 `InfiniteTimeSpan`，两轮超时靠各自的 `CancellationTokenSource`。
   - 时机：交互模式启动后**后台线程延迟 12 秒**查一次（DeskBox 是 45s —— 别跟启动抢资源）；**没有时间去重**（DeskBox 同款：每次启动一次，未认证限流 60/h 对单机够用）。设置项 `WidgetSettings.CheckUpdates`（默认 true，设置「常规」页可关）+ `SkippedVersion`（「关于」页「跳过此版本」写入）。
-  - 提示落点两处、**同一份** `MainWindow.CurrentUpdate`：托盘菜单项「发现新版本 vX」+ 托盘 Tooltip、设置「关于」页那一行（有更新时多出「下载」「跳过此版本」按钮）。分发都走 `App.ApplyUpdateResult` —— 加第三个入口必须从它走，否则会出现"设置页说有新版、托盘没有"。
-  - CLI：`--update-check`（查一次 → 写日志 → 退出码表成败；不建窗口、不落盘）、`--update-api <url>`（覆盖 API 地址，验收脚本指向本地合成服务，整条链路因此不依赖真网络）、`--update-proxy <url>`（覆盖镜像前缀并强制启用兜底）。
+  - 提示落点**三处**、**同一份** `MainWindow.CurrentUpdate`：① 托盘菜单项「发现新版本 vX」+ 托盘 Tooltip；② 设置「关于」页那一行（有更新时多出「下载」「跳过此版本」按钮）；③ **系统通知**（2026-09-17 起，点它直达「关于」页）。分发都走 `App.ApplyUpdateResult` —— 加第四个入口必须从它走，否则会出现「设置页说有新版、托盘没有」。
+  - **系统通知**（`TrayIcon.ShowNotification`，`NIF_INFO` 气泡）：Win10/11 上由系统按**通知中心里的 toast 样式**呈现，点击回 `NIN_BALLOONUSERCLICK`（`0x405`，判 `lParam` 低位 —— 比鼠标消息的 `0x2xx` 大，所以先判它再取鼠标消息）。**不用 WinRT `AppNotification`**：未打包应用要注册 AUMID / COM 激活器（DeskBox 为此写了 600+ 行信封存储），而我们只要「应用在运行时提醒一句」—— 托盘气泡零注册、零依赖，dev 构建也能弹。
+    - 只有**同一次运行里没弹过的版本**才弹（纯逻辑 `UpdateCheck.ShouldNotify`，去重键 `NotificationVersion` = 归一化版本号）：手动点「检查新版本」不重复弹，跳过后出了更高版本照样提醒。文案在 `UpdateCheck.NotificationTitle` / `NotificationBody`。
+    - ⚠️ `NOTIFYICONDATAW` 的 `szInfoTitle` / `szInfo` 是定长内嵌缓冲（64 / 256 字节），.NET 的 `ByValTStr` **不检查长度、超长会越界写** → `TrayIcon.Clamp` 先截断（标题 ≤ 63、正文 ≤ 255，单测钉住文案长度）。
+    - 点击落点 `App.OpenAboutPage` → `ShowSettings(..., SettingsWindow.PageAbout)`（窗口已开着时它自己 `Activate` + `SelectPage`，不会叠出第二个设置窗口）。
+    - 顺序：`ScheduleUpdateCheck` 在 `_tray = BuildTray(...)` **之前**调用，但检查延迟 12 秒 → 那时托盘已就绪；兜底是 `_tray is null` 时记 `[notify-skip]` 跳过（日志锚点全 ASCII，验收脚本才能匹配）。
+    - CLI：`--update-notify`（查一次 → 有更新就把通知**真弹出来** → 停 6 秒 → 退出；不建挂件窗口、不落盘），配合 `--update-api` 指向本地合成服务。验收 `.tools/verify-update-notify.ps1`：A 有更新 → 出现 `[notify]` 且不出现 `[notify-skip]`；B 已最新 → 无 `[notify]`；C 响应非法 / D 网络失败 → 退出码 1。⚠️ 通知窗口由系统托管、脚本抓不到，「弹出来长什么样」只能人眼看（自检模式下点它只写日志，**不**打开设置窗口）。
+  - CLI：`--update-check`（查一次 → 写日志 → 退出码表成败；不建窗口、不落盘）、`--update-notify`（同上，但有更新时把系统通知真弹出来）、`--update-api <url>`（覆盖 API 地址，验收脚本指向本地合成服务，整条链路因此不依赖真网络）、`--update-proxy <url>`（覆盖镜像前缀并强制启用兜底）。
   - 验收 `.tools/verify-update-check.ps1`（A 有新版 / B 已最新 / C 响应非法 / D 网络失败 / E 跳过 / F 关于页构建 / **G 兜底**：`--update-api` 指向死端口 + `--update-proxy` 指向假镜像 → 假镜像收到请求、结论 `UpdateAvailable`、日志里的 `url=` 是 gh-proxy.org 前缀）：本地 `HttpListener` 假扮 GitHub API，payload 变化靠改文件（job 里读不到脚本变量）。
   - ⚠️ 口径：README 的「离线」→「**离线优先**」，唯一联网行为就是这一次版本查询（启动自动查 + 给开关）。**镜像回退是用户明确要的**（2026-09-17：直连失败走 gh-proxy.org，下载链接也重定向到它）—— 别再写回「不做镜像回退」。
 - **真机验收脚本**（`.tools/`，纯 ASCII）：`live-check.ps1`（启动 + owner / 可见性 + Win+D 后再读）；`verify-move.ps1`（`SetWindowPos` → `WM_EXITSIZEMOVE` → 落盘 → 重启恢复）；`verify-converge.ps1`（连跑 3 次不漂移）；`verify-topology.ps1`（`WM_DISPLAYCHANGE` → `[layer] 静息 display-change`）。⚠️ 脚本单引号里只放 ASCII（中文会让 PowerShell 5 解析崩）。

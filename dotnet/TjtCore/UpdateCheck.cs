@@ -261,6 +261,49 @@ public static class UpdateCheck
         return ProxiedUrl(result.Package?.DownloadUrl ?? result.Release?.HtmlUrl ?? RepoUrl);
     }
 
+    /* ---------------------------------------------------------- 系统通知（气泡 / Toast） */
+
+    /// <summary>
+    /// 通知去重用的版本键（<c>1.4.1</c>）；结论里没有可用版本时为 <c>null</c>。
+    /// </summary>
+    public static string? NotificationVersion(UpdateCheckResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return result.Latest is { } latest ? Normalize(latest).ToString() : null;
+    }
+
+    /// <summary>
+    /// 该不该为这次结论弹**系统通知**：有更新，且不是"同一个版本已经弹过一次"。
+    ///
+    /// <para>去重按"版本"而不是"这次查询"：手动点「检查新版本」不该再弹一遍同一个版本，
+    /// 但用户跳过之后又出了更高的版本，还是要提醒。</para>
+    /// </summary>
+    /// <param name="result">本次结论。</param>
+    /// <param name="lastNotifiedVersion">本进程内最近弹过通知的版本键（见 <see cref="NotificationVersion"/>）。</param>
+    public static bool ShouldNotify(UpdateCheckResult result, string? lastNotifiedVersion)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (!result.HasUpdate) return false;
+        var version = NotificationVersion(result);
+        return version is not null
+            && !string.Equals(version, lastNotifiedVersion?.Trim(), StringComparison.Ordinal);
+    }
+
+    /// <summary>通知标题（尽量短，Windows 会截断过长标题）。</summary>
+    public static string NotificationTitle(UpdateCheckResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var version = NotificationVersion(result);
+        return version is null ? "发现新版本" : $"发现新版本 v{version}";
+    }
+
+    /// <summary>通知正文：说清当前版本与"点它做什么"。</summary>
+    public static string NotificationBody(UpdateCheckResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return $"当前 v{result.Current}，点这条通知打开「关于」页下载。";
+    }
+
     /// <summary>
     /// 该地址能不能交给 gh-proxy 类镜像去取。
     ///

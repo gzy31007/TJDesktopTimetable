@@ -210,6 +210,49 @@ public class UpdateCheckTests
             UpdateCheck.WithProxyPrefix("http://localhost:18778/releases/latest", "http://localhost:18777/"));
     }
 
+    // ── 系统通知（2026-09-17：查到新版本弹通知，点击进「关于」页）────────────────
+
+    /// <summary>有更新且这个版本还没弹过 → 弹；同一个版本第二次 → 不弹（手动检查不该重复弹）。</summary>
+    [Fact]
+    public void 同一版本的系统通知只弹一次()
+    {
+        var result = UpdateCheck.Evaluate("1.2.0.0", SampleJson);
+
+        Assert.True(UpdateCheck.ShouldNotify(result, null));
+        Assert.Equal("1.3.0", UpdateCheck.NotificationVersion(result));
+        Assert.False(UpdateCheck.ShouldNotify(result, "1.3.0"));
+        // 弹过的是更老的版本 → 线上这个更高的版本照样提醒
+        Assert.True(UpdateCheck.ShouldNotify(result, "1.2.0"));
+        // 脏值 / 空白当作没弹过
+        Assert.True(UpdateCheck.ShouldNotify(result, "  "));
+        Assert.True(UpdateCheck.ShouldNotify(result, "nightly"));
+    }
+
+    /// <summary>没更新 / 已跳过 / 响应不可用都不该弹通知。</summary>
+    [Fact]
+    public void 没有更新或已被跳过时不弹通知()
+    {
+        Assert.False(UpdateCheck.ShouldNotify(UpdateCheck.Evaluate("1.3.0.0", SampleJson), null));
+        Assert.False(UpdateCheck.ShouldNotify(UpdateCheck.Evaluate("1.2.0.0", SampleJson, "1.3.0"), null));
+        Assert.False(UpdateCheck.ShouldNotify(UpdateCheck.Evaluate("1.2.0.0", "<html>404</html>"), null));
+        Assert.False(UpdateCheck.ShouldNotify(UpdateCheck.Evaluate("1.2.0.0", SampleJson.Replace("\"prerelease\": false", "\"prerelease\": true")), null));
+        Assert.Null(UpdateCheck.NotificationVersion(UpdateCheck.Evaluate("1.2.0.0", "<html>404</html>")));
+    }
+
+    /// <summary>通知文案：标题带版本号、正文说清当前版本与"点它做什么"（并别太长）。</summary>
+    [Fact]
+    public void 通知文案带版本号且不超长()
+    {
+        var result = UpdateCheck.Evaluate("1.2.0.0", SampleJson);
+
+        Assert.Equal("发现新版本 v1.3.0", UpdateCheck.NotificationTitle(result));
+        Assert.Contains("1.2.0", UpdateCheck.NotificationBody(result));
+        Assert.Contains("关于", UpdateCheck.NotificationBody(result));
+        // NOTIFYICONDATAW 的定长缓冲：标题 ≤ 63、正文 ≤ 255（超了会被 TrayIcon 截断）
+        Assert.True(UpdateCheck.NotificationTitle(result).Length <= 63);
+        Assert.True(UpdateCheck.NotificationBody(result).Length <= 255);
+    }
+
     [Fact]
     public void 请求约定是稳定的()
     {
