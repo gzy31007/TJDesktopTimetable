@@ -6,7 +6,7 @@
     单一处声明：发版时只改这一个数字 → 设置窗口「关于」页读的就是它（AssemblyVersion）。
   -->
   <PropertyGroup>
-    <Version>1.4.0-beta.1</Version>
+    <Version>1.4.1</Version>
     <Product>TJDesktopTimetable</Product>
     <Authors>gzy31007</Authors>
     <Copyright>MIT © 2026 gzy31007</Copyright>
