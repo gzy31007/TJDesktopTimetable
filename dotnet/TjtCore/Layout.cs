@@ -27,8 +27,13 @@ public sealed record BoardOptions
     /// <summary>展示哪些天（默认全周；<c>false</c> 时只到周五）。</summary>
     public bool? ShowWeekend { get; init; }
 
-    /// <summary>周次过滤：全部 / 仅单周 / 仅双周（默认 <see cref="WeekFilter.All"/>）。</summary>
-    public WeekFilter WeekFilter { get; init; } = WeekFilter.All;
+    /// <summary>
+    /// 周次视图：全部 / 本周 / 单周 / 双周（默认 <see cref="WeekView.Current"/>，即"只看本周"）。
+    ///
+    /// <para>默认值是产品决策（ADR 0001）：课表就该是"这一周"。开学前 / 学期结束后 / 开学日未知时，
+    /// <see cref="Weeks.ResolveFilter"/> 返回 <c>null</c> → 静默退回显示全部周次，挂件绝不空。</para>
+    /// </summary>
+    public WeekView WeekView { get; init; } = WeekView.Current;
 
     /// <summary>是否把节次范围自动收窄到"有课的范围"。</summary>
     public bool TrimEmptySlots { get; init; }
@@ -128,6 +133,13 @@ public sealed record BoardBlock(
 /// <param name="CurrentWeek">当前教学周（假期为 <c>null</c>）。</param>
 /// <param name="Today">"今日"的 <c>YYYY-MM-DD</c>。</param>
 /// <param name="HiddenSessions">被周次过滤掉的时段数。</param>
+/// <param name="TodaySessionCount">
+/// 今天在**当前教学周**里实际要上的安排条数（header 的「今日 N 节」读它）。
+///
+/// <para>口径与视图无关：<see cref="WeekView.All"/> 下也按当前周算（旧实现数色块，会把别的周的课算进今天）；
+/// 假期 / 开学日未知时退回"今天有几条安排"。不数 <see cref="Blocks"/> 的另一个原因：色块还受
+/// "隐藏周末"与视图影响，而今日节数不该受它们影响。</para>
+/// </param>
 public sealed record BoardState(
     Term Term,
     string Title,
@@ -136,7 +148,8 @@ public sealed record BoardState(
     IReadOnlyList<BoardBlock> Blocks,
     int? CurrentWeek,
     string Today,
-    int HiddenSessions);
+    int HiddenSessions,
+    int TodaySessionCount);
 
 /// <summary>网格需要的总尺寸（TS 侧 <c>boardSize</c> 的返回值）。</summary>
 /// <param name="Width">总宽。</param>
@@ -245,9 +258,14 @@ public static partial class Layout
         // 即"今日"永远按系统时间 + 默认北京时区算。C# 照抄这个既有行为，避免两端"今日"高亮不一致。
         var today = opts.Today ?? Time.LocalTodayIso(DateTimeOffset.UtcNow, TimetableModel.DefaultTzOffsetMinutes);
         var todayWeekday = SafeWeekday(today);
-        var filterMask = Weeks.ResolveFilter(opts.WeekFilter, term.TotalWeeks);
+        // 当前教学周要在过滤**之前**算出来：「本周」视图靠它生成掩码（假期为 null → 不过滤，见 Weeks.ResolveFilter）
+        var currentWeek = SafeTermWeekAt(term, today);
+        var filterMask = Weeks.ResolveFilter(opts.WeekView, currentWeek, term.TotalWeeks);
         var colorOf = opts.ColorOf ?? (course => Colors.ColorForCourse(course.Name));
         var shortName = opts.ShortName ?? DefaultShortName;
+
+        // 今日节数：与视图无关（永远按当前教学周；假期退回"今天的全部安排"），因此单独从 courses 数
+        var todaySessionCount = CountTodaySessions(courses, todayWeekday, currentWeek);
 
         var pending = new List<PendingBlock>();
         var hiddenSessions = 0;
@@ -286,7 +304,6 @@ public static partial class Layout
                 ? slotNumbers.Max()
                 : Math.Max(11, slotNumbers.Count > 0 ? slotNumbers.Max() : 0));
 
-        var currentWeek = SafeTermWeekAt(term, today);
         var nowSlot = CurrentSlotIndex(term, Time.LocalMinutesOfDay(opts.Now ?? DateTimeOffset.UtcNow, opts.TzOffsetMinutes));
 
         var rows = new List<BoardRow>();
@@ -355,7 +372,37 @@ public static partial class Layout
             .ThenBy(b => b.Col)
             .ToList();
 
-        return new BoardState(term, term.Label, days, rows, sorted, currentWeek, today, hiddenSessions);
+        return new BoardState(term, term.Label, days, rows, sorted, currentWeek, today, hiddenSessions, todaySessionCount);
+    }
+
+    /// <summary>
+    /// 今天该上几条课（header「今日 N 节」的唯一口径）。
+    ///
+    /// <para>语义（方案决策 9）：<b>永远按当前教学周算</b>，与周次视图无关；当前周不存在
+    /// （假期 / 开学日未知）或越界时退回"今天有几条安排"。空掩码（<c>weeks == 0</c>）的安排永远不算
+    /// —— 它在本项目里等于"从不发生"（与 <see cref="BuildBoard"/> 的丢弃口径一致）。</para>
+    ///
+    /// <para>数的是**安排条数**而不是色块：色块会被"隐藏周末"丢掉、被视图过滤，而今日节数不该受它们影响。</para>
+    /// </summary>
+    private static int CountTodaySessions(IReadOnlyList<Course> courses, Weekday? todayWeekday, int? currentWeek)
+    {
+        if (todayWeekday is not { } day) return 0;
+        var weekMask = currentWeek is { } week ? Weeks.WeekMask(week) : 0u;
+        var filterByWeek = weekMask != 0;
+
+        var count = 0;
+        foreach (var course in courses)
+        {
+            foreach (var session in course.Sessions)
+            {
+                if (session.Day != day) continue;
+                if (session.Weeks == 0) continue;
+                if (filterByWeek && (session.Weeks & weekMask) == 0) continue;
+                count += 1;
+            }
+        }
+
+        return count;
     }
 
     /// <summary>

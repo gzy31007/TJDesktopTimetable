@@ -50,9 +50,17 @@ public class BoardVisualTests
         Sessions: [new Session("s3", Weekday.Monday, 1, 2, Weeks.EvenMask(16), "南305")],
         CourseCode: "TST1003");
 
+    /// <summary>
+    /// 这些用例看的是**视觉计算**（几何 / 染色 / 文案 / 分档），所以显式给「全部周次」：
+    /// 三块并排的形状不该被动不动就变的"当前周"搅动（旧默认就是 All，这里把它钉明）。
+    /// 周次视图本身由专门用例覆盖。
+    /// </summary>
     private static BoardVisual Visual(double width, bool dark = false, int? nowMinutes = null) =>
         BoardVisualBuilder.Build(
-            Layout.BuildBoard([Maths, Physics, English], TestTerm, new BoardOptions { Today = "2026-09-14" }),
+            Layout.BuildBoard(
+                [Maths, Physics, English],
+                TestTerm,
+                new BoardOptions { WeekView = WeekView.All, Today = "2026-09-14" }),
             width,
             dark,
             nowMinutes);
@@ -352,16 +360,71 @@ public class BoardVisualTests
     [Fact]
     public void 顶部条给出学期周次与今日节数()
     {
-        // 2026-09-14 是第 1 周周一：三块课都在周一（1-2 节同格三块）
+        // 2026-09-14 是第 1 周周一：三块课都排在周一 1-2 节（同格三块）。
+        // 「今日节数」按**当前教学周**算 → English 是双周课，第 1 周没有它 → 今日 2 节。
+        // （旧实现数色块，会给出 3 —— 那是既有错误，2026-09 周次视图一并修正。）
         var visual = BoardVisualBuilder.Build(
-            Layout.BuildBoard([Maths, Physics, English], TestTerm, new BoardOptions { Today = "2026-09-14" }),
+            Layout.BuildBoard(
+                [Maths, Physics, English],
+                TestTerm,
+                new BoardOptions { WeekView = WeekView.All, Today = "2026-09-14" }),
             1000,
             dark: false);
 
         Assert.Equal("2026-2027学年第1学期", visual.Header.Title);
         Assert.Equal("第 1 周", visual.Header.WeekText);
-        Assert.Equal("今日 3 节", visual.Header.TodayText);
+        Assert.Equal("今日 2 节", visual.Header.TodayText);
         Assert.False(visual.Header.IsHoliday);
+        Assert.Equal(3, visual.Blocks.Count); // 画出来三块，但今天真正要上的是两块
+    }
+
+    [Fact]
+    public void 今日节数不受周次视图影响()
+    {
+        // 第 2 周周一：画面上（All 视图）三块并排，今天真正要上的是 Maths(全周) + English(双周) = 2
+        var all = BoardVisualBuilder.Build(
+            Layout.BuildBoard(
+                [Maths, Physics, English],
+                TestTerm,
+                new BoardOptions { WeekView = WeekView.All, Today = "2026-09-21" }),
+            1000,
+            dark: false);
+        Assert.Equal(3, all.Blocks.Count);
+        Assert.Equal("今日 2 节", all.Header.TodayText);
+
+        // 同一日期、只画本周（English 保留、Physics 被过滤）：今日节数不变
+        var current = BoardVisualBuilder.Build(
+            Layout.BuildBoard(
+                [Maths, Physics, English],
+                TestTerm,
+                new BoardOptions { Today = "2026-09-21" }),
+            1000,
+            dark: false);
+        Assert.Equal(2, current.Blocks.Count);
+        Assert.Equal("今日 2 节", current.Header.TodayText);
+
+        // 只看单周：单周课照常画出来（视图选的是"画哪些周次形态"，不是"这一周是不是单周"），
+        // 但「今日节数」按当前周算 —— 今天在第 2 周（双周），这门只上单周的课今天没有 → 不显示
+        var oddOnly = new Course(
+            Id: "o1",
+            Name: "只上单周的课",
+            Teachers: [],
+            Sessions: [new Session("so", Weekday.Monday, 1, 2, Weeks.OddMask(16), "南101")]);
+        var oddView = BoardVisualBuilder.Build(
+            Layout.BuildBoard([oddOnly], TestTerm, new BoardOptions { WeekView = WeekView.Odd, Today = "2026-09-21" }),
+            1000,
+            dark: false);
+        Assert.Single(oddView.Blocks);
+        Assert.Null(oddView.Header.TodayText);
+        Assert.Equal("第 2 周", oddView.Header.WeekText);
+
+        // 只看本周、而本周恰好没有这门课 → 空网格（不加"本周无课"文案），今日节数同样是 0
+        var empty = BoardVisualBuilder.Build(
+            Layout.BuildBoard([oddOnly], TestTerm, new BoardOptions { Today = "2026-09-21" }),
+            1000,
+            dark: false);
+        Assert.Empty(empty.Blocks);
+        Assert.Null(empty.Header.TodayText);
     }
 
     [Fact]

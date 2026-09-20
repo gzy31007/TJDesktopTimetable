@@ -241,18 +241,12 @@ public static class BoardVisualBuilder
         var week = state.CurrentWeek;
         var weekText = week is null ? "假期" : $"第 {week} 周";
 
-        // 今日节数 = 今天开始的课（与渲染层 todaysSessions(...).length 同义：只看有没有课）
-        var today = state.Blocks.Count(block => block.Day == (Weekday)WeekdayOf(state.Today));
-        var todayText = today > 0 ? $"今日 {today} 节" : null;
+        // 今日节数 = 今天 × **当前教学周**命中的安排数，由布局层算好（BoardState.TodaySessionCount）。
+        // 旧实现是 state.Blocks.Count(block => block.Day == 今天)：All 视图下会把别的周的课算进今天
+        // （既有错误，2026-09 周次视图一并修正），且"隐藏周末"会把今天的课从色块里丢掉。
+        var todayText = state.TodaySessionCount > 0 ? $"今日 {state.TodaySessionCount} 节" : null;
         _ = nowMinutes; // 保留参数：将来要做"还剩 N 节"时用，当前文案与渲染层一致，不依赖当前时刻
         return new BoardHeader(state.Title, weekText, todayText, week is null);
-    }
-
-    /// <summary><c>YYYY-MM-DD</c> → 星期（1 = 周一 … 7 = 周日）；解析失败返回 0（不会命中任何天）。</summary>
-    private static int WeekdayOf(string iso)
-    {
-        var weekday = Time.IsoToWeekday(iso);
-        return weekday is null ? 0 : (int)weekday.Value;
     }
 
     /// <summary>

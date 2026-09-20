@@ -133,7 +133,14 @@ public class TongjiReportFormatTests
     {
         var result = Import("122");
         var timetable = ImportPipeline.MaterializeTimetable(result);
-        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { TrimEmptySlots = true });
+        // 显式「全部周次」+ 显式日期：这条钉的是"报表格式能一路走到布局"（19 块），
+        // 不该随"今天是第几周"漂 —— 凡断言观感就必须显式给 --today 的同一条纪律。
+        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions
+        {
+            WeekView = WeekView.All,
+            Today = "2026-09-21",
+            TrimEmptySlots = true,
+        });
 
         Assert.Equal(7, board.Days.Count);
         Assert.True(board.Rows.Count > 0);

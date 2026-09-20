@@ -85,7 +85,12 @@ public class LayoutTests
     [Fact]
     public void 同格多课并排并标记special()
     {
-        var board = Layout.BuildBoard([MathCourse, PhysicsCourse, EnglishCourse], TestTerm, new BoardOptions { Today = "2026-09-14" });
+        // 显式「全部周次」：这条钉的是布局（并排 / Special），不是周次视图 —— 不显式给就会落到
+        // 新默认 Current，双周课在本周（第 1 周）被过滤，三块并排变两块。
+        var board = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { WeekView = WeekView.All, Today = "2026-09-14" });
         var cell = board.Blocks.Where(b => b.Day == Weekday.Monday && b.StartSlot == 1).ToList();
         Assert.Equal(3, cell.Count);
         Assert.Equal(new[] { 0, 1, 2 }, cell.Select(b => b.Col).OrderBy(c => c).ToArray());
@@ -109,7 +114,7 @@ public class LayoutTests
         var odd = Layout.BuildBoard(
             [MathCourse, PhysicsCourse, EnglishCourse],
             TestTerm,
-            new BoardOptions { WeekFilter = WeekFilter.Odd, Today = "2026-09-14" });
+            new BoardOptions { WeekView = WeekView.Odd, Today = "2026-09-14" });
         var oddIds = odd.Blocks.Select(b => b.CourseId).ToHashSet();
         Assert.DoesNotContain("e1", oddIds); // 双周课被过滤
         Assert.Equal(1, odd.HiddenSessions); // 仅 e1 的那一块被过滤
@@ -122,13 +127,100 @@ public class LayoutTests
         var even = Layout.BuildBoard(
             [MathCourse, PhysicsCourse, EnglishCourse],
             TestTerm,
-            new BoardOptions { WeekFilter = WeekFilter.Even, Today = "2026-09-14" });
+            new BoardOptions { WeekView = WeekView.Even, Today = "2026-09-14" });
         var evenIds = even.Blocks.Select(b => b.CourseId).ToHashSet();
         Assert.Contains("e1", evenIds);
         // 物理周三那块是全周（与双周有交集）→ 保留；周一那块是单周 → 被过滤
         Assert.Contains(even.Blocks, b => b.CourseId == "p1" && b.Day == Weekday.Wednesday);
         Assert.DoesNotContain(even.Blocks, b => b.CourseId == "p1" && b.Day == Weekday.Monday);
         Assert.Equal(1, even.HiddenSessions);
+    }
+
+    // ── 周次视图（2026-09-21 定稿：默认「只看本周」，假期静默退回全部）────────────────
+
+    [Fact]
+    public void 默认周次视图是只看本周()
+    {
+        // ⚠️ 写错成 All = 功能白做（方案 Q2）。默认值是产品决策，不能用"当前恰好等价"绕过。
+        Assert.Equal(WeekView.Current, new BoardOptions().WeekView);
+    }
+
+    [Fact]
+    public void 本周视图只保留当前教学周命中的块并计入隐藏数()
+    {
+        // 2026-09-21 是第 2 周周一：Math(全周) / English(双周) 命中；Physics 周一那块(单周)被过滤。
+        var current = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { Today = "2026-09-21" }); // 不传视图 = 默认 Current
+        Assert.Equal(2, current.CurrentWeek);
+        Assert.Contains(current.Blocks, b => b.CourseId == "m1");                    // 全周 → 在
+        Assert.Contains(current.Blocks, b => b.CourseId == "e1");                    // 双周 → 在
+        Assert.Contains(current.Blocks, b => b.CourseId == "p1" && b.Day == Weekday.Wednesday); // 周三那块全周 → 在
+        Assert.DoesNotContain(current.Blocks, b => b.CourseId == "p1" && b.Day == Weekday.Monday);
+        Assert.Equal(1, current.HiddenSessions); // 与单双周同一口径：被本周丢掉的时段要计数
+
+        // 同一日期切回"全部"→ 四块都在，隐藏数为 0（这正是旧默认的观感）
+        var all = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { WeekView = WeekView.All, Today = "2026-09-21" });
+        Assert.Equal(4, all.Blocks.Count);
+        Assert.Equal(0, all.HiddenSessions);
+    }
+
+    [Fact]
+    public void 假期时本周视图静默退回全部周次()
+    {
+        // 开学前（2026-09-07）当前周为 null → 不过滤：挂件绝不能空（ADR 0001）
+        var current = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { Today = "2026-09-07" });
+        var all = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { WeekView = WeekView.All, Today = "2026-09-07" });
+
+        Assert.Null(current.CurrentWeek);
+        Assert.Equal(all.Blocks.Count, current.Blocks.Count);
+        Assert.Equal(0, current.HiddenSessions);
+        Assert.NotEmpty(current.Blocks);
+    }
+
+    [Fact]
+    public void 今日节数永远按当前教学周算_假期退回今天的全部安排()
+    {
+        // 第 2 周周一：Math(全周) + English(双周) = 2 条；All 视图下也必须是 2（旧实现数色块 = 3）
+        var week2 = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { WeekView = WeekView.All, Today = "2026-09-21" });
+        Assert.Equal(3, week2.Blocks.Count(b => b.Day == Weekday.Monday)); // 画出来的是三块
+        Assert.Equal(2, week2.TodaySessionCount);                          // 今天真正要上的是两条
+
+        // 第 1 周周一：Math + Physics(单周) = 2 条（English 是双周，本周没有）
+        var week1 = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { Today = "2026-09-14" });
+        Assert.Equal(2, week1.TodaySessionCount);
+
+        // 假期（开学前）：退回"今天有几条安排" = 周一三条都在
+        var holiday = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { Today = "2026-09-07" });
+        Assert.Null(holiday.CurrentWeek);
+        Assert.Equal(3, holiday.TodaySessionCount);
+
+        // 今天没有课 / 今天解析不出来 → 0
+        Assert.Equal(0, Layout.BuildBoard([MathCourse], TestTerm, new BoardOptions { Today = "2026-09-19" }).TodaySessionCount);
+        Assert.Equal(0, Layout.BuildBoard([MathCourse], TestTerm, new BoardOptions { Today = "not-a-date" }).TodaySessionCount);
+
+        // 空周次掩码（= 从不发生）不算数
+        var never = new Course("z1", "无周次课", [], [new Session("sz", Weekday.Monday, 1, 2, 0u, "南101")]);
+        Assert.Equal(0, Layout.BuildBoard([never], TestTerm, new BoardOptions { Today = "2026-09-21" }).TodaySessionCount);
     }
 
     [Fact]
@@ -152,7 +244,10 @@ public class LayoutTests
     [Fact]
     public void 几何计算_自适应列宽与色块矩形()
     {
-        var board = Layout.BuildBoard([MathCourse, PhysicsCourse, EnglishCourse], TestTerm, new BoardOptions { Today = "2026-09-14" });
+        var board = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { WeekView = WeekView.All, Today = "2026-09-14" });
         var geo = Layout.FitGeometry(1000, board.Rows.Count, board.Days.Count);
         Assert.Equal(Math.Floor((1000 - Layout.DefaultGeometry.GutterWidth) / 7), geo.CellWidth);
 
@@ -169,7 +264,10 @@ public class LayoutTests
     [Fact]
     public void 并排色块按1比n均分列宽()
     {
-        var board = Layout.BuildBoard([MathCourse, PhysicsCourse, EnglishCourse], TestTerm, new BoardOptions { Today = "2026-09-14" });
+        var board = Layout.BuildBoard(
+            [MathCourse, PhysicsCourse, EnglishCourse],
+            TestTerm,
+            new BoardOptions { WeekView = WeekView.All, Today = "2026-09-14" });
         var geo = Layout.FitGeometry(1000, board.Rows.Count, board.Days.Count);
         var cell = board.Blocks
             .Where(b => b.Day == Weekday.Monday && b.StartSlot == 1)

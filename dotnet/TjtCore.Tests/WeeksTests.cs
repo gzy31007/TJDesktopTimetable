@@ -76,11 +76,40 @@ public class WeeksTests
     }
 
     [Fact]
+    public void 单周掩码按周次生成且越界给零()
+    {
+        Assert.Equal(1u, Weeks.WeekMask(1));
+        Assert.Equal(0b100u, Weeks.WeekMask(3));
+        Assert.Equal(1u << 15, Weeks.WeekMask(16));
+        Assert.Equal(0x8000_0000u, Weeks.WeekMask(32));
+        // 越界一律 0（调用方据此判"这一周不存在"）
+        Assert.Equal(0u, Weeks.WeekMask(0));
+        Assert.Equal(0u, Weeks.WeekMask(-3));
+        Assert.Equal(0u, Weeks.WeekMask(33));
+    }
+
+    [Fact]
+    public void 周次视图解析_四态与当前周兜底()
+    {
+        // All / 当前周为 null → 不过滤（null 语义 = 全部周次）
+        Assert.Null(Weeks.ResolveFilter(WeekView.All, 3, 16));
+        Assert.Null(Weeks.ResolveFilter(WeekView.Current, null, 16));       // 假期 / 开学日未知
+        Assert.Null(Weeks.ResolveFilter(WeekView.Current, 0, 16));          // 越界周 → 同样不过滤
+        Assert.Null(Weeks.ResolveFilter(WeekView.Current, 33, 16));
+
+        // Current 且有当前周 → 只命中这一周
+        Assert.Equal(1u, Weeks.ResolveFilter(WeekView.Current, 1, 16));
+        Assert.Equal(1u << 15, Weeks.ResolveFilter(WeekView.Current, 16, 16));
+
+        // 单双周按 totalWeeks 生成（15 周学期的偶数是 2..14，不是 0xAAAA）
+        Assert.Equal(0x5555u, Weeks.ResolveFilter(WeekView.Odd, null, 16));
+        Assert.Equal(0xaaaau, Weeks.ResolveFilter(WeekView.Even, null, 16));
+        Assert.Equal(Weeks.EvenMask(15), Weeks.ResolveFilter(WeekView.Even, null, 15));
+    }
+
+    [Fact]
     public void 过滤器解析与交集判断()
     {
-        Assert.Null(Weeks.ResolveFilter(WeekFilter.All, 16));
-        Assert.Equal(0x5555u, Weeks.ResolveFilter(WeekFilter.Odd, 16));
-        Assert.Equal(0xaaaau, Weeks.ResolveFilter(WeekFilter.Even, 16));
         Assert.True(Weeks.Overlap(Weeks.FromWeeks([1, 3]), Weeks.FromWeeks([2, 3])));
         Assert.False(Weeks.Overlap(Weeks.FromWeeks([1, 3]), Weeks.FromWeeks([2, 4])));
     }

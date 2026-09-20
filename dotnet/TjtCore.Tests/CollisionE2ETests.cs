@@ -32,8 +32,11 @@ public class CollisionE2ETests
 
     private static readonly Timetable Table = ImportPipeline.MaterializeTimetable(Imported);
 
+    // 显式「全部周次」：这份 fixture 的形状（三课并排 / 周次不相交）要看的是**布局**，
+    // 而新默认的「本周」会把双周那门过滤掉（2026-09-14 = 第 1 周）。周次视图另有专门用例。
     private static readonly BoardState Board = Layout.BuildBoard(Table.Courses, Table.Term, new BoardOptions
     {
+        WeekView = WeekView.All,
         Today = "2026-09-14",
         TrimEmptySlots = true,
     });
@@ -173,7 +176,7 @@ public class CollisionE2ETests
         var odd = Layout.BuildBoard(Table.Courses, Table.Term, new BoardOptions
         {
             Today = "2026-09-14",
-            WeekFilter = WeekFilter.Odd,
+            WeekView = WeekView.Odd,
         });
         var oddCell = odd.Blocks
             .Where(b => b.Day == Weekday.Monday && b.StartSlot == 1 && b.EndSlot == 2)

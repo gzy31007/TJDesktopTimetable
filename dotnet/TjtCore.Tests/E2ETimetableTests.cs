@@ -217,6 +217,8 @@ public class E2ETimetableTests
 
         var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions
         {
+            // 显式「全部周次」：这条走的是"导入 → 布局"整条链路，不是周次视图
+            WeekView = WeekView.All,
             Today = "2026-09-16",
             TrimEmptySlots = true,
         });
@@ -253,11 +255,11 @@ public class E2ETimetableTests
     public void 单双周过滤生效()
     {
         var timetable = ImportPipeline.MaterializeTimetable(Personal);
-        var all = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { Today = "2026-09-16" });
+        var all = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { WeekView = WeekView.All, Today = "2026-09-16" });
         var even = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions
         {
             Today = "2026-09-16",
-            WeekFilter = WeekFilter.Even,
+            WeekView = WeekView.Even,
         });
 
         Assert.True(even.Blocks.Count < all.Blocks.Count);
@@ -276,7 +278,7 @@ public class E2ETimetableTests
     public void 同一格多门课并排且矩形不重叠()
     {
         var timetable = ImportPipeline.MaterializeTimetable(Personal);
-        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { Today = "2026-09-16" });
+        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { WeekView = WeekView.All, Today = "2026-09-16" });
         var geometry = Layout.FitGeometry(1280, board.Rows.Count, board.Days.Count);
 
         Assert.All(board.Blocks, block => Assert.True(block.ColCount >= 1));
@@ -310,7 +312,7 @@ public class E2ETimetableTests
     public void 布局块的周次标签与全周标记()
     {
         var timetable = ImportPipeline.MaterializeTimetable(Personal);
-        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { Today = "2026-09-16" });
+        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { WeekView = WeekView.All, Today = "2026-09-16" });
 
         Assert.All(board.Blocks, block =>
         {
@@ -336,7 +338,7 @@ public class E2ETimetableTests
     public void 布局尺寸与色块矩形()
     {
         var timetable = ImportPipeline.MaterializeTimetable(Personal);
-        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { Today = "2026-09-16" });
+        var board = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions { WeekView = WeekView.All, Today = "2026-09-16" });
         var geometry = Layout.FitGeometry(1280, board.Rows.Count, board.Days.Count);
 
         Assert.Equal(board.Days.Count, geometry.Cols);
@@ -356,5 +358,72 @@ public class E2ETimetableTests
             Assert.True(rect.Left + rect.Width <= lastDayRight);
             Assert.True(rect.Top >= geometry.HeaderHeight);
         });
+    }
+
+    // ── 阶段三：周次视图（2026-09-21 定稿；权威验收日期 = 第 2 周）────────────────────
+
+    /// <summary>
+    /// 真实个人课表上的「只看本周」：权威验收日期 <c>--today 2026-09-21</c>（第 2 周周一）。
+    ///
+    /// <para>这些数字就是 Windows 冒烟与 <c>.tools/verify-weekview.ps1</c> 的基准 —— 改 fixture /
+    /// 改过滤语义都会在这里和那边同时暴露。</para>
+    /// </summary>
+    [Fact]
+    public void 本周视图在真实个人课表上的块数与隐藏数()
+    {
+        var timetable = ImportPipeline.MaterializeTimetable(Personal);
+
+        var all = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions
+        {
+            WeekView = WeekView.All,
+            Today = "2026-09-21",
+        });
+        var current = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions
+        {
+            Today = "2026-09-21", // 默认就是 Current（只看本周）
+        });
+
+        Assert.Equal(2, current.CurrentWeek);
+        Assert.Equal(19, all.Blocks.Count);      // 黄金基准：全部 19 条
+        Assert.Equal(14, current.Blocks.Count);  // 第 2 周：14 条
+        Assert.Equal(5, current.HiddenSessions);
+        Assert.Equal(all.Blocks.Count - current.Blocks.Count, current.HiddenSessions);
+        Assert.Equal(0, all.HiddenSessions);
+
+        // 本周视图里每一块都必须真的覆盖第 2 周（不过滤的那部分原样保留）
+        Assert.All(current.Blocks, block => Assert.True((block.Weeks & Weeks.WeekMask(2)) != 0));
+
+        // 今日（周一，第 2 周）2 条：与 SessionsOnDate 一致
+        Assert.Equal(2, current.TodaySessionCount);
+        Assert.Equal(
+            Time.SessionsOnDate(timetable.Courses, timetable.Term, "2026-09-21").Length,
+            current.TodaySessionCount);
+
+        // 换个周（第 3 周，2026-09-28）块数与第 2 周不同 → 真的在跟着周走
+        var week3 = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions
+        {
+            Today = "2026-09-28",
+        });
+        Assert.Equal(3, week3.CurrentWeek);
+        Assert.NotEqual(current.Blocks.Count, week3.Blocks.Count);
+    }
+
+    [Fact]
+    public void 本周视图在假期静默退回全部周次()
+    {
+        var timetable = ImportPipeline.MaterializeTimetable(Personal);
+
+        var holiday = Layout.BuildBoard(timetable.Courses, timetable.Term, new BoardOptions
+        {
+            Today = "2026-09-07", // 开学前一周
+        });
+
+        Assert.Null(holiday.CurrentWeek);
+        Assert.Equal(19, holiday.Blocks.Count); // 绝不空：退回显示全部
+        Assert.Equal(0, holiday.HiddenSessions);
+        // 假期的今日节数退回"今天有几条安排"（2026-09-07 也是周一）
+        Assert.Equal(
+            Time.SessionsOnDate(timetable.Courses, timetable.Term, "2026-09-14").Length,
+            holiday.TodaySessionCount);
     }
 }
