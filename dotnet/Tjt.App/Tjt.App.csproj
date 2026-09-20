@@ -72,6 +72,8 @@
   <ItemGroup>
     <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\app-blue.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- QQ 群二维码（设置「关于」页显示，扫码入群）：同样是运行时按文件路径加载 -->
+    <Content Include="Assets\qq-group.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!--

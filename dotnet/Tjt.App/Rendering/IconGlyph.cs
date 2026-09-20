@@ -49,4 +49,7 @@ internal static class IconGlyph
 
     /// <summary>关闭（<c>&#xE8BB;</c>）。</summary>
     public const string Close = "\uE8BB";
+
+    /// <summary>一群人（<c>&#xE716;</c>，People）—— 「关于」页的 QQ 群那一行。</summary>
+    public const string People = "\uE716";
 }

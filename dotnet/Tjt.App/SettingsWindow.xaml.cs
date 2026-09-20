@@ -468,8 +468,68 @@ public sealed partial class SettingsWindow : Window
             BuildUpdateRow(dark),
             SettingsView.InfoRow("当前课表", _host.Imports.DescribeCurrent(), dark),
             SettingsView.InfoRow("数据目录", ImportService.DataDirectory + "（settings.json / timetable.json / credentials.json）", dark),
+            BuildQqGroupBlock(dark),
         };
         return Page("关于", rows, dark);
+    }
+
+    /// <summary>
+    /// 「关于」页的 QQ 群一块：二维码 + 群号（可选中复制）。
+    ///
+    /// <para>用 <see cref="SettingsView.Block"/> 而不是 <c>Row</c>：二维码要占一块自己的地方，
+    /// 塞进 Row 右侧那一列会把整行撑得很高、还把说明文字挤成一条。群号**同时给文本**：
+    /// 二维码扫不动时（老手机、截图糊了）还能直接搜群号，所以它是兜底不是装饰。</para>
+    ///
+    /// <para>图片走**运行时文件路径**（与 app.ico 同一套路，不嵌资源）：文件缺失时只留一行
+    /// <c>[about] qq-qr exists=False</c> 日志、界面不崩，也不会有"二维码是空框"的哑失败
+    /// —— 验收脚本就按这条 ASCII 锚点断言资源真的随发布包发出去了。</para>
+    /// </summary>
+    private static FrameworkElement BuildQqGroupBlock(bool dark)
+    {
+        const string groupNumber = "1098943919";
+        var path = Path.Combine(AppContext.BaseDirectory, "Assets", "qq-group.png");
+        AppLog.Line($"[about] qq-qr exists={File.Exists(path)} path={path}");
+
+        var qr = new Image
+        {
+            Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(path)) { DecodePixelWidth = 420 },
+            // 200 DIP：150% 缩放下就是 300 物理像素，手机隔二三十厘米扫得动（再小就得凑近屏幕）
+            Width = 200,
+            Height = 200,
+            Stretch = Stretch.Uniform,
+        };
+
+        var body = new StackPanel { Spacing = 8 };
+        body.Children.Add(new Border
+        {
+            // 白底 + 内边距：二维码本身是黑模块白底，垫一层白让它在深浅两种主题下都有足够静区
+            Background = new SolidColorBrush(Microsoft.UI.Colors.White),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(8),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Child = qr,
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = $"群号 {groupNumber}",
+            FontSize = 14,
+            IsTextSelectionEnabled = true,
+        });
+        // 群号是**兜底**不是装饰：扫码失败（老手机 / 截图糊了 / 屏幕反光）时还能直接搜群号
+        body.Children.Add(new TextBlock
+        {
+            Text = "用手机 QQ「扫一扫」加入；扫不动就直接在 QQ 里搜上面的群号",
+            FontSize = 12,
+            Opacity = 0.62,
+            TextWrapping = TextWrapping.Wrap,
+        });
+
+        return SettingsView.Block(
+            IconGlyph.People,
+            "QQ 群",
+            "遇到问题、想提需求或只是想聊聊：扫码入群（群里也会发新版本通知）",
+            body,
+            dark);
     }
 
     /// <summary>
