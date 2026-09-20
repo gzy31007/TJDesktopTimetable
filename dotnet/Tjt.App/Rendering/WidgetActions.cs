@@ -32,6 +32,12 @@ public sealed record WidgetActions
     /// <summary>切换"显示周末"。</summary>
     public Action? ToggleShowWeekend { get; init; }
 
+    /// <summary>当前周次视图（<c>null</c> = 不显示这一项）。</summary>
+    public Tjt.Core.WeekView? WeekView { get; init; }
+
+    /// <summary>切到某个周次视图（四项互斥，选中项由 <see cref="WeekView"/> 表达）。</summary>
+    public Action<Tjt.Core.WeekView>? SetWeekView { get; init; }
+
     /// <summary>隐藏挂件（本次运行内；下次启动照常显示）。</summary>
     public Action? Hide { get; init; }
 

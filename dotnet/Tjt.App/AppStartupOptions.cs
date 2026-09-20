@@ -16,6 +16,15 @@ namespace Tjt.App;
 /// 覆盖窗口材质（<c>--material mica|mica-alt|acrylic|acrylic-thin|solid</c>），只影响本次运行、不落盘。
 /// 为的是能用截图逐个材质对比（设置页也能切，但脚本点不到下拉）。
 /// </param>
+/// <param name="Today">
+/// 覆盖"今日"（<c>--today YYYY-MM-DD</c>）：<b>唯一真源</b>，连带决定今日高亮 / 当前教学周 / 今日节数；
+/// <c>null</c> = 系统日期。凡断言观感的验收与冒烟都必须显式带上它，否则基准会随日历漂
+/// （一周后周期性假 FAIL）。
+/// </param>
+/// <param name="WeekView">
+/// 覆盖周次视图（<c>--week-view all|current|odd|even</c>），只影响本次运行、不落盘；
+/// <c>null</c> = 用设置里的值（默认只看本周）。
+/// </param>
 /// <param name="NoBackdrop">跳过系统材质（无 GPU 的 CI runner 上 D3D 合成会挂住）。</param>
 /// <param name="LogPath">日志文件路径（WinExe 不附加控制台，CI 只能靠文件拿输出）。</param>
 /// <param name="FixturePath">显式指定要导入的课表 JSON；为空时按约定位置探测。</param>
@@ -71,6 +80,8 @@ internal sealed record AppStartupOptions(
     bool? DesktopLayer = null,
     bool? Weekend = null,
     int? NowMinutes = null,
+    string? Today = null,
+    Tjt.Core.WeekView? WeekView = null,
     Data.MaterialMode? Material = null,
     bool NoBackdrop = false,
     string? LogPath = null,
@@ -94,6 +105,7 @@ internal sealed record AppStartupOptions(
     /// 解析命令行。
     ///
     /// 支持的形态：<c>--smoke</c>、<c>--desktop-layer</c> / <c>--no-desktop-layer</c>、<c>--weekend</c> / <c>--no-weekend</c>、<c>--no-backdrop</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
+    /// <c>--today YYYY-MM-DD</c>（覆盖"今日"，见 <c>Today</c>）、<c>--week-view all|current|odd|even</c>、
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>（不传就用窗口系统给的默认尺寸，传了就精确设成它，
     /// 便于验证自适应）、<c>--now HH:mm</c>（覆盖"当前时刻"，只为验证时间线，见 <c>NowMinutes</c>）、
     /// <c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>、
@@ -107,6 +119,8 @@ internal sealed record AppStartupOptions(
         bool? desktopLayer = null;
         bool? weekend = null;
         int? nowMinutes = null;
+        string? today = null;
+        Tjt.Core.WeekView? weekView = null;
         Data.MaterialMode? material = null;
         var noBackdrop = false;
         string? logPath = null;
@@ -135,6 +149,16 @@ internal sealed record AppStartupOptions(
             else if (Matches(arg, "weekend")) weekend = true;
             else if (Matches(arg, "no-weekend")) weekend = false;
             else if (Matches(arg, "no-backdrop")) noBackdrop = true;
+            else if (Matches(arg, "today") && i + 1 < args.Length && LooksLikeDate(args[i + 1]))
+            {
+                today = args[i + 1];
+                i += 1;
+            }
+            else if (Matches(arg, "week-view") && i + 1 < args.Length && ParseWeekView(args[i + 1]) is { } parsedView)
+            {
+                weekView = parsedView;
+                i += 1;
+            }
             else if (Matches(arg, "log") && i + 1 < args.Length) logPath = args[++i];
             else if (Matches(arg, "dark")) dark = true;
             else if (Matches(arg, "light")) dark = false;
@@ -181,6 +205,8 @@ internal sealed record AppStartupOptions(
             DesktopLayer: desktopLayer,
             Weekend: weekend,
             NowMinutes: nowMinutes,
+            Today: today,
+            WeekView: weekView,
             Material: material,
             NoBackdrop: noBackdrop,
             LogPath: logPath,
@@ -214,6 +240,29 @@ internal sealed record AppStartupOptions(
         "tongji" or "tj" => LoginSchool.Tongji,
         _ => null,
     };
+
+    /// <summary>
+    /// 周次视图名 → 枚举（认 <c>all</c> / <c>current</c> / <c>odd</c> / <c>even</c>，忽略大小写；
+    /// 不认识返回 <c>null</c>，让调用方按默认处理）。
+    /// </summary>
+    private static Tjt.Core.WeekView? ParseWeekView(string text) => text.ToLowerInvariant() switch
+    {
+        "all" => Tjt.Core.WeekView.All,
+        "current" or "this" or "this-week" => Tjt.Core.WeekView.Current,
+        "odd" => Tjt.Core.WeekView.Odd,
+        "even" => Tjt.Core.WeekView.Even,
+        _ => null,
+    };
+
+    /// <summary>
+    /// <c>--today</c> 的取值校验：只收 <c>YYYY-MM-DD</c> 形状（不合法一律当没给，
+    /// 免得把后面的开关名当成日期吞掉）。
+    /// </summary>
+    private static bool LooksLikeDate(string text) =>
+        text.Length == 10 && text[4] == '-' && text[7] == '-'
+        && int.TryParse(text.AsSpan(0, 4), out _)
+        && int.TryParse(text.AsSpan(5, 2), out _)
+        && int.TryParse(text.AsSpan(8, 2), out _);
 
     /// <summary>材质名 → 枚举（认 <c>acrylic-thin</c> / <c>acrylicthin</c> / <c>thin</c> 三种写法；不认识返回 null）。</summary>
     private static Data.MaterialMode? ParseMaterial(string text) => text.ToLowerInvariant() switch

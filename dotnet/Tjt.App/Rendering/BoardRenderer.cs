@@ -243,7 +243,8 @@ internal static class BoardRenderer
     /// <c>⋯</c> 溢出菜单：设置 / 恢复默认位置 / 贴桌面层开关 / 显示周末开关 / 隐藏挂件 / 退出。
     ///
     /// 菜单里的两个**开关**（"贴桌面层"、"显示周末"）用 <see cref="ToggleMenuFlyoutItem"/> 反映当前值 ——
-    /// 它们是唯一能用勾选状态表达"当前是否生效"的项，其余都是动作。
+    /// 它们是唯一能用勾选状态表达"当前是否生效"的项，其余都是动作。周次视图是**四选一**，
+    /// 所以单独用「周次视图」子菜单 + <see cref="RadioMenuFlyoutItem"/>。
     /// </summary>
     private static Button BuildOverflowButton(bool dark, WidgetActions actions)
     {
@@ -290,6 +291,25 @@ internal static class BoardRenderer
             };
             toggle.Click += (_, _) => actions.ToggleShowWeekend();
             flyout.Items.Add(toggle);
+        }
+
+        // 「周次视图」四项互斥：用 RadioMenuFlyoutItem 让系统画选中态（ToggleMenuFlyoutItem 表达不了"四选一"）
+        if (actions.WeekView is { } view && actions.SetWeekView is not null)
+        {
+            var submenu = new MenuFlyoutSubItem { Text = WeekViewLabels.Title };
+            foreach (var (item, label) in WeekViewLabels.Ordered)
+            {
+                var radio = new RadioMenuFlyoutItem
+                {
+                    Text = label,
+                    GroupName = "week-view",
+                    IsChecked = view == item,
+                };
+                radio.Click += (_, _) => actions.SetWeekView(item);
+                submenu.Items.Add(radio);
+            }
+
+            flyout.Items.Add(submenu);
         }
 
         var hide = new MenuFlyoutItem { Text = "隐藏挂件", Icon = new FontIcon { Glyph = IconGlyph.Hide } };

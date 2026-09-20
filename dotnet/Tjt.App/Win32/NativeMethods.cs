@@ -383,9 +383,13 @@ internal static partial class NativeMethods
     [DllImport("user32.dll")]
     internal static extern nint CreatePopupMenu();
 
-    /// <summary>追加菜单项。</summary>
+    /// <summary>
+    /// 追加菜单项。第三个参数原生类型是 <c>UINT_PTR</c>：普通项放命令 id，
+    /// <c>MF_POPUP</c> 时放**子菜单句柄** —— 句柄在 x64 上可能超过 32 位，所以必须声明成
+    /// <see cref="nint"/>（写成 <c>uint</c> 会截断句柄，子菜单整个失效）。
+    /// </summary>
     [DllImport("user32.dll", EntryPoint = "AppendMenuW", CharSet = CharSet.Unicode)]
-    internal static extern bool AppendMenu(nint menu, uint flags, uint id, string? text);
+    internal static extern bool AppendMenu(nint menu, uint flags, nint id, string? text);
 
     /// <summary>弹出菜单（<c>TPM_RETURNCMD</c> 时返回选中的命令 id）。</summary>
     [DllImport("user32.dll")]

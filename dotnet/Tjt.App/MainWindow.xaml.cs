@@ -42,6 +42,9 @@ public sealed partial class MainWindow : Window
     private LoadedTimetable? _loaded;
     private AppStartupOptions _options = new();
 
+    /// <summary>最近一次布局算出的当前教学周（<c>null</c> = 假期 / 开学日未知）；冒烟自检复算可见时段数要用。</summary>
+    private int? _currentWeek;
+
     /// <summary>
     /// 命令行是否给了 <c>--size WxH</c>。这类实例是**诊断用**的：尺寸照参数走，
     /// 且**不写用户设置**（见 <see cref="SaveBounds"/> 开头的守卫）——否则跑一次截图脚本
@@ -378,7 +381,15 @@ public sealed partial class MainWindow : Window
         var board = Tjt.Core.Layout.BuildBoard(
             _loaded.Timetable.Courses,
             _loaded.Timetable.Term,
-            new Tjt.Core.BoardOptions { TrimEmptySlots = true, ShowWeekend = WeekendEnabled });
+            new Tjt.Core.BoardOptions
+            {
+                TrimEmptySlots = true,
+                ShowWeekend = WeekendEnabled,
+                // `--today` 是"今日"的唯一真源（今日高亮 / 当前周 / 今日节数 / 视图过滤全看它）；
+                // 不传就走系统日期（北京时区），由核心库兜底
+                Today = _options.Today,
+                WeekView = WeekViewEnabled,
+            });
         var visual = BoardVisualBuilder.Build(
             board,
             widthDip,
@@ -387,6 +398,8 @@ public sealed partial class MainWindow : Window
             _options.NowMinutes ?? Tjt.Core.Time.LocalMinutesOfDay(),
             minCellWidth: 72,
             availableHeight: heightDip);
+
+        _currentWeek = board.CurrentWeek;
 
         var root = BoardRenderer.Render(visual, IsDark(), BuildActions());
         Host.Children.Clear();
@@ -405,7 +418,22 @@ public sealed partial class MainWindow : Window
             visual.NeedsHorizontalScroll || visual.NeedsVerticalScroll);
 
         AppLog.Line($"[relayout] {reason} client={widthDip:0}x{heightDip:0}dip colW={visual.Geometry.CellWidth:0} rowH={visual.Geometry.RowHeight:0.#} scroll={visual.NeedsHorizontalScroll}/{visual.NeedsVerticalScroll} blocks={visual.Blocks.Count}");
+
+        // 周次视图的 ASCII 锚点（验收脚本靠它断言视图 / 日期 / 当前周 / 今日节数；不得出现中文）
+        AppLog.Line(
+            $"[weekview] view={WeekViewName(WeekViewEnabled)} today={board.Today} "
+            + $"week={(board.CurrentWeek?.ToString() ?? "holiday")} todaySessions={board.TodaySessionCount} "
+            + $"hidden={board.HiddenSessions} menu={Tjt.Widget.WeekViewLabels.Ordered.Length}");
     }
+
+    /// <summary>周次视图的日志名（纯 ASCII：验收脚本要按它匹配）。</summary>
+    internal static string WeekViewName(Tjt.Core.WeekView view) => view switch
+    {
+        Tjt.Core.WeekView.All => "all",
+        Tjt.Core.WeekView.Odd => "odd",
+        Tjt.Core.WeekView.Even => "even",
+        _ => "current",
+    };
 
     /// <summary>窗口尺寸变化 → 重排（带一点去抖，拖动缩放时不必每帧都重建）。</summary>
     private void OnSizeChanged(object sender, WindowSizeChangedEventArgs args) => Render("窗口尺寸变化");
@@ -645,6 +673,18 @@ public sealed partial class MainWindow : Window
             var next = _settings with { ShowWeekend = !WeekendEnabled };
             ApplySettings(next);
         },
+        WeekView = WeekViewEnabled,
+        SetWeekView = view =>
+        {
+            if (_options.WeekView is not null)
+            {
+                // CLI 覆盖只影响本次运行：与 --weekend / --desktop-layer 同口径，别把诊断口径写进用户设置
+                AppLog.Line("[menu] 周次视图被 CLI 覆盖，忽略切换");
+                return;
+            }
+
+            ApplySettings(_settings with { WeekView = view });
+        },
         ReportResizeGrip = grip => _edgeResize?.NotePressedGrip(grip),
         Hide = HideWidget,
         Exit = () => Application.Current.Exit(),
@@ -716,6 +756,13 @@ public sealed partial class MainWindow : Window
             // 列数变了（7 ↔ 5），必须整棵树重排 —— 网格几何 / 色块坐标 / 滚动判定全都跟着变
             AppLog.Line($"[settings] 显示周末 → {next.ShowWeekend}");
             Render("显示周末变化");
+        }
+
+        if (previous.WeekView != next.WeekView)
+        {
+            // 周次视图变了同样要整树重排：被丢掉的课会改变并排块数、行范围、行高（接受每周跳变）
+            AppLog.Line($"[settings] 周次视图 → {next.WeekView}");
+            Render("周次视图变化");
         }
 
         if (previous.LaunchAtLogin != next.LaunchAtLogin)
@@ -822,6 +869,30 @@ public sealed partial class MainWindow : Window
     /// 供验收脚本在不碰用户设置的前提下跑另一种布局。</para>
     /// </summary>
     internal bool WeekendEnabled => _options.Weekend ?? _settings.ShowWeekend;
+
+    /// <summary>
+    /// 当前的周次视图（<c>⋯</c> 菜单 / 设置页 / 托盘三处读它，<c>--week-view</c> 覆盖后的**有效值**）。
+    ///
+    /// <para>默认由 <see cref="WidgetSettings.WeekView"/> 给出 = <c>Current</c>（只看本周）；
+    /// CLI 覆盖只影响本次运行、不落盘（与 <c>WeekendEnabled</c> 同款）。</para>
+    /// </summary>
+    internal Tjt.Core.WeekView WeekViewEnabled => _options.WeekView ?? _settings.WeekView;
+
+    /// <summary>
+    /// "今日"的覆盖值（<c>--today</c>）；<c>null</c> = 系统日期。
+    ///
+    /// <para>冒烟自检要用它复算"当前周 + 可见时段数"，所以外壳必须暴露它（与 <see cref="WeekViewEnabled"/> 同理）。</para>
+    /// </summary>
+    internal string? TodayOverride => _options.Today;
+
+    /// <summary>
+    /// 最近一次布局算出的当前教学周（<c>null</c> = 假期 / 开学日未知）。
+    ///
+    /// <para>冒烟自检要用它复算"周次视图过滤后应该有几块"—— 判定逻辑必须与
+    /// <see cref="Tjt.Core.Layout.BuildBoard"/> 同源，所以由外壳把布局算出来的值带出来，
+    /// 而不是在自检里重算一遍日历。</para>
+    /// </summary>
+    internal int? CurrentWeek => _currentWeek;
 
     /// <summary>层级状态快照（冒烟自检 / 真机日志用）。</summary>
     internal LayerState? LayerSnapshot() => _layer?.Snapshot();

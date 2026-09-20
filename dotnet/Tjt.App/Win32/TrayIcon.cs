@@ -2,11 +2,22 @@ using System.Runtime.InteropServices;
 
 namespace Tjt.App.Win32;
 
-/// <summary>托盘菜单项（<c>null</c> id 表示分隔线）。</summary>
+/// <summary>
+/// 托盘菜单项（<c>null</c> id 表示分隔线）。
+///
+/// <para><see cref="Children"/> 非空即"子菜单"（原生 <c>MF_POPUP</c>）—— 周次视图那四项用它挂成一层，
+/// 免得四项平铺在托盘菜单里把别的项挤下去。子菜单内的勾选同样是普通勾 <c>MF_CHECKED</c>：
+/// <c>MFT_RADIOCHECK</c> 在没有位图时不画圆点（实测过，别试）。</para>
+/// </summary>
 /// <param name="Id">命令 id。</param>
 /// <param name="Text">显示文案。</param>
 /// <param name="Checked">是否显示勾选（用于"贴桌面层"这类开关项）。</param>
-internal sealed record TrayMenuItem(uint? Id, string Text, bool Checked = false);
+/// <param name="Children">子菜单项；<c>null</c> = 普通项。</param>
+internal sealed record TrayMenuItem(
+    uint? Id,
+    string Text,
+    bool Checked = false,
+    IReadOnlyList<TrayMenuItem>? Children = null);
 
 /// <summary>
 /// 托盘图标（<c>Shell_NotifyIcon</c> + 原生右键菜单）。
@@ -37,6 +48,7 @@ internal sealed class TrayIcon : IDisposable
     private const uint WmContextMenu = 0x007B;
     private const uint MfString = 0x0000;
     private const uint MfChecked = 0x0008;
+    private const uint MfPopup = 0x0010;
     private const uint MfSeparator = 0x0800;
     private const uint TpmRightButton = 0x0002;
     private const uint TpmReturnCmd = 0x0100;
@@ -262,6 +274,26 @@ internal sealed class TrayIcon : IDisposable
         {
             foreach (var item in items)
             {
+                if (item.Children is { Count: > 0 } children)
+                {
+                    var submenu = NativeMethods.CreatePopupMenu();
+                    if (submenu == nint.Zero)
+                    {
+                        AppLog.Error("[tray] 创建子菜单失败，跳过该项");
+                        continue;
+                    }
+
+                    foreach (var child in children)
+                    {
+                        if (child.Id is not { } childId) continue;
+                        var childFlags = MfString | (child.Checked ? MfChecked : 0);
+                        NativeMethods.AppendMenu(submenu, childFlags, (nint)childId, child.Text);
+                    }
+
+                    NativeMethods.AppendMenu(menu, MfPopup | MfString, submenu, item.Text);
+                    continue;
+                }
+
                 if (item.Id is not { } id)
                 {
                     NativeMethods.AppendMenu(menu, MfSeparator, 0, null);
@@ -269,7 +301,7 @@ internal sealed class TrayIcon : IDisposable
                 }
 
                 var flags = MfString | (item.Checked ? MfChecked : 0);
-                NativeMethods.AppendMenu(menu, flags, id, item.Text);
+                NativeMethods.AppendMenu(menu, flags, (nint)id, item.Text);
             }
 
             NativeMethods.GetCursorPos(out var point);
@@ -281,6 +313,7 @@ internal sealed class TrayIcon : IDisposable
         }
         finally
         {
+            // 只销毁顶层：挂上去的子菜单随父菜单一起销毁，再单独 DestroyMenu 一次就是 use-after-free
             NativeMethods.DestroyMenu(menu);
         }
     }

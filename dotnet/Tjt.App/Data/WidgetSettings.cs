@@ -1,3 +1,4 @@
+using Tjt.Core;
 using Tjt.Widget;
 
 namespace Tjt.App.Data;
@@ -104,6 +105,19 @@ internal sealed record WidgetSettings
 
     /// <summary>是否跳过系统材质（排查材质问题用）。</summary>
     public bool NoBackdrop { get; init; }
+
+    /// <summary>
+    /// 周次视图（全部 / 本周 / 单周 / 双周）。
+    ///
+    /// <para><b>默认 <see cref="Tjt.Core.WeekView.Current"/>（只看本周）</b> —— 这是产品决策，写错成 All 等于功能白做。
+    /// 当前教学周不存在时（开学前 / 学期结束后 / 开学日未知）静默退回显示全部周次，挂件绝不空
+    /// （见 <c>docs/adr/0001-默认周次视图为本周.md</c>）。</para>
+    ///
+    /// <para>落盘是**字符串**（<c>"weekView": "current"</c>）：转换器挂在 <see cref="Tjt.Core.WeekView"/>
+    /// 类型上，不动全局 <c>JsonSerializerOptions</c>，因此 <see cref="ThemeMode"/> /
+    /// <see cref="MaterialMode"/> 仍是既有数字格式；未知取值 → 整份设置回落默认。</para>
+    /// </summary>
+    public WeekView WeekView { get; init; } = WeekView.Current;
 
     /// <summary>主题模式。</summary>
     public ThemeMode Theme { get; init; } = ThemeMode.Auto;

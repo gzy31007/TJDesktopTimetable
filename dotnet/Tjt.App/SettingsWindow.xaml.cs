@@ -428,7 +428,36 @@ public sealed partial class SettingsWindow : Window
             weekend,
             dark));
 
+        // 周次视图：四项下拉（说明文字是**静态**的，兜底口径要能从界面上读懂 —— ADR 0001）
+        var weekView = SettingsView.Combo(
+            [.. Tjt.Widget.WeekViewLabels.Ordered.Select(item => item.Label)],
+            SelectedWeekView());
+        weekView.SelectionChanged += (_, _) =>
+        {
+            if (_loading) return;
+            var index = weekView.SelectedIndex;
+            if (index < 0 || index >= Tjt.Widget.WeekViewLabels.Ordered.Length) return;
+            Apply(_current with { WeekView = Tjt.Widget.WeekViewLabels.Ordered[index].View });
+        };
+        rows.Add(SettingsView.Row(
+            "\uE787", // Segoe Fluent Icons：Calendar
+            Tjt.Widget.WeekViewLabels.Title,
+            Tjt.Widget.WeekViewLabels.Description,
+            weekView,
+            dark));
+
         return Page("外观", rows, dark);
+    }
+
+    /// <summary>下拉框的选中下标（按 <see cref="Tjt.Widget.WeekViewLabels.Ordered"/> 的顺序；认不出来退回 0 = 全部周次）。</summary>
+    private int SelectedWeekView()
+    {
+        for (var i = 0; i < Tjt.Widget.WeekViewLabels.Ordered.Length; i += 1)
+        {
+            if (Tjt.Widget.WeekViewLabels.Ordered[i].View == _current.WeekView) return i;
+        }
+
+        return 0;
     }
 
     private UIElement BuildAboutPage(bool dark)

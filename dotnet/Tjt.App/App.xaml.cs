@@ -39,6 +39,12 @@ public partial class App : Application
 
         /// <summary>「发现新版本 vX」——打开下载页（只有查到新版本时这一项才在菜单里）。</summary>
         OpenUpdate = 9,
+
+        /// <summary>周次视图四项（互斥；勾选状态表达"当前生效的是哪个"）。</summary>
+        WeekViewAll = 10,
+        WeekViewCurrent = 11,
+        WeekViewOdd = 12,
+        WeekViewEven = 13,
     }
 
     private readonly List<MainWindow> _windows = [];
@@ -727,6 +733,7 @@ public partial class App : Application
             new((uint)TrayCommand.ResetPosition, "恢复默认位置"),
             new((uint)TrayCommand.ToggleDesktopLayer, "贴桌面层", widget.LayerEnabled),
             new((uint)TrayCommand.ToggleWeekend, "显示周末", widget.WeekendEnabled),
+            WeekViewMenuItem(widget),
             new(null, string.Empty),
             new((uint)TrayCommand.Exit, "退出"),
         };
@@ -738,6 +745,30 @@ public partial class App : Application
         }
 
         return items;
+    }
+
+    /// <summary>
+    /// 托盘的「周次视图」子菜单：四项**普通勾**（<c>MF_CHECKED</c>），只有当前项打勾。
+    ///
+    /// <para>刻意**不用** <c>MFT_RADIOCHECK</c>：本实现不设菜单位图，没有位图时它不画圆点，
+    /// 观感与"没选中"完全一样（实测过）。</para>
+    /// </summary>
+    private static TrayMenuItem WeekViewMenuItem(MainWindow widget)
+    {
+        var children = new List<TrayMenuItem>();
+        foreach (var (view, label) in Tjt.Widget.WeekViewLabels.Ordered)
+        {
+            var id = view switch
+            {
+                WeekView.Odd => TrayCommand.WeekViewOdd,
+                WeekView.Even => TrayCommand.WeekViewEven,
+                WeekView.All => TrayCommand.WeekViewAll,
+                _ => TrayCommand.WeekViewCurrent,
+            };
+            children.Add(new TrayMenuItem((uint)id, label, widget.WeekViewEnabled == view));
+        }
+
+        return new TrayMenuItem(null, Tjt.Widget.WeekViewLabels.Title, Children: children);
     }
 
     private void OnTrayCommand(MainWindow widget, uint command)
@@ -767,6 +798,18 @@ public partial class App : Application
                 widget.BuildActions().ToggleShowWeekend?.Invoke();
                 _tray?.SetMenu(1, BuildTrayMenu(widget));
                 break;
+            case TrayCommand.WeekViewAll:
+                SetTrayWeekView(widget, WeekView.All);
+                break;
+            case TrayCommand.WeekViewCurrent:
+                SetTrayWeekView(widget, WeekView.Current);
+                break;
+            case TrayCommand.WeekViewOdd:
+                SetTrayWeekView(widget, WeekView.Odd);
+                break;
+            case TrayCommand.WeekViewEven:
+                SetTrayWeekView(widget, WeekView.Even);
+                break;
             case TrayCommand.OpenUpdate:
                 OpenUpdatePage(widget);
                 break;
@@ -774,6 +817,13 @@ public partial class App : Application
                 Exit();
                 break;
         }
+    }
+
+    /// <summary>托盘点了周次视图的某一项：切视图 + 立刻重建菜单（勾选状态要跟上）。</summary>
+    private void SetTrayWeekView(MainWindow widget, WeekView view)
+    {
+        widget.BuildActions().SetWeekView?.Invoke(view);
+        _tray?.SetMenu(1, BuildTrayMenu(widget));
     }
 
     /// <summary>自检看门狗：超时即打印最后阶段并硬退出（退出码非零）。</summary>
@@ -819,14 +869,21 @@ public partial class App : Application
 
             if (layout.Slots <= 0) problems.Add($"节次行数应大于 0，实际 {layout.Slots}");
 
-            // 色块数必须等于"可见时段的条数"（周次过滤后仍可见、且落在可见列上的那些）。
-            // 隐藏周末时周末的课**不占列**，布局层直接丢弃，预期值也要跟着过滤。
+            // 色块数必须等于"可见时段的条数"：周次视图过滤后仍可见、且落在可见列上的那些。
+            // 隐藏周末时周末的课**不占列**，布局层直接丢弃；周次视图（默认只看本周）还会丢掉别的周 —— 
+            // 两件事都要在这里跟着过滤，否则默认视图一上线冒烟就假 FAIL。
+            var mask = Tjt.Core.Weeks.ResolveFilter(window.WeekViewEnabled, window.CurrentWeek, loaded.Timetable.Term.TotalWeeks);
             var expected = loaded.Timetable.Courses
                 .SelectMany(course => course.Sessions)
-                .Count(session => weekend || !Tjt.Core.TimetableModel.IsWeekend(session.Day));
+                .Count(session =>
+                    session.Weeks != 0
+                    && (weekend || !Tjt.Core.TimetableModel.IsWeekend(session.Day))
+                    && (mask is null || (session.Weeks & mask.Value) != 0));
             if (layout.Blocks != expected)
             {
-                problems.Add($"色块数 {layout.Blocks} 与可见时段数 {expected} 不一致");
+                problems.Add(
+                    $"色块数 {layout.Blocks} 与可见时段数 {expected} 不一致"
+                    + $"（view={MainWindow.WeekViewName(window.WeekViewEnabled)} today={window.TodayOverride ?? "system"} week={window.CurrentWeek?.ToString() ?? "holiday"}）");
             }
         }
 
@@ -854,7 +911,13 @@ public partial class App : Application
 
         if (problems.Count == 0)
         {
-            AppLog.Line($"[smoke] ok blocks={layout!.Blocks} days={layout.Days} canvas={layout.CanvasWidth:0}x{layout.CanvasHeight:0} rowH={layout.RowHeight:0.#} scroll={layout.NeedsScroll} title={layout.Title}");
+            // view / today / week 是给验收脚本断言的 ASCII 锚点（周次视图的验收全靠它们；
+            // `--today` 必须由调用方显式给，否则这些数字会随日历漂）。
+            AppLog.Line(
+                $"[smoke] ok blocks={layout!.Blocks} days={layout.Days} canvas={layout.CanvasWidth:0}x{layout.CanvasHeight:0} "
+                + $"rowH={layout.RowHeight:0.#} scroll={layout.NeedsScroll} title={layout.Title} "
+                + $"view={MainWindow.WeekViewName(window.WeekViewEnabled)} today={window.TodayOverride ?? "system"} "
+                + $"week={window.CurrentWeek?.ToString() ?? "holiday"}");
             AppLog.Line(layer is null
                 ? "[smoke] layer 未启用"
                 : $"[smoke] layer enabled={layer.Enabled} owner=0x{layer.Owner:X} host=0x{layer.Host:X} disposition={window.LastDisposition} backdrop={window.BackdropMode}");
