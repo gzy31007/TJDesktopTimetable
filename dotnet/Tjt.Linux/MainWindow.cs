@@ -113,6 +113,12 @@ internal sealed class MainWindow : Window
 
     public bool WeekendEnabled => _options.Weekend ?? _settings.ShowWeekend;
 
+    /// <summary>
+    /// 当前周次视图（菜单的唯一入口；Linux 没有设置窗口与托盘，别在这边"补齐"三入口）。
+    /// <c>--week-view</c> 覆盖只影响本次运行、不落盘。
+    /// </summary>
+    public Tjt.Core.WeekView WeekViewEnabled => _options.WeekView ?? _settings.WeekView;
+
     public bool DesktopLayerEnabled => _options.DesktopLayer ?? _settings.DesktopLayer;
 
     /// <summary>重新按载入顺序读课表并重画（"重新载入"与导入应用共用这一个入口）。</summary>
@@ -180,6 +186,9 @@ internal sealed class MainWindow : Window
             // 行数 / 行高 / 纵向滚动判定都会与 Windows 分叉（黄金 fixture 最大 11 节所以之前没暴露）。
             TrimEmptySlots = true,
             ShowWeekend = WeekendEnabled,
+            // `--today` 与 Windows 线同口径：今日高亮 / 当前周 / 今日节数 / 视图过滤的唯一真源
+            Today = _options.Today,
+            WeekView = WeekViewEnabled,
             Now = DateTimeOffset.UtcNow,
         });
         var nowMinutes = Time.LocalMinutesOfDay(DateTimeOffset.UtcNow, TimetableModel.DefaultTzOffsetMinutes);
@@ -189,6 +198,9 @@ internal sealed class MainWindow : Window
         var signature = (visual.NowLineTop, visual.Header.WeekText, visual.Header.TodayText);
         if (clockOnly && signature == _lastClockSignature) return;
         _lastClockSignature = signature;
+
+        // 周次视图的 ASCII 锚点（与 Windows 线同名，便于两端对照；验收用）
+        AppLog.Line($"[weekview] view={WeekViewName(WeekViewEnabled)} today={_options.Today ?? "system"} week={(state.CurrentWeek?.ToString() ?? "holiday")} todaySessions={state.TodaySessionCount} hidden={state.HiddenSessions} menu={Tjt.Widget.WeekViewLabels.Ordered.Length}");
 
         var board = BoardRenderer.Render(visual, _dark, BuildActions());
         Content = new Border
@@ -210,9 +222,20 @@ internal sealed class MainWindow : Window
         ToggleDesktopLayer = ToggleDesktopLayer,
         ShowWeekend = WeekendEnabled,
         ToggleShowWeekend = ToggleWeekend,
+        WeekView = WeekViewEnabled,
+        SetWeekView = SetWeekView,
         Exit = Close,
         AttachDragArea = AttachDrag,
         BeginResize = BeginResizeFromZone,
+    };
+
+    /// <summary>周次视图的日志名（纯 ASCII）。</summary>
+    private static string WeekViewName(Tjt.Core.WeekView view) => view switch
+    {
+        Tjt.Core.WeekView.All => "all",
+        Tjt.Core.WeekView.Odd => "odd",
+        Tjt.Core.WeekView.Even => "even",
+        _ => "current",
     };
 
     private void AttachDrag(Control element)
@@ -239,6 +262,21 @@ internal sealed class MainWindow : Window
         _settings = _settings with { ShowWeekend = !WeekendEnabled };
         SettingsStore.Save(_settings);
         AppLog.Line($"[settings] 显示周末 → {WeekendEnabled}");
+        Render();
+    }
+
+    /// <summary>切到某个周次视图（四项互斥；CLI 覆盖时忽略，与 <see cref="ToggleWeekend"/> 同款）。</summary>
+    private void SetWeekView(Tjt.Core.WeekView view)
+    {
+        if (_options.WeekView is not null)
+        {
+            AppLog.Line("[menu] 周次视图被 CLI 覆盖，忽略切换");
+            return;
+        }
+
+        _settings = _settings with { WeekView = view };
+        SettingsStore.Save(_settings);
+        AppLog.Line($"[settings] 周次视图 → {view}");
         Render();
     }
 

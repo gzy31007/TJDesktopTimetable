@@ -207,9 +207,9 @@ internal static class BoardRenderer
     }
 
     /// <summary>
-    /// <c>⋯</c> 溢出菜单：导入课表 / 重新载入 / 恢复默认位置 / 贴桌面层开关 / 显示周末开关 / 退出。
-    /// 开关用 <see cref="MenuItem.ToggleType"/> 反映当前值（Linux 版没有设置窗口与托盘，
-    /// 这份菜单就是全部入口）。
+    /// <c>⋯</c> 溢出菜单：导入课表 / 重新载入 / 恢复默认位置 / 贴桌面层开关 / 显示周末开关 /
+    /// 周次视图（四选一子菜单）/ 退出。开关用 <see cref="MenuItem.ToggleType"/> 反映当前值
+    /// （Linux 版没有设置窗口与托盘，这份菜单就是全部入口）。
     /// </summary>
     private static Button BuildOverflowButton(bool dark, WidgetActions actions)
     {
@@ -252,6 +252,27 @@ internal static class BoardRenderer
             };
             toggle.Click += (_, _) => actions.ToggleShowWeekend();
             menu.Items.Add(toggle);
+        }
+
+        // 「周次视图」四项互斥：Avalonia 的 MenuItem 用 Radio 类型画选中态（与 Windows 的
+        // RadioMenuFlyoutItem 对应）；文案取自 Tjt.Widget 的共用表，两端逐字一致
+        if (actions.WeekView is { } view && actions.SetWeekView is not null)
+        {
+            var submenu = new MenuItem { Header = Tjt.Widget.WeekViewLabels.Title };
+            foreach (var (item, label) in Tjt.Widget.WeekViewLabels.Ordered)
+            {
+                var radio = new MenuItem
+                {
+                    Header = label,
+                    ToggleType = MenuItemToggleType.Radio,
+                    GroupName = "week-view",
+                    IsChecked = view == item,
+                };
+                radio.Click += (_, _) => actions.SetWeekView(item);
+                submenu.Items.Add(radio);
+            }
+
+            menu.Items.Add(submenu);
         }
 
         menu.Items.Add(new Separator());

@@ -1,3 +1,4 @@
+using Tjt.Core;
 using Tjt.Widget;
 
 namespace Tjt.Linux.Data;
@@ -37,6 +38,15 @@ internal sealed record WidgetSettings
 
     /// <summary>窗口位置与尺寸（DIP）；<c>null</c> = 首次启动，用默认右下角。</summary>
     public WindowBounds? Bounds { get; init; }
+
+    /// <summary>
+    /// 周次视图（全部 / 本周 / 单周 / 双周），默认 <see cref="Tjt.Core.WeekView.Current"/>。
+    ///
+    /// <para>与 Windows 版**同名同形同默认**，两端共读一份 <c>settings.json</c>；落盘是字符串
+    /// （<c>"weekView": "current"</c>，转换器挂在 <see cref="Tjt.Core.WeekView"/> 上）。
+    /// 当前周不存在（开学前 / 假期 / 开学日未知）时静默退回全部周次。</para>
+    /// </summary>
+    public WeekView WeekView { get; init; } = WeekView.Current;
 
     /// <summary>主题模式。</summary>
     public ThemeMode Theme { get; init; } = ThemeMode.Auto;

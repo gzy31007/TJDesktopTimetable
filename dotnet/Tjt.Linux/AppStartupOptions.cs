@@ -6,6 +6,8 @@ namespace Tjt.Linux;
 /// </summary>
 /// <param name="DesktopLayer">贴桌面层（X11 DESKTOP 类型 + keep-below）；<c>null</c> = 用设置里的值（默认 true）。</param>
 /// <param name="Weekend">显示周末两列；<c>null</c> = 用设置里的值。只影响本次运行、不落盘。</param>
+/// <param name="Today">覆盖"今日"（<c>--today YYYY-MM-DD</c>）：唯一真源，连带决定今日高亮 / 当前教学周 / 今日节数。</param>
+/// <param name="WeekView">覆盖周次视图（<c>--week-view all|current|odd|even</c>）；<c>null</c> = 用设置里的值（默认只看本周）。</param>
 /// <param name="LogPath">日志文件路径。</param>
 /// <param name="FixturePath">显式指定要导入的课表 JSON；为空时按约定位置探测。</param>
 /// <param name="Dark">强制深色主题；<c>null</c> 表示跟随系统。</param>
@@ -19,6 +21,8 @@ namespace Tjt.Linux;
 internal sealed record AppStartupOptions(
     bool? DesktopLayer = null,
     bool? Weekend = null,
+    string? Today = null,
+    Tjt.Core.WeekView? WeekView = null,
     string? LogPath = null,
     string? FixturePath = null,
     bool? Dark = null,
@@ -31,7 +35,8 @@ internal sealed record AppStartupOptions(
 {
     /// <summary>
     /// 解析命令行。支持的形态：<c>--desktop-layer</c> / <c>--no-desktop-layer</c>、
-    /// <c>--weekend</c> / <c>--no-weekend</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
+    /// <c>--weekend</c> / <c>--no-weekend</c>、<c>--today YYYY-MM-DD</c>、
+    /// <c>--week-view all|current|odd|even</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>、<c>--import &lt;path&gt;</c>、
     /// <c>--fetch-check &lt;path&gt;</c>、<c>--import-window</c>、<c>--no-import-window</c>。
     /// </summary>
@@ -39,6 +44,8 @@ internal sealed record AppStartupOptions(
     {
         bool? desktopLayer = null;
         bool? weekend = null;
+        string? today = null;
+        Tjt.Core.WeekView? weekView = null;
         string? logPath = null;
         var dark = (bool?)null;
         string? fixture = null;
@@ -57,6 +64,16 @@ internal sealed record AppStartupOptions(
             else if (Matches(arg, "weekend")) weekend = true;
             else if (Matches(arg, "no-weekend")) weekend = false;
             else if (Matches(arg, "log") && i + 1 < args.Length) logPath = args[++i];
+            else if (Matches(arg, "today") && i + 1 < args.Length && LooksLikeDate(args[i + 1]))
+            {
+                today = args[i + 1];
+                i += 1;
+            }
+            else if (Matches(arg, "week-view") && i + 1 < args.Length && ParseWeekView(args[i + 1]) is { } parsedView)
+            {
+                weekView = parsedView;
+                i += 1;
+            }
             else if (Matches(arg, "dark")) dark = true;
             else if (Matches(arg, "light")) dark = false;
             else if (Matches(arg, "fixture") && i + 1 < args.Length) fixture = args[++i];
@@ -75,6 +92,8 @@ internal sealed record AppStartupOptions(
         return new AppStartupOptions(
             DesktopLayer: desktopLayer,
             Weekend: weekend,
+            Today: today,
+            WeekView: weekView,
             LogPath: logPath,
             FixturePath: fixture,
             Dark: dark,
@@ -85,6 +104,23 @@ internal sealed record AppStartupOptions(
             OpenImportWindow: openImport,
             SuppressImportWindow: suppressImport);
     }
+
+    /// <summary>周次视图名 → 枚举（认 all / current / odd / even，忽略大小写；不认识返回 null）。</summary>
+    private static Tjt.Core.WeekView? ParseWeekView(string text) => text.ToLowerInvariant() switch
+    {
+        "all" => Tjt.Core.WeekView.All,
+        "current" or "this" or "this-week" => Tjt.Core.WeekView.Current,
+        "odd" => Tjt.Core.WeekView.Odd,
+        "even" => Tjt.Core.WeekView.Even,
+        _ => null,
+    };
+
+    /// <summary><c>--today</c> 的取值校验：只收 <c>YYYY-MM-DD</c> 形状（不合法当没给）。</summary>
+    private static bool LooksLikeDate(string text) =>
+        text.Length == 10 && text[4] == '-' && text[7] == '-'
+        && int.TryParse(text.AsSpan(0, 4), out _)
+        && int.TryParse(text.AsSpan(5, 2), out _)
+        && int.TryParse(text.AsSpan(8, 2), out _);
 
     /// <summary>支持 <c>--flag</c> / <c>-flag</c> / <c>/flag</c> 三种前缀。</summary>
     private static bool Matches(string arg, string name) =>
