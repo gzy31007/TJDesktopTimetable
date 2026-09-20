@@ -120,7 +120,9 @@ dotnet publish dotnet/Tjt.Linux/Tjt.Linux.csproj -c Release -r linux-x64 \
 ```
 
 常用开关：`--dark` / `--light`（主题）、`--size 880x600`、`--fixture <path>`、
-`--weekend` / `--no-weekend`、`--no-desktop-layer`、`--import <json>`（启动即导入落盘）、
+`--weekend` / `--no-weekend`、`--week-view all|current|odd|even`（只影响本次运行）、
+`--today YYYY-MM-DD`（覆盖"今日"：当前周 / 今日高亮 / 今日节数都看它）、
+`--no-desktop-layer`、`--import <json>`（启动即导入落盘）、
 `--fetch-check <请求文件>`（抓取自检，退出码表成败）、`--log <path>`。
 
 ### 桌面集成
@@ -220,7 +222,10 @@ install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
 - 研究生页的 `findSchoolTimetab2` 分支按前端源码实现，**未在真机实测**。
 - 内置学期表只覆盖已知学期（当前 `122` / `124`）：更远的学期导入后课表正常，但顶部不显示"现在第几周"。
 - Acrylic 需要透明窗口，观感可能弱于 Mica。
-- 设置里的**周次过滤（只看单周 / 双周）尚未实现**；「显示周末」已在 v1.1.0 支持（外观页 / 挂件 `⋯` 菜单 / 托盘）。
+- **周次视图**（全部 / 只看本周 / 只看单周 / 只看双周）默认**只看本周**；开学日未知、开学前或学期结束后
+  **静默退回显示全部周次**（顶部照旧显示「假期」）—— 挂件永远不会是空的。周次视图只决定画哪些课，
+  **不影响**冲突判定、今日高亮与「今日 N 节」（那个数字永远按当前教学周算）。入口三处同源：设置「外观」页 /
+  挂件 `⋯` 菜单 / 托盘（Linux 只有 `⋯` 菜单）。「显示周末」已在 v1.1.0 支持。
 - 仅 x64：Windows 10 2004+ / linux-x64（Linux 版限制见上文「已知限制」）。
 
 ## 开发
@@ -261,7 +266,8 @@ $PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\
       + **gh-proxy.org 镜像兜底**（版本查询与下载链接在国内可直连）
 - [x] **v1.4.2** · 查到新版本**弹系统通知**，点它直达设置「关于」页
 - [ ] 新学期自动取校历（不再依赖内置学期表）
-- [ ] 周次过滤（只看单周 / 双周）
+- [x] **周次视图**（本周 / 单周 / 双周；默认只看本周，假期静默退回全部周次；`--today` /
+      `--week-view` 诊断开关 + `.tools/verify-weekview.ps1`）
 - [ ] ICS / 图片导出
 - [ ] 多校适配器
 
