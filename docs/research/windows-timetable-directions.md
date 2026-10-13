@@ -23,7 +23,7 @@
 - 顶部刷新只调用本地重载，见 [MainWindow.xaml.cs:658](https://github.com/gzy31007/TJDesktopTimetable/blob/45b37dd8ff3677c92ea80b308fef0d046ab9e981/dotnet/Tjt.App/MainWindow.xaml.cs#L658)及 [MainWindow.xaml.cs:784–796](https://github.com/gzy31007/TJDesktopTimetable/blob/45b37dd8ff3677c92ea80b308fef0d046ab9e981/dotnet/Tjt.App/MainWindow.xaml.cs#L784-L796)。它重新读文件，不向教务请求最新课表。
 - 下一节算法已在核心层，但 Windows 显示层未调用；它扫描今日起 14 天，含正在上课的课。见 [Time.cs:192–227](https://github.com/gzy31007/TJDesktopTimetable/blob/45b37dd8ff3677c92ea80b308fef0d046ab9e981/dotnet/TjtCore/Time.cs#L192-L227)。末尾 `return inProgressFallback` 会返回今日已结束的候选，`inProgressFallback ??= item` 实际保留首个候选，不是注释写的最后一节。现有[测试:245–250](https://github.com/gzy31007/TJDesktopTimetable/blob/45b37dd8ff3677c92ea80b308fef0d046ab9e981/dotnet/TjtCore.Tests/TimeTests.cs#L245-L250)还明确断言负倒计时被描述成“即将开始”。接 UI 前必须审语义，不能直接宣布已有可靠倒计时。
 - 同济依赖内置学期校历快照，见 [TongjiTerms.cs:4–20](https://github.com/gzy31007/TJDesktopTimetable/blob/45b37dd8ff3677c92ea80b308fef0d046ab9e981/dotnet/TjtCore/TongjiTerms.cs#L4-L20)。已有文件导入路径，没有日期纠正 UI；交大导入取校历的现状不作为主动扩校理由。
-- 多屏与 DPI 基础已有。本轮未发现课程提醒、图片或 ICS 导出、独立紧凑模式、日期例外调课入口；已有版本更新通知不是课程提醒。调查 Windows 外壳、核心模型、菜单、导入及测试，不运行会落盘的诊断，不改变真实课表或设置。
+- 多屏与 DPI 基础已有，见[显示器范围校验 MainWindow.xaml.cs:547–569](https://github.com/gzy31007/TJDesktopTimetable/blob/45b37dd8ff3677c92ea80b308fef0d046ab9e981/dotnet/Tjt.App/MainWindow.xaml.cs#L547-L569)及[窗口 DPI 读取 MainWindow.xaml.cs:372–373](https://github.com/gzy31007/TJDesktopTimetable/blob/45b37dd8ff3677c92ea80b308fef0d046ab9e981/dotnet/Tjt.App/MainWindow.xaml.cs#L372-L373)。本轮未发现课程提醒、图片或 ICS 导出、独立紧凑模式、日期例外调课入口；已有版本更新通知不是课程提醒。调查 Windows 外壳、核心模型、菜单、导入及测试，不运行会落盘的诊断，不改变真实课表或设置。
 
 ## 下一节与倒计时
 
