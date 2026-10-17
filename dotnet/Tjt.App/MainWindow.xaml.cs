@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -27,8 +30,10 @@ namespace Tjt.App;
 /// </summary>
 public sealed partial class MainWindow : Window
 {
-    /// <summary>时间线刷新间隔：一分钟够用（节次最小粒度是 5 分钟）。</summary>
+    /// <summary>常规核对上限；开课边界与午夜会把下一次刷新提前。</summary>
     private static readonly TimeSpan NowRefreshInterval = TimeSpan.FromSeconds(30);
+
+    private static readonly TimeSpan ClockOffset = TimeSpan.FromMinutes(TimetableModel.DefaultTzOffsetMinutes);
 
     /// <summary>默认窗口尺寸（DIP）：够放 7 列 × 11 节且不用滚动。</summary>
     internal const int DefaultWidth = 1080;
@@ -38,6 +43,13 @@ public sealed partial class MainWindow : Window
     private const int ScreenMargin = 24;
 
     private readonly DispatcherTimer _nowTimer = new();
+    private readonly List<Action> _clockUnsubscribe = [];
+    private nint _resumeNotification;
+    private bool _clockPaused;
+    private bool _clockRefreshQueued;
+    private bool _tearingDown;
+    private DateTimeOffset? _diagnosticClockStart;
+    private long _diagnosticClockOrigin;
 
     private LoadedTimetable? _loaded;
     private AppStartupOptions _options = new();
@@ -75,8 +87,9 @@ public sealed partial class MainWindow : Window
         // 任务栏 / Alt-Tab 也读窗口图标（挂件自己没有标题栏，但这两个地方会用上）
         WindowIcon.Apply(this);
         SizeChanged += OnSizeChanged;
+        Closed += (_, _) => Teardown();
         _nowTimer.Interval = NowRefreshInterval;
-        _nowTimer.Tick += (_, _) => Render(reason: "时间线刷新");
+        _nowTimer.Tick += OnClockTick;
     }
 
     /// <summary>
@@ -279,6 +292,15 @@ public sealed partial class MainWindow : Window
 
         _options = startup;
         _loaded = loaded;
+        // 仅隔离的 fixture+size 验收进程可启用推进时钟；正常应用不读取此环境变量。
+        // 不增加用户设置、不修改系统钟，所有后续计算及真实 DispatcherTimer 仍走同一管线。
+        if (startup.FixturePath is not null && HasExplicitSize
+            && Environment.GetEnvironmentVariable("TJT_DIAGNOSTIC_CLOCK_START") is { } clockStart)
+        {
+            _diagnosticClockStart = DateTimeOffset.ParseExact(clockStart, "O", CultureInfo.InvariantCulture);
+            _diagnosticClockOrigin = Stopwatch.GetTimestamp();
+            AppLog.Line($"[diagnostic-clock] source=controlled start={_diagnosticClockStart:O}");
+        }
         // 冒烟自检**不读设置**：它应当验证"默认状态下的渲染与层级"，
         // 读到上次运行留下的窗口尺寸/位置会让自检结果随历史漂移（实测被污染过一次）。
         _settings = startup.Smoke ? new WidgetSettings() : SettingsStore.Load();
@@ -339,6 +361,9 @@ public sealed partial class MainWindow : Window
     /// <summary>真正显示窗口（冒烟测试不调用它，因此不会弹窗）。</summary>
     internal void ShowWidget()
     {
+        if (_tearingDown) return;
+        _clockPaused = false;
+        Render("window-show");
         Activate();
         AppLog.Line($"[window] visible handle=0x{WindowNative.GetWindowHandle(this):X}");
     }
@@ -346,7 +371,21 @@ public sealed partial class MainWindow : Window
     /// <summary>断开材质与事件（关闭前调用）。</summary>
     internal void Teardown()
     {
+        if (_tearingDown) return;
+        _tearingDown = true;
         _nowTimer.Stop();
+        _nowTimer.Tick -= OnClockTick;
+        SizeChanged -= OnSizeChanged;
+        if (_resumeNotification != nint.Zero)
+        {
+            var notification = _resumeNotification;
+            _resumeNotification = nint.Zero;
+            if (!NativeMethods.UnregisterSuspendResumeNotification(notification))
+                AppLog.Error($"[nextclass-power] unregister-failed error={Marshal.GetLastPInvokeError()}");
+            else AppLog.Line("[nextclass-power] unregistered");
+        }
+        foreach (var unsubscribe in _clockUnsubscribe) unsubscribe();
+        _clockUnsubscribe.Clear();
         if (_layer is not null)
         {
             SaveBounds("退出");
@@ -366,7 +405,17 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void Render(string reason)
     {
-        if (_loaded is null) return;
+        if (_loaded is null || _tearingDown) return;
+
+        // 一次渲染只采样一次墙钟；日期、严格未来比较与时间线共享同一有效时刻。
+        var renderStarted = Stopwatch.GetTimestamp();
+        var sampledNow = _diagnosticClockStart is { } clockStart
+            ? clockStart + Stopwatch.GetElapsedTime(_diagnosticClockOrigin, renderStarted)
+            : DateTimeOffset.UtcNow;
+        var effectiveNow = BoardClock.Resolve(sampledNow, _options.Today, _options.NowMinutes);
+        var localNow = effectiveNow.ToOffset(ClockOffset);
+        var today = localNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var nowMinutes = localNow.Hour * 60 + localNow.Minute;
 
         var handle = WindowNative.GetWindowHandle(this);
         var dpi = NativeMethods.GetDpiForWindow(handle);
@@ -385,26 +434,29 @@ public sealed partial class MainWindow : Window
             {
                 TrimEmptySlots = true,
                 ShowWeekend = WeekendEnabled,
-                // `--today` 是"今日"的唯一真源（今日高亮 / 当前周 / 今日节数 / 视图过滤全看它）；
-                // 不传就走系统日期（北京时区），由核心库兜底
-                Today = _options.Today,
+                Today = today,
+                Now = effectiveNow,
+                TzOffsetMinutes = TimetableModel.DefaultTzOffsetMinutes,
                 WeekView = WeekViewEnabled,
             });
         var visual = BoardVisualBuilder.Build(
             board,
             widthDip,
             IsDark(),
-            // `--now HH:mm` 覆盖"当前时刻"（只影响当前时间线）；不传就用系统时钟
-            _options.NowMinutes ?? Tjt.Core.Time.LocalMinutesOfDay(),
+            nowMinutes,
             minCellWidth: 72,
-            availableHeight: heightDip);
+            availableHeight: heightDip,
+            includeNextClassRow: true);
 
         _currentWeek = board.CurrentWeek;
 
-        var root = BoardRenderer.Render(visual, IsDark(), BuildActions());
-        Host.Children.Clear();
-        Host.Children.Add(root);
-        _root = root;
+        var root = BoardRenderer.Render(visual, IsDark(), BuildActions(), _root);
+        if (!ReferenceEquals(_root, root))
+        {
+            Host.Children.Clear();
+            Host.Children.Add(root);
+            _root = root;
+        }
 
         Layout = new WindowLayoutInfo(
             visual.CanvasWidth,
@@ -424,6 +476,57 @@ public sealed partial class MainWindow : Window
             $"[weekview] view={WeekViewName(WeekViewEnabled)} today={board.Today} "
             + $"week={(board.CurrentWeek?.ToString() ?? "holiday")} todaySessions={board.TodaySessionCount} "
             + $"hidden={board.HiddenSessions} menu={Tjt.Widget.WeekViewLabels.Ordered.Length}");
+
+        var next = board.NextClass;
+        var interval = ScheduleClock(sampledNow, effectiveNow, next.StartsAt, renderStarted);
+        var nextDate = next.StartsAt?.ToOffset(ClockOffset).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var dateRange = nextDate is null ? "none" : nextDate == today ? "today" : "later";
+        // 只记录时钟、状态与组条数，不输出真实课程名、教室或整组悬停。
+        AppLog.Line(FormattableString.Invariant(
+            $"[nextclass-clock] reason={reason} source={(_diagnosticClockStart is null ? "system" : "controlled")} sampled={sampledNow:O} now={effectiveNow:O} today={today} minute={nowMinutes} range={dateRange} status={next.Status} count={next.Sessions.Count} startsAt={next.StartsAt?.ToString("O", CultureInfo.InvariantCulture) ?? "none"} intervalMs={interval.TotalMilliseconds:0.###} paused={_clockPaused}"));
+    }
+
+    private void OnClockTick(object? sender, object args)
+    {
+        _nowTimer.Stop();
+        if (_tearingDown || _clockPaused) return;
+        Render("clock-tick");
+    }
+
+    /// <summary>按墙钟前进速度调度，不让一次渲染的耗时推迟开课边界。</summary>
+    private TimeSpan ScheduleClock(DateTimeOffset sampledNow, DateTimeOffset effectiveNow,
+        DateTimeOffset? startsAt, long renderStarted)
+    {
+        var delay = NowRefreshInterval;
+        // 午夜由真实墙钟推进触发；--today 固定日历，--now 固定时分，两者都不是可推进时钟。
+        var sampledLocal = sampledNow.ToOffset(ClockOffset);
+        var untilMidnight = new DateTimeOffset(sampledLocal.Date.AddDays(1), ClockOffset) - sampledNow;
+        if (untilMidnight < delay) delay = untilMidnight;
+        if (_options.NowMinutes is null && startsAt is { } boundary && boundary > effectiveNow)
+        {
+            var untilStart = boundary - effectiveNow;
+            if (untilStart < delay) delay = untilStart;
+        }
+
+        delay -= Stopwatch.GetElapsedTime(renderStarted);
+        // WinUI timer可稍早唤醒。下一帧重新核对并再次安排剩余边界，不能退回30秒。
+        if (delay < TimeSpan.FromMilliseconds(1)) delay = TimeSpan.FromMilliseconds(1);
+        _nowTimer.Stop();
+        _nowTimer.Interval = delay;
+        if (!_tearingDown && !_clockPaused) _nowTimer.Start();
+        return delay;
+    }
+
+    /// <summary>原生消息回调只排队；避免在 WndProc 内重建 XAML，关闭后的晚到回调不再触碰窗口。</summary>
+    private void QueueClockRefresh(string reason)
+    {
+        if (_tearingDown || _clockPaused || _clockRefreshQueued) return;
+        _clockRefreshQueued = true;
+        if (!DispatcherQueue.TryEnqueue(() =>
+        {
+            _clockRefreshQueued = false;
+            if (!_tearingDown && !_clockPaused) Render(reason);
+        })) _clockRefreshQueued = false;
     }
 
     /// <summary>周次视图的日志名（纯 ASCII：验收脚本要按它匹配）。</summary>
@@ -481,6 +584,30 @@ public sealed partial class MainWindow : Window
             // 窗口失活（用户点到别处）也是一次"位置可能变了"的信号，顺便持久化
             SaveBounds("失活");
         });
+
+        _clockUnsubscribe.Add(MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmPowerBroadcast, (powerEvent, _) =>
+        {
+            if (powerEvent == NativeMethods.Constants.PbtApmResumeAutomatic
+                || powerEvent == NativeMethods.Constants.PbtApmResumeSuspend
+                || powerEvent == NativeMethods.Constants.PbtApmResumeCritical)
+            {
+                AppLog.Line($"[nextclass-power] resume event=0x{powerEvent:X} utc={DateTimeOffset.UtcNow:O}");
+                QueueClockRefresh("power-resume");
+            }
+        }));
+        // 仅监听广播不足以覆盖 Modern Standby；必须先有消息钩子，再向系统显式注册。
+        _resumeNotification = NativeMethods.RegisterSuspendResumeNotification(
+            hwnd, NativeMethods.Constants.DeviceNotifyWindowHandle);
+        if (_resumeNotification == nint.Zero)
+            AppLog.Error($"[nextclass-power] register-failed error={Marshal.GetLastPInvokeError()}");
+        else AppLog.Line("[nextclass-power] registered");
+
+        _clockUnsubscribe.Add(MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmTimeChange,
+            () => QueueClockRefresh("system-time-change")));
+        _clockUnsubscribe.Add(MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmShowWindow, (shown, _) =>
+        {
+            if (shown != nint.Zero) QueueClockRefresh("window-show-message");
+        }));
     }
 
     /// <summary>
@@ -687,7 +814,7 @@ public sealed partial class MainWindow : Window
         },
         ReportResizeGrip = grip => _edgeResize?.NotePressedGrip(grip),
         Hide = HideWidget,
-        Exit = () => Application.Current.Exit(),
+        Exit = () => { Teardown(); Close(); Application.Current.Exit(); },
         AttachDragArea = AttachDragArea,
     };
 
@@ -835,6 +962,8 @@ public sealed partial class MainWindow : Window
     /// </summary>
     internal void HideWidget()
     {
+        if (_tearingDown) return;
+        _clockPaused = true;
         _nowTimer.Stop();
         _layer?.Pause();
         AppWindow.Hide();
@@ -844,8 +973,10 @@ public sealed partial class MainWindow : Window
     /// <summary>从隐藏状态恢复显示。</summary>
     internal void ShowWidgetAgain()
     {
+        if (_tearingDown) return;
+        _clockPaused = false;
+        Render("show-again");
         Resting.EnsureVisible(WindowNative.GetWindowHandle(this));
-        _nowTimer.Start();
         _layer?.Resume("托盘显示");
         Activate();
         AppLog.Line("[window] 从托盘恢复显示");

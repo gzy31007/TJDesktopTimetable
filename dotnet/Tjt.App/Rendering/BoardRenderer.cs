@@ -34,18 +34,31 @@ internal static class BoardRenderer
     /// </summary>
     /// <param name="visual">呈现模型。</param>
     /// <param name="dark">是否深色主题。</param>
-    public static FrameworkElement Render(BoardVisual visual, bool dark, WidgetActions? actions = null)
+    public static FrameworkElement Render(BoardVisual visual, bool dark, WidgetActions? actions = null,
+        FrameworkElement? previous = null)
     {
         ArgumentNullException.ThrowIfNull(visual);
         actions ??= new WidgetActions();
 
-        var root = new Grid();
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-
+        var shell = previous as BoardShell ?? new BoardShell();
+        var root = shell.Body;
         var header = BuildHeaderBar(visual.Header, dark, actions);
         Grid.SetRow(header, 0);
-        root.Children.Add(header);
+        if (root.Children.Count > 0) root.Children.RemoveAt(0);
+        root.Children.Insert(0, header);
+        // 时间推进仍重算整个呈现模型，但未变化的摘要不能卸载：用户可能正在浮层内读完整组。
+        if (shell.Summary is null || shell.Dark != dark || !SameSummary(shell.Summary, visual.NextClass))
+        {
+            if (root.Children.Count > 1) root.Children.RemoveAt(1);
+            var summary = BuildNextClassRow(visual.NextClass, dark);
+            Grid.SetRow(summary, 1);
+            root.Children.Insert(1, summary);
+        }
+        shell.Summary = visual.NextClass;
+        shell.Dark = dark;
+        var previousScroller = root.Children.Count > 2 ? root.Children[2] as ScrollViewer : null;
+        var oldHorizontalOffset = previousScroller?.HorizontalOffset ?? 0;
+        var oldVerticalOffset = previousScroller?.VerticalOffset ?? 0;
 
         var canvas = BuildCanvas(visual, dark);
         // 网格可能比可用空间大（列宽或行高到了下限）—— 用 ScrollViewer 兜住，
@@ -70,7 +83,14 @@ internal static class BoardRenderer
             VerticalScrollMode = ScrollMode.Auto,
             Padding = new Thickness(0),
         };
-        Grid.SetRow(scroller, 1);
+        Grid.SetRow(scroller, 2);
+        if (previousScroller is not null)
+        {
+            root.Children.Remove(previousScroller);
+            scroller.Loaded += (_, _) => scroller.ChangeView(
+                Math.Clamp(oldHorizontalOffset, 0, scroller.ScrollableWidth),
+                Math.Clamp(oldVerticalOffset, 0, scroller.ScrollableHeight), null, disableAnimation: true);
+        }
         root.Children.Add(scroller);
 
         // 边缘光标条放在**独立覆盖层**里，和整块课表同处一格（z 序在后 → 盖在上面）。
@@ -79,9 +99,7 @@ internal static class BoardRenderer
         // 用 WinUI 原生光标（`ProtectedCursor`）而不是 Win32 `SetCursor`：后者会被窗口过程
         // 在 WM_SETCURSOR 里按类光标重置（真机实测"能缩放但看不到缩放光标"）。
         // 只挂光标、不挂事件处理：拖拽判定仍在 Win32 侧（WindowEdgeResize）。
-        var shell = new Grid();
-        shell.Children.Add(root);
-
+        if (shell.Children.Count > 1) shell.Children.RemoveAt(1);
         var overlay = new Grid { IsHitTestVisible = true };
         var totalW = visual.CanvasWidth;
         var totalH = visual.CanvasHeight;
@@ -109,6 +127,114 @@ internal static class BoardRenderer
         return shell;
     }
 
+    private sealed class BoardShell : Grid
+    {
+        internal Grid Body { get; } = new();
+        internal NextClassVisual? Summary { get; set; }
+        internal bool Dark { get; set; }
+
+        internal BoardShell()
+        {
+            Body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(NextClassSummary.RowHeight) });
+            Body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            Children.Add(Body);
+        }
+    }
+
+    private static bool SameSummary(NextClassVisual first, NextClassVisual second) =>
+        first.Group.Status == second.Group.Status && first.Group.StartsAt == second.Group.StartsAt
+        && first.Group.LocalToday == second.Group.LocalToday && first.Tooltip == second.Tooltip
+        // 不能只比较拼接后的悬停字符串：名称／教室中的分隔符可能造成相同字符串、不同宽度优先级。
+        && first.Items.Count == second.Items.Count
+        && first.Items.Zip(second.Items).All(pair => pair.First.Name == pair.Second.Name
+            && pair.First.Room == pair.Second.Room);
+
+    private static FrameworkElement BuildNextClassRow(NextClassVisual initial, bool dark)
+    {
+        var text = new SolidColorBrush(Parse(TintPalette.Text(dark)));
+        var soft = new SolidColorBrush(Parse(TintPalette.TextSoft(dark)));
+        var host = new Grid
+        {
+            Height = NextClassSummary.RowHeight,
+            Background = new SolidColorBrush(Colors.Transparent),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(host, "NextClassSummary");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(host, initial.Tooltip);
+        // ToolTip 不接收滚动交互。用覆盖整个摘要的 hover owner 打开可移入的 Popup，
+        // 完整同刻组只在浮层里滚动；常驻行始终保持固定高度。
+        NextClassHoverPopup.Attach(host, initial.Tooltip, dark, text,
+            new SolidColorBrush(Parse(TintPalette.Stroke(dark))));
+        TextBlock Label(string value, double? width = null, bool secondary = false) => new()
+        {
+            Text = value, FontSize = NextClassSummary.FontSize,
+            Foreground = secondary ? soft : text,
+            Width = width ?? double.NaN,
+            TextWrapping = TextWrapping.NoWrap, MaxLines = 1,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        double Measure(string value)
+        {
+            var probe = Label(value);
+            probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, NextClassSummary.RowHeight));
+            return probe.DesiredSize.Width;
+        }
+        void Rebuild(double width)
+        {
+            var visual = NextClassSummary.Build(initial.Group, width, Measure);
+            var line = new Grid { Margin = new Thickness(10, 0, 10, 0) };
+            if (visual.Message is { } message)
+            {
+                line.Children.Add(Label(message, secondary: true));
+            }
+            else
+            {
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(NextClassSummary.MarkerWidth) });
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var marker = Label(visual.Marker!);
+                marker.Foreground = new SolidColorBrush(Parse(TintPalette.Accent(dark)));
+                marker.FontWeight = FontWeights.SemiBold;
+                line.Children.Add(marker);
+                var items = new StackPanel { Orientation = Orientation.Horizontal, Spacing = NextClassSummary.ItemGap };
+                foreach (var item in visual.Items)
+                {
+                    var pair = new StackPanel { Orientation = Orientation.Horizontal, Spacing = NextClassSummary.NameRoomGap };
+                    pair.Children.Add(Label(item.DisplayName, item.NameWidth));
+                    pair.Children.Add(Label(item.DisplayRoom, item.RoomWidth));
+                    items.Children.Add(pair);
+                }
+                var content = new Grid();
+                content.Children.Add(items);
+                content.SizeChanged += (_, e) => content.Clip = new RectangleGeometry
+                { Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
+                Grid.SetColumn(content, 1);
+                line.Children.Add(content);
+                if (visual.ShowAuxiliary)
+                {
+                    var auxiliary = Label($"{visual.DateText} {visual.StartText}", secondary: true);
+                    auxiliary.Margin = new Thickness(NextClassSummary.ItemGap, 0, 0, 0);
+                    Grid.SetColumn(auxiliary, 2);
+                    line.Children.Add(auxiliary);
+                }
+                if (visual.CountText is { } count)
+                {
+                    var quantity = Label(count, secondary: true);
+                    quantity.Margin = new Thickness(NextClassSummary.ItemGap, 0, 0, 0);
+                    Grid.SetColumn(quantity, 3);
+                    line.Children.Add(quantity);
+                }
+            }
+            host.Children.Clear();
+            host.Children.Add(line);
+            host.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, width, NextClassSummary.RowHeight) };
+        }
+        host.SizeChanged += (_, e) => { if (e.NewSize.Width > 0) Rebuild(e.NewSize.Width); };
+        return host;
+    }
+
     /// <summary>
     /// 顶部信息条 —— 布局照资源管理器卡片头：**左边图标 + 标题 + 元信息，右边一组动作按钮**。
     ///
@@ -128,41 +254,41 @@ internal static class BoardRenderer
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         // ── 左：应用图标（强调色圆角块 + 白色显示器字形，与托盘/任务栏图标同源）
-        var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        var left = new Grid { VerticalAlignment = VerticalAlignment.Center, ColumnSpacing = 8 };
+        left.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+        left.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        left.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        left.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         left.Children.Add(BuildAppGlyph(accent));
-        left.Children.Add(new TextBlock
+        var title = new TextBlock
         {
-            Text = header.Title,
-            FontSize = HeaderFontSize,
-            FontWeight = FontWeights.SemiBold,
+            Text = header.Title, FontSize = HeaderFontSize, FontWeight = FontWeights.SemiBold,
             Foreground = new SolidColorBrush(Parse(header.IsHoliday ? soft : text)),
-            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap,
             VerticalAlignment = VerticalAlignment.Center,
-        });
-        left.Children.Add(new TextBlock
+        };
+        ToolTipService.SetToolTip(title, header.Title);
+        Grid.SetColumn(title, 1);
+        left.Children.Add(title);
+        var week = new TextBlock
         {
-            Text = header.WeekText,
-            FontSize = HeaderFontSize - 1,
-            Foreground = new SolidColorBrush(Parse(soft)),
-            VerticalAlignment = VerticalAlignment.Center,
-        });
+            Text = header.WeekText, FontSize = HeaderFontSize - 1,
+            Foreground = new SolidColorBrush(Parse(soft)), VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(week, 2);
+        left.Children.Add(week);
         if (header.TodayText is { Length: > 0 } today)
         {
-            left.Children.Add(new TextBlock
+            var todayLabel = new TextBlock
             {
-                Text = "·",
-                FontSize = HeaderFontSize - 1,
-                Foreground = new SolidColorBrush(Parse(soft)),
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-            left.Children.Add(new TextBlock
-            {
-                Text = today,
-                FontSize = HeaderFontSize - 1,
-                Foreground = new SolidColorBrush(Parse(soft)),
-                VerticalAlignment = VerticalAlignment.Center,
-            });
+                Text = $"· {today}", FontSize = HeaderFontSize - 1,
+                Foreground = new SolidColorBrush(Parse(soft)), VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(todayLabel, 3);
+            left.Children.Add(todayLabel);
         }
+        left.SizeChanged += (_, e) => left.Clip = new RectangleGeometry
+        { Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
 
         Grid.SetColumn(left, 0);
         row.Children.Add(left);

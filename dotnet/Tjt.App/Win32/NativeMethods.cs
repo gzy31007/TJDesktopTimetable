@@ -109,6 +109,24 @@ internal static partial class NativeMethods
         /// <summary>系统设置变化（工作区 / 任务栏；<c>WM_SETTINGCHANGE</c>）。</summary>
         public const uint WmSettingChange = 0x001A;
 
+        /// <summary>电源状态广播（<c>WM_POWERBROADCAST</c>）。</summary>
+        public const uint WmPowerBroadcast = 0x0218;
+
+        /// <summary>把电源通知发送给窗口（<c>DEVICE_NOTIFY_WINDOW_HANDLE</c>）。</summary>
+        public const uint DeviceNotifyWindowHandle = 0;
+
+        /// <summary>自动从挂起恢复（<c>PBT_APMRESUMEAUTOMATIC</c>）。</summary>
+        public const nint PbtApmResumeAutomatic = 0x0012;
+
+        /// <summary>挂起后用户活动恢复（<c>PBT_APMRESUMESUSPEND</c>）。</summary>
+        public const nint PbtApmResumeSuspend = 0x0007;
+
+        /// <summary>关键恢复（<c>PBT_APMRESUMECRITICAL</c>）。</summary>
+        public const nint PbtApmResumeCritical = 0x0006;
+
+        /// <summary>系统墙钟被校正（<c>WM_TIMECHANGE</c>）。</summary>
+        public const uint WmTimeChange = 0x001E;
+
         /// <summary>窗口被隐藏（Win+D 会触发；<c>WM_SHOWWINDOW</c>）。</summary>
         public const uint WmShowWindow = 0x0018;
 
@@ -152,6 +170,15 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", EntryPoint = "SetWindowPos", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
+
+    /// <summary>显式订阅挂起/恢复；Modern Standby 不保证向未注册的窗口广播。</summary>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static partial nint RegisterSuspendResumeNotification(nint recipient, uint flags);
+
+    /// <summary>注销挂起/恢复通知，参数是注册句柄，不是窗口句柄。</summary>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool UnregisterSuspendResumeNotification(nint notification);
 
     /// <summary>取窗口 DPI（<c>GetDpiForWindow</c>），用于把 DIP 换算成物理像素。</summary>
     [LibraryImport("user32.dll")]

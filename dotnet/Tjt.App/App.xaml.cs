@@ -170,11 +170,17 @@ public partial class App : Application
             // 或用户手工删过那项，都会在这一步自动纠正）。
             // 只在交互模式做：自检 / 诊断路径（--smoke / --fetch-check / --login-check）都已提前 return，
             // 那些会反复启动的验收流程不该动真实系统状态（同"冒烟不写设置"的理由）。
-            AutoStart.Sync(window.CurrentSettings.LaunchAtLogin);
-
-            // 新版本检查：后台线程 + 延迟 12 秒（DeskBox 同款思路 —— 别跟启动抢资源），
-            // 失败静默、只记日志。走的是"交互模式"这条路径，所以自检 / 诊断都不会触发。
-            ScheduleUpdateCheck(window);
+            var isolatedDisplayCheck = options.FixturePath is not null
+                && options.Width is not null && options.Height is not null;
+            if (!isolatedDisplayCheck)
+            {
+                AutoStart.Sync(window.CurrentSettings.LaunchAtLogin);
+                ScheduleUpdateCheck(window);
+            }
+            else
+            {
+                AppLog.Line("[diagnostic] fixture+size: skipped autostart sync and update check");
+            }
 
             window.ShowWidget();
             _tray = BuildTray(window);
@@ -205,6 +211,8 @@ public partial class App : Application
         {
             AppLog.Error($"[fatal] {ex}");
             SmokePassed = false;
+            if (options.FixturePath is not null && options.Width is not null && options.Height is not null)
+                Environment.Exit(1);
         }
         finally
         {
@@ -814,6 +822,7 @@ public partial class App : Application
                 OpenUpdatePage(widget);
                 break;
             case TrayCommand.Exit:
+                QuitAll();
                 Exit();
                 break;
         }

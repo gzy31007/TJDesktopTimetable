@@ -8,18 +8,17 @@ namespace Tjt.App;
 /// 只影响本次运行、不落盘，供验收脚本跑"隐藏周末"那种布局。
 /// </param>
 /// <param name="NowMinutes">
-/// 覆盖"当前时刻"（<c>--now HH:mm</c>，如 <c>--now 12:30</c>），只影响**当前时间线**的位置；
-/// <c>null</c> = 用系统时钟。存在的理由：时间线的几何取决于真实时间，而课间 / 午休那些分支
-/// 不可能等到点上再去截图验证（见 <c>BoardVisualTests</c> 的同名用例）。
+/// 覆盖课表时区下的时分（<c>--now HH:mm</c>），秒和小数秒归零。
+/// 下一次上课摘要与原时间线共用合成后的有效时刻；不传时保留同次采样的完整时间。
 /// </param>
 /// <param name="Material">
 /// 覆盖窗口材质（<c>--material mica|mica-alt|acrylic|acrylic-thin|solid</c>），只影响本次运行、不落盘。
 /// 为的是能用截图逐个材质对比（设置页也能切，但脚本点不到下拉）。
 /// </param>
 /// <param name="Today">
-/// 覆盖"今日"（<c>--today YYYY-MM-DD</c>）：<b>唯一真源</b>，连带决定今日高亮 / 当前教学周 / 今日节数；
-/// <c>null</c> = 系统日期。凡断言观感的验收与冒烟都必须显式带上它，否则基准会随日历漂
-/// （一周后周期性假 FAIL）。
+/// 覆盖课表时区下的日历日，保留同次采样的时分秒；与 --now 同时给出时组合两者。
+/// 摘要、今日高亮、当前教学周与今日计数共用有效时刻的日历日。
+/// 静态观感验收固定日期和时分；动态刷新验收不冻结时间。
 /// </param>
 /// <param name="WeekView">
 /// 覆盖周次视图（<c>--week-view all|current|odd|even</c>），只影响本次运行、不落盘；
@@ -107,7 +106,7 @@ internal sealed record AppStartupOptions(
     /// 支持的形态：<c>--smoke</c>、<c>--desktop-layer</c> / <c>--no-desktop-layer</c>、<c>--weekend</c> / <c>--no-weekend</c>、<c>--no-backdrop</c>、<c>--log &lt;path&gt;</c>、<c>--dark</c> / <c>--light</c>、
     /// <c>--today YYYY-MM-DD</c>（覆盖"今日"，见 <c>Today</c>）、<c>--week-view all|current|odd|even</c>、
     /// <c>--fixture &lt;path&gt;</c>、<c>--size WxH</c>（不传就用窗口系统给的默认尺寸，传了就精确设成它，
-    /// 便于验证自适应）、<c>--now HH:mm</c>（覆盖"当前时刻"，只为验证时间线，见 <c>NowMinutes</c>）、
+    /// 便于验证自适应）、<c>--now HH:mm</c>（覆盖"当前时刻"，摘要与时间线共用有效时刻，见 <c>NowMinutes</c>）、
     /// <c>--import &lt;path&gt;</c>、<c>--fetch-check &lt;path&gt;</c>、<c>--settings-page &lt;n&gt;</c>、
     /// <c>--login</c>、<c>--login-school tongji|sjtu</c>、<c>--login-check &lt;url&gt;</c>、<c>--sjtu-host &lt;url&gt;</c>、
     /// <c>--update-check</c>、<c>--update-notify</c>、<c>--update-api &lt;url&gt;</c>、<c>--update-proxy &lt;url&gt;</c>。
@@ -255,14 +254,10 @@ internal sealed record AppStartupOptions(
     };
 
     /// <summary>
-    /// <c>--today</c> 的取值校验：只收 <c>YYYY-MM-DD</c> 形状（不合法一律当没给，
-    /// 免得把后面的开关名当成日期吞掉）。
+    /// <c>--today</c> 只接受真实日历日；不合法一律当没给，避免在首次 Render 解析失败。
     /// </summary>
-    private static bool LooksLikeDate(string text) =>
-        text.Length == 10 && text[4] == '-' && text[7] == '-'
-        && int.TryParse(text.AsSpan(0, 4), out _)
-        && int.TryParse(text.AsSpan(5, 2), out _)
-        && int.TryParse(text.AsSpan(8, 2), out _);
+    private static bool LooksLikeDate(string text) => DateOnly.TryParseExact(text, "yyyy-MM-dd",
+        System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _);
 
     /// <summary>材质名 → 枚举（认 <c>acrylic-thin</c> / <c>acrylicthin</c> / <c>thin</c> 三种写法；不认识返回 null）。</summary>
     private static Data.MaterialMode? ParseMaterial(string text) => text.ToLowerInvariant() switch

@@ -105,7 +105,11 @@ public sealed record BoardVisual(
     double CanvasWidth,
     double CanvasHeight,
     bool NeedsHorizontalScroll,
-    bool NeedsVerticalScroll);
+    bool NeedsVerticalScroll)
+{
+    public NextClassVisual NextClass { get; init; } = NextClassSummary.Build(
+        new NextClassGroup(NextClassStatus.InformationInsufficient, null, [], ""), 0);
+}
 
 /// <summary>把 <see cref="BoardState"/> 编译成 <see cref="BoardVisual"/>。</summary>
 public static class BoardVisualBuilder
@@ -150,11 +154,15 @@ public static class BoardVisualBuilder
         bool dark,
         int? nowMinutes = null,
         double minCellWidth = 72,
-        double? availableHeight = null)
+        double? availableHeight = null,
+        bool includeNextClassRow = false)
     {
         ArgumentNullException.ThrowIfNull(state);
 
-        var geometry = FitGeometry(availableWidth, state.Rows.Count, state.Days.Count, minCellWidth, availableHeight);
+        // Linux 外壳仍只渲染原顶栏；Windows 显式为独立摘要行预留高度。
+        var summaryHeight = includeNextClassRow ? NextClassSummary.RowHeight : 0;
+        var geometry = FitGeometry(availableWidth, state.Rows.Count, state.Days.Count, minCellWidth,
+            availableHeight - summaryHeight);
         var gridHeight = geometry.RowHeight * state.Rows.Count;
 
         var days = new List<DayHeader>(state.Days.Count);
@@ -226,7 +234,10 @@ public static class BoardVisualBuilder
             // 横向：可用宽度装不下最小列宽时才滚（与渲染层的 minCellWidth=72 语义一致）；
             // 纵向：行高已经压到下限、还是装不下才滚。
             NeedsHorizontalScroll: canvasWidth > availableWidth + 0.5,
-            NeedsVerticalScroll: availableHeight is { } h && canvasHeight + HeaderHeight > h + 0.5);
+            NeedsVerticalScroll: availableHeight is { } h && canvasHeight + HeaderHeight + summaryHeight > h + 0.5)
+        {
+            NextClass = NextClassSummary.Build(state.NextClass, availableWidth),
+        };
     }
 
     /// <summary>

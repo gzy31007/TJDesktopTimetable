@@ -15,7 +15,7 @@ namespace Tjt.Core.Tests;
 /// `blockName` / `tintStyle`，2026-09-16 随该线删除）与基准版 `select_preview.html`。
 /// **这些期望值现在就是挂件视觉的真源**：改 `Tjt.Widget` 的几何/文案/染色时，改的就是这里。
 /// </summary>
-public class BoardVisualTests
+public partial class BoardVisualTests
 {
     private static readonly Term TestTerm = new(
         Id: "122",

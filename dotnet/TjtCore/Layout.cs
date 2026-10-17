@@ -47,7 +47,7 @@ public sealed record BoardOptions
     /// <summary>用于"今日"高亮的 <c>YYYY-MM-DD</c>；不传则取系统当前日期（北京时区）。</summary>
     public string? Today { get; init; }
 
-    /// <summary>当前时刻（用于标记"正在上的节次"）；不传则取系统当前时刻。</summary>
+    /// <summary>当前时刻（用于下一次上课与标记"正在上的节次"）；不传则为两者采样一次当前时刻。</summary>
     public DateTimeOffset? Now { get; init; }
 
     /// <summary>时区偏移（分钟），默认北京时间（+480）。</summary>
@@ -149,7 +149,11 @@ public sealed record BoardState(
     int? CurrentWeek,
     string Today,
     int HiddenSessions,
-    int TodaySessionCount);
+    int TodaySessionCount)
+{
+    /// <summary>原始课表的下一次上课；旧构造调用未查询时保持信息不足。</summary>
+    public NextClassGroup NextClass { get; init; } = new(NextClassStatus.InformationInsufficient, null, [], string.Empty);
+}
 
 /// <summary>网格需要的总尺寸（TS 侧 <c>boardSize</c> 的返回值）。</summary>
 /// <param name="Width">总宽。</param>
@@ -253,6 +257,10 @@ public static partial class Layout
         ArgumentNullException.ThrowIfNull(courses);
         ArgumentNullException.ThrowIfNull(term);
         var opts = options ?? new BoardOptions();
+        var now = opts.Now ?? DateTimeOffset.UtcNow;
+        var nextClass = NextClasses.Find(courses, term, now, opts.TzOffsetMinutes);
+        // 周次掩码只有 32 位；畸形总周数不应使旧网格抛异常或无界遍历。
+        var displayWeeks = Math.Clamp(term.TotalWeeks, 0, Weeks.MaxWeeks);
 
         // 注意：TS 这里写的是 localTodayIso()（无参），**不读** options.now / options.tzOffsetMinutes，
         // 即"今日"永远按系统时间 + 默认北京时区算。C# 照抄这个既有行为，避免两端"今日"高亮不一致。
@@ -260,7 +268,7 @@ public static partial class Layout
         var todayWeekday = SafeWeekday(today);
         // 当前教学周要在过滤**之前**算出来：「本周」视图靠它生成掩码（假期为 null → 不过滤，见 Weeks.ResolveFilter）
         var currentWeek = SafeTermWeekAt(term, today);
-        var filterMask = Weeks.ResolveFilter(opts.WeekView, currentWeek, term.TotalWeeks);
+        var filterMask = Weeks.ResolveFilter(opts.WeekView, currentWeek, displayWeeks);
         var colorOf = opts.ColorOf ?? (course => Colors.ColorForCourse(course.Name));
         var shortName = opts.ShortName ?? DefaultShortName;
 
@@ -304,7 +312,7 @@ public static partial class Layout
                 ? slotNumbers.Max()
                 : Math.Max(11, slotNumbers.Count > 0 ? slotNumbers.Max() : 0));
 
-        var nowSlot = CurrentSlotIndex(term, Time.LocalMinutesOfDay(opts.Now ?? DateTimeOffset.UtcNow, opts.TzOffsetMinutes));
+        var nowSlot = CurrentSlotIndex(term, Time.LocalMinutesOfDay(now, opts.TzOffsetMinutes));
 
         var rows = new List<BoardRow>();
         for (var index = minSlot; index <= maxSlot; index++)
@@ -348,8 +356,8 @@ public static partial class Layout
                     Room: session.Room,
                     Teachers: course.Teachers,
                     Weeks: session.Weeks,
-                    WeeksLabel: Weeks.FormatLabel(session.Weeks, term.TotalWeeks),
-                    Special: !Weeks.IsAll(session.Weeks, term.TotalWeeks),
+                    WeeksLabel: Weeks.FormatLabel(session.Weeks, displayWeeks),
+                    Special: !Weeks.IsAll(session.Weeks, displayWeeks),
                     Color: color,
                     Fill: Colors.WithAlpha(color, 0.8),
                     TextColor: Colors.ReadableTextColor(color),
@@ -372,7 +380,10 @@ public static partial class Layout
             .ThenBy(b => b.Col)
             .ToList();
 
-        return new BoardState(term, term.Label, days, rows, sorted, currentWeek, today, hiddenSessions, todaySessionCount);
+        return new BoardState(term, term.Label, days, rows, sorted, currentWeek, today, hiddenSessions, todaySessionCount)
+        {
+            NextClass = nextClass
+        };
     }
 
     /// <summary>
