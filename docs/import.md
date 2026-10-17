@@ -6,6 +6,10 @@
     `describe` = 当前课表摘要），由 `App` 接到挂件窗口；设置窗口也**不认识 `MainWindow`**，一切经
     `SettingsWindow.SettingsHost`。`apply` 里对"窗口还没建"做了兜底（直接落盘）—— 否则 `--import`
     会因为那一刻 `_windows` 还是空的而静默失败。
+  - **先保存、再替换画面**：`MainWindow.ApplyImportedTimetable` 先调用 `TimetableStore.Save`，成功后才替换 `_loaded` 并重画；失败不动当前实例。存储用同目录临时文件写入后替换，保证正常进程内的失败保留旧表，不承诺断电或跨文件事务。
+    「重新载入本地课表」只读本机，不联网；「重新获取课表」沿现有学校抓取链路，成功后整表替换、不合并。零课程不进入保存。
+  - **登录恢复按入口区分**：只有 HTTP 401/403、明确的未登录响应或登录页证据才判登录失效；普通网络、HTML、格式错误不冒称失效。粘贴请求引导网页重新登录并复制新请求；内置登录引导关闭旧窗口、回导入页重开，无自动重试或原窗重试入口。`CapturedResponseCompleted` 将内置登录的实际保存结果通知当前挂载的导入页；页面卸载退订。
+  - **建窗后隔离验收**：`--session-check <plan.json> --diagnostic-dir <独立绝对路径>` 成对使用，隔离设置、课表、凭据与 WebView profile，跳过自启、托盘、更新检查。计划仅访问 loopback HTTP，驱动已挂载导入页的按钮，读取实际 XAML、当前实例和落盘文件；`temp` / `replace` 文件锁分别验证临时写入和目标替换失败。它不是默认导入入口，不使用真实用户数据，详见 `docs/import-replacement-acceptance.md`。
   - **落盘格式沿用旧 Electron 线的形状**：`TimetableJson` 用 camelCase、逐字段对齐当年 TS 的 `Timetable` 接口，
     因此 `%APPDATA%\TJDesktopTimetable\timetable.json` **能直接读入旧版本写出的文件**
     （`credentials.json` 同理：`{ tongjiRequest, savedAt }`）。`Term.Label` 加了 `[JsonIgnore]`
@@ -26,7 +30,7 @@
   - **"打开时停在第几页"必须走构造参数**（`SettingsWindow(..., initialPage)`）：只调 `SelectPage(n)`
     在"窗口还没加载"时可能不回调 `SelectionChanged`，于是托盘「导入课表…」**第一次点开会落在「常规」页**
     （截图实测到的 bug）。自检里 `shown=` 那一段就是钉这个的。
-  - **卡片的主操作放标题行右侧**（`SettingsView.Block(..., action)`）：导入页的「获取我的课表」原本在输入框
+  - **卡片的主操作放标题行右侧**（`SettingsView.Block(..., action)`）：导入页的「重新获取课表」原本在输入框
     下方，落在首屏之外、打开页面根本看不到（截图实测）。凡是"这一页就是来干这件事"的按钮，都放标题行。
   - ⚠️ **说明文字别放进水平 `StackPanel`**：水平 StackPanel 用**无限宽度**测量子元素 → `TextWrapping`
     直接失效，设置窗口一缩小文字就横着溢出、不会折行（2026-09-17 用户实测"提示没有折叠"）。

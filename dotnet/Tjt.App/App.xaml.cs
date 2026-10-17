@@ -67,6 +67,17 @@ public partial class App : Application
     public App()
     {
         Startup = AppStartupOptions.Parse(Environment.GetCommandLineArgs());
+        // Fail closed before any store/profile access. Neither flag works on its own.
+        if (Startup.SessionCheckPath is not null || Startup.DiagnosticDirectory is not null)
+        {
+            if (Startup.SessionCheckPath is null || Startup.DiagnosticDirectory is null
+                || Startup.Smoke || Startup.LoginCheckUrl is not null || Startup.FetchCheckPath is not null
+                || Startup.ImportPath is not null || Startup.FixturePath is not null
+                || Startup.UpdateCheck || Startup.UpdateNotify)
+                throw new ArgumentException("session-check 仅与独立 diagnostic-dir 配对使用，不混用其他诊断入口。");
+            RequireLoopback(Startup.SjtuHost ?? throw new ArgumentException("session-check 必须显式指定 loopback sjtu-host。"));
+            SettingsStore.UseDiagnosticDirectory(Startup.DiagnosticDirectory);
+        }
         AppLog.UseFile(Startup.LogPath);
         InitializeComponent();
         UnhandledException += OnUnhandledException;
@@ -157,6 +168,15 @@ public partial class App : Application
             window.SetSettingsOpener(ShowSettings);
             window.Initialize(options, loaded);
 
+            if (options.SessionCheckPath is not null)
+            {
+                AppLog.Line("[diagnostic] isolated session: skipped tray, autostart and update check");
+                window.ShowWidget();
+                ShowSettings(window.CurrentSettings, window.CurrentIsDark, SettingsWindow.PageImport);
+                StartSessionCheck(window, options.SessionCheckPath);
+                return;
+            }
+
             if (options.Smoke)
             {
                 // 两个检查都要跑（不用 && 短路：设置页构建失败的原因也想知道）
@@ -211,7 +231,8 @@ public partial class App : Application
         {
             AppLog.Error($"[fatal] {ex}");
             SmokePassed = false;
-            if (options.FixturePath is not null && options.Width is not null && options.Height is not null)
+            if (options.SessionCheckPath is not null
+                || (options.FixturePath is not null && options.Width is not null && options.Height is not null))
                 Environment.Exit(1);
         }
         finally
@@ -638,8 +659,13 @@ public partial class App : Application
         var window = new TongjiLoginWindow(
             RequireImports(),
             dark,
-            (ok, message) => AppLog.Line($"[login] 结束 ok={ok}：{message}"),
+            (ok, message) =>
+            {
+                _sessionLoginResult = (ok, message);
+                AppLog.Line($"[login] 结束 ok={ok}：{message}");
+            },
             school,
+            startUrl: Startup.SessionCheckPath is not null ? _sessionLoginStartUrl : null,
             sjtuBaseUrl: Startup.SjtuHost);
         _loginWindow = window;
         window.Closed += (_, _) =>

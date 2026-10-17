@@ -131,9 +131,11 @@ internal sealed partial class TongjiLoginWindow : Window
             Text = sjtu
                 ? "下面就是交大自己的登录页面（jAccount）—— 本应用不接触你的密码。\n"
                   + "登录后课表页会自己加载；程序随即用这份登录态取一次整学期课表与教务日历，"
-                  + "拿到就自动导入并关窗，没拿到就正常关掉、什么都不会改。"
+                  + "拿到就自动导入并关窗。没取到的话，原因会写在这行下面：关掉这个窗口，"
+                  + "再从「导入课表」页点「登录并获取课表」重来一次。"
                 : "下面就是学校自己的登录页面（统一身份认证，短信验证也在这里完成）—— 本应用不接触你的密码。\n"
-                  + "课表一加载出来，程序会自动抓取并导入，然后这个窗口自己关上；没抓到就正常关掉、什么都不会改。",
+                  + "课表一加载出来，程序会自动抓取并导入，然后这个窗口自己关上。没抓到的话，"
+                  + "原因会写在这行下面：关掉这个窗口，再从「导入课表」页点「登录并获取课表」重来一次。",
             FontSize = 12,
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
@@ -166,9 +168,10 @@ internal sealed partial class TongjiLoginWindow : Window
         };
 
         var reload = new Button { Content = "重新加载页面", MinWidth = 120 };
+        ToolTipService.SetToolTip(reload, "重新加载网页；课表获取失败请关闭窗口，从导入页重开");
         reload.Click += (_, _) =>
         {
-            SetStatus("正在重新加载…");
+            SetStatus("正在重新加载页面…");
             _view?.CoreWebView2?.Reload();
         };
 
@@ -181,6 +184,15 @@ internal sealed partial class TongjiLoginWindow : Window
         root.Children.Add(bottom);
 
         return root;
+    }
+
+    /// <summary>
+    /// 失败文案后面接"关窗重开"这条唯一恢复路径；缺标点时补一个句号，避免两句粘成一坨。
+    /// </summary>
+    private static string WithRestart(string message)
+    {
+        var punctuated = message.EndsWith('。') || message.EndsWith('；') || message.EndsWith('？') || message.EndsWith('！');
+        return (punctuated ? message : message + "。") + TongjiWebCapture.BuiltInLoginRestartGuidance;
     }
 
     private void SetStatus(string text)
@@ -204,6 +216,18 @@ internal sealed partial class TongjiLoginWindow : Window
             await _view.EnsureCoreWebView2Async(environment);
 
             var core = _view.CoreWebView2;
+            if (SettingsStore.IsDiagnostic)
+            {
+                // Block navigation, redirects and script subrequests outside loopback.
+                core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+                core.WebResourceRequested += (_, request) =>
+                {
+                    if (Uri.TryCreate(request.Request.Uri, UriKind.Absolute, out var uri)
+                        && uri.IsLoopback && uri.Scheme is "http" or "https") return;
+                    request.Response = core.Environment.CreateWebResourceResponse(null, 403,
+                        "Diagnostic network blocked", "Content-Type: text/plain");
+                };
+            }
             core.Settings.IsStatusBarEnabled = false;
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreDefaultContextMenusEnabled = false;
@@ -230,7 +254,8 @@ internal sealed partial class TongjiLoginWindow : Window
                 if (_done) return;
                 SetStatus(args.IsSuccess
                     ? "页面已加载。登录后点开「我的课表」——程序会自动接住那条课表请求。"
-                    : $"页面加载失败：{args.WebErrorStatus}（可点「重新加载页面」再试）");
+                    : $"页面加载失败：{args.WebErrorStatus}。「重新加载页面」只会重新加载这个页面；"
+                      + "一直失败就关掉窗口重来，或改用「粘贴请求」那条路");
             };
 
             _webViewReady = true;
@@ -239,8 +264,8 @@ internal sealed partial class TongjiLoginWindow : Window
         }
         catch (Exception ex)
         {
-            AppLog.Error($"[login] WebView2 初始化失败：{ex}");
-            SetStatus($"内置浏览器初始化失败：{ex.Message}（需要 WebView2 运行时可再用此功能）");
+            AppLog.Error($"[login] WebView2 初始化失败：{ex.GetType().Name}");
+            SetStatus($"内置浏览器初始化失败（{ex.GetType().Name}）：需要 WebView2 运行时才能用内置登录，也可以改用「粘贴请求」那条路。");
         }
     }
 
@@ -290,11 +315,19 @@ internal sealed partial class TongjiLoginWindow : Window
                 return;
             }
 
-            SetStatus($"这条响应还不能用：{verdict.Note}");
+            if (TongjiWebCapture.IsLoginExpired(args.Response.StatusCode))
+            {
+                // 只有 401/403 才算"有证据的登录失效"：正文长得不像课表、接口换了字段、
+                // 读到的是 HTML 错误页…… 一律按"这条响应不能用"说，不归因登录态
+                SetStatus(WithRestart($"登录态已失效（HTTP {args.Response.StatusCode}）"));
+                return;
+            }
+
+            SetStatus(WithRestart($"这条响应还不能用：{verdict.Note}"));
         }
         catch (Exception ex)
         {
-            AppLog.Error($"[login] 处理捕获到的响应时异常：{ex}");
+            AppLog.Error($"[login] 处理捕获到的响应时异常：{ex.GetType().Name}");
         }
     }
 
@@ -356,7 +389,7 @@ internal sealed partial class TongjiLoginWindow : Window
             null,
             "内置登录窗口");
 
-        var outcome = await TongjiFetcher.FetchSpecAsync(spec);
+        var outcome = await TongjiFetcher.FetchSpecAsync(spec, entry: FetchEntry.BuiltInLogin);
         if (!outcome.Ok || outcome.TimetableText is null)
         {
             SetStatus(outcome.Message);
@@ -408,7 +441,7 @@ internal sealed partial class TongjiLoginWindow : Window
                 null,
                 "内置登录窗口");
 
-            var fetched = await SjtuFetcher.FetchAsync(spec, default, _sjtuBaseUrl);
+            var fetched = await SjtuFetcher.FetchAsync(spec, default, _sjtuBaseUrl, FetchEntry.BuiltInLogin);
             if (!fetched.Ok || fetched.TimetableText is null)
             {
                 SetStatus(fetched.Message);
@@ -420,7 +453,7 @@ internal sealed partial class TongjiLoginWindow : Window
         }
         catch (Exception ex)
         {
-            AppLog.Error($"[login] 交大抓取异常：{ex}");
+            AppLog.Error($"[login] 交大抓取异常：{ex.GetType().Name}");
             _sjtuCapturing = false;
         }
     }
@@ -443,7 +476,7 @@ internal sealed partial class TongjiLoginWindow : Window
 
         AppLog.Line($"[login] 交大捕获：{SjtuWebCapture.Describe(triggerUrl, fetched.TimetableText!.Length)} applied={applied.Ok}");
 
-        SetStatus(applied.Message);
+        SetStatus(applied.Ok ? applied.Message : WithRestart(applied.Message));
         Complete(applied.Ok, applied.Message);
         if (applied.Ok) Close();
     }
@@ -462,7 +495,7 @@ internal sealed partial class TongjiLoginWindow : Window
         var outcome = _imports.ApplyCapturedResponse(body, termId, probes);
         AppLog.Line($"[login] 捕获成功：{TongjiWebCapture.Describe(url, body.Length)} applied={outcome.Ok}");
 
-        SetStatus(outcome.Message);
+        SetStatus(outcome.Ok ? outcome.Message : WithRestart(outcome.Message));
         Complete(outcome.Ok, outcome.Message);
         if (outcome.Ok) Close();
     }
@@ -478,7 +511,7 @@ internal sealed partial class TongjiLoginWindow : Window
         }
         catch (Exception ex)
         {
-            AppLog.Error($"[login] 结束回调里异常：{ex}");
+            AppLog.Error($"[login] 结束回调里异常：{ex.GetType().Name}");
         }
     }
 

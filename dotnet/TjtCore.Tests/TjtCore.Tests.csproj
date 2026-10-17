@@ -27,6 +27,15 @@
     `Link` + `CopyToOutputDirectory` 让测试从输出目录读（AppContext.BaseDirectory/fixtures），
     避免依赖运行时的当前工作目录。
   -->
+  <!--
+    导入编排（dotnet/Tjt.App/Data/ImportService.cs）**链接源码**进本工程：它没有 WinUI 依赖，
+    桩掉外壳静态类（见 ShellStubsForImportService.cs）就能在 Linux 上验证"应用才有成功文案"这类语义。
+    链接而不是复制：副本会与出货代码立刻不同步。App 工程自己仍然单独编译这一份。
+  -->
+  <ItemGroup>
+    <Compile Include="..\Tjt.App\Data\ImportService.cs" Link="Linked\ImportService.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="..\fixtures\*.json" Link="fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

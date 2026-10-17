@@ -39,10 +39,15 @@ internal static class SjtuFetcher
     /// <param name="baseUrl">
     /// 覆盖接口主机（只给验收脚本用，<c>--sjtu-host</c> 指向本地合成服务）；<c>null</c> = 真 <c>j.sjtu.edu.cn</c>。
     /// </param>
+    /// <param name="entry">
+    /// 这一份是从哪个入口取的 —— 只影响**失败后该怎么恢复**的文案：粘贴入口请用户回浏览器重新登录、
+    /// 重新复制请求；内置登录入口只能请用户关掉窗口重来。
+    /// </param>
     public static async Task<TongjiFetchOutcome> FetchAsync(
         HttpRequestSpec origin,
         CancellationToken cancellationToken = default,
-        string? baseUrl = null)
+        string? baseUrl = null,
+        FetchEntry entry = FetchEntry.PastedRequest)
     {
         ArgumentNullException.ThrowIfNull(origin);
 
@@ -72,8 +77,10 @@ internal static class SjtuFetcher
         if (string.IsNullOrWhiteSpace(year) || string.IsNullOrWhiteSpace(semester))
         {
             return TongjiFetcher.Fail(
-                "没能确定学期（请求里没有 year/semester，当前学期接口也没返回）。"
-                + "请改粘课表页里那条 listBySemester 或 listByWeek 请求。",
+                WithHint(
+                    "没能确定学期（请求里没有 year/semester，当前学期接口也没返回）。",
+                    entry,
+                    "请改粘课表页里那条 listBySemester 或 listByWeek 请求。"),
                 probes);
         }
 
@@ -85,13 +92,13 @@ internal static class SjtuFetcher
 
         AppLog.Line($"[sjtu] 开始抓取：GET {SjtuWebCapture.ApiPrefix}/stu/lesson/listBySemester（学期 {year}-{semester}）");
         var lessons = await SendAsync(origin, lessonsUrl, cancellationToken).ConfigureAwait(false);
-        if (lessons.Error is not null) return TongjiFetcher.Fail(lessons.Error, probes);
+        if (lessons.Error is not null) return TongjiFetcher.Fail(WithHint(lessons.Error, entry, string.Empty), probes);
 
         probes.Add(new("课表 HTTP", lessons.Status.ToString()));
         probes.Add(new("响应大小", $"{lessons.Text.Length} 字节"));
         if (lessons.Status != 200)
         {
-            return TongjiFetcher.Fail(StatusMessage(lessons.Status, lessons.Text), probes);
+            return TongjiFetcher.Fail(StatusMessage(lessons.Status, lessons.Text, entry), probes);
         }
 
         var verdict = SjtuResponseProbe.Inspect(lessons.Text);
@@ -99,7 +106,10 @@ internal static class SjtuFetcher
         if (!verdict.Ok)
         {
             return TongjiFetcher.Fail(
-                $"这份响应里没有课表数据（{verdict.Note}）。请确认登录态还有效，并在课表页刷新后重试。",
+                WithHint(
+                    $"这份响应里没有课表数据（{verdict.Note}）。",
+                    entry,
+                    "请在课表页刷新后重新复制那条请求；如果页面本身也打不开课表，先在学校网页里重新登录。"),
                 probes);
         }
 
@@ -154,7 +164,7 @@ internal static class SjtuFetcher
 
         try
         {
-            using var client = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = true })
+            using var client = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = !SettingsStore.IsDiagnostic })
             {
                 Timeout = Timeout,
             };
@@ -193,16 +203,33 @@ internal static class SjtuFetcher
         }
     }
 
-    /// <summary>非 200 时说人话（401/403 单独提"登录态"）。</summary>
-    private static string StatusMessage(int status, string text)
+    /// <summary>非 200 时说人话（401/403 且只有 401/403 提"登录态"）。</summary>
+    private static string StatusMessage(int status, string text, FetchEntry entry)
     {
-        if (status is 401 or 403)
+        if (TongjiWebCapture.IsLoginExpired(status))
         {
-            return "登录态已失效（HTTP 401/403）：请在浏览器里重新登录交大「学在交大」，再复制一次请求。";
+            return WithHint(
+                $"登录态已失效（HTTP {status}）。",
+                entry,
+                "请在浏览器里重新登录交大「学在交大」，再重新复制一次课表页那条请求。");
         }
 
         var detail = text.Length > 0 ? $"：{Truncate(text, 120)}" : string.Empty;
-        return $"服务端返回 HTTP {status}{detail}";
+        return WithHint(
+            $"服务端返回 HTTP {status}{detail}。",
+            entry,
+            "请先在页面上确认课表能正常打开，再重新获取。");
+    }
+
+    /// <summary>失败文案后接"接下来该做什么"（按入口分岔；粘贴入口没给提示时原样返回）。</summary>
+    private static string WithHint(string message, FetchEntry entry, string pastedHint)
+    {
+        var hint = TongjiWebCapture.RecoveryHint(entry, pastedHint);
+        if (hint.Length == 0) return message;
+
+        // 两句话之间得有句读，不然会粘成"…不可达。关掉这个…"之外的一坨；缺标点就补一个
+        var punctuated = message.EndsWith('。') || message.EndsWith('；') || message.EndsWith('？') || message.EndsWith('！');
+        return punctuated ? message + hint : message + "。" + hint;
     }
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..max];

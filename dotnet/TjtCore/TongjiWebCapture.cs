@@ -7,6 +7,21 @@ public sealed record WebCookie(string Name, string Value, string Domain, string 
 public sealed record WebCaptureVerdict(bool Ok, string Note, string? TermId);
 
 /// <summary>
+/// 这一份课表是从哪个入口取的。两条入口的**登录态来源完全不同**，所以"登录失效了该怎么办"也不同：
+/// <see cref="PastedRequest"/> 的登录态在用户的浏览器里（只能请回浏览器重新登录、重新复制请求）；
+/// <see cref="BuiltInLogin"/> 的登录态在应用内那个登录窗口里（只能关掉重开）。
+/// </summary>
+/// <remarks>交大与同济共用这一套入口语义（见 <see cref="TongjiWebCapture.RecoveryHint"/>）。</remarks>
+public enum FetchEntry
+{
+    /// <summary>用户从浏览器粘贴进来的一条请求（<c>Copy as cURL</c>）。</summary>
+    PastedRequest,
+
+    /// <summary>应用内 WebView2 登录窗口（自动捕获，或用窗口里的 cookie 主动取）。</summary>
+    BuiltInLogin,
+}
+
+/// <summary>
 /// 内置登录窗口（WebView2）背后的**纯逻辑**：这条响应是不是课表、学期 id 在不在 URL 上、
 /// cookie 该拼成什么请求头。
 ///
@@ -24,6 +39,33 @@ public static class TongjiWebCapture
 
     /// <summary>1 系统站点根（WebView2 的初始导航目标）。</summary>
     public const string TongjiOrigin = "https://" + TongjiHost;
+
+    /// <summary>
+    /// 内置登录窗口里任何一次获取失败后的恢复路径（**只有这一条**：关掉窗口重来）。
+    ///
+    /// <para>刻意不提"点「重新加载页面」"——那个按钮只是让页面重新加载，不会从头开始一次获取；
+    /// 把重新加载当恢复手段，用户会在一个已经失效的窗口里反复点。</para>
+    /// </summary>
+    public const string BuiltInLoginRestartGuidance =
+        "请关掉这个登录窗口，再从「导入课表」页点「登录并获取课表」重新打开一个窗口重新登录。";
+
+    /// <summary>
+    /// 这个 HTTP 状态码算不算"有证据的登录态失效"。
+    ///
+    /// <para>只有 401/403 才算。**只看状态码，不看响应体文案**：正文里出现"登录""失效"之类的字样
+    /// 可能只是接口自己的提示或一段 HTML 错误页，据此断言"你的登录过期了"会把网络故障、
+    /// 选错了请求等问题都误导成登录问题。</para>
+    /// </summary>
+    public static bool IsLoginExpired(int status) => status is 401 or 403;
+
+    /// <summary>
+    /// 失败后"接下来该做什么"。按入口分岔：粘贴入口用调用方给的提示（回到学校网页重新登录、
+    /// 重新复制请求）；内置登录入口一律返回 <see cref="BuiltInLoginRestartGuidance"/>。
+    /// </summary>
+    /// <param name="entry">这份课表是从哪个入口取的。</param>
+    /// <param name="pastedHint">粘贴入口专属的下一步（例如"请到 1.tongji.edu.cn 重新登录并重新复制请求"）。</param>
+    public static string RecoveryHint(FetchEntry entry, string pastedHint) =>
+        entry == FetchEntry.BuiltInLogin ? BuiltInLoginRestartGuidance : pastedHint;
 
     /// <summary>课表接口的路径特征（小写比较）。三条都是实测/前端源码里的真路径（详见 AGENTS.md「两条接口两种包法」）。</summary>
     private static readonly (string Fragment, string Label)[] Endpoints =

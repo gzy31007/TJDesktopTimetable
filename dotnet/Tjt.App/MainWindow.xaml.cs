@@ -927,8 +927,7 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// 应用一份**导入的**课表：落盘 → 换掉当前课表 → 重画。
     ///
-    /// <para>落盘失败也算失败并如实返回：画面上课表变了、下次启动却又回去，
-    /// 这种"看起来成功"必须让用户知道。</para>
+    /// <para>保存失败立即返回，不替换当前课表，也不重画；当前画面与下次启动读回保持一致。</para>
     /// </summary>
     internal bool ApplyImportedTimetable(Timetable timetable, string source)
     {
@@ -939,12 +938,20 @@ public sealed partial class MainWindow : Window
             return false;
         }
 
-        var saved = TimetableStore.Save(timetable);
+        if (!TimetableStore.Save(timetable))
+        {
+            AppLog.Line("[import] 保存失败；保留当前课表与画面");
+            return false;
+        }
+
         _loaded = new LoadedTimetable(TimetableStore.FilePath, timetable, TimetableOrigin.Imported);
         Render("导入课表");
-        AppLog.Line($"[import] 已应用 {timetable.Courses.Count} 门 / {TimetableStore.Count(timetable)} 条上课安排（来源：{source}）saved={saved}");
-        return saved;
+        AppLog.Line($"[import] 已应用 {timetable.Courses.Count} 门 / {TimetableStore.Count(timetable)} 条上课安排（来源：{source}）saved=True");
+        return true;
     }
+
+    /// <summary>隔离验收观察当前已载入数据，不重新运行导入或布局计算。</summary>
+    internal string? LoadedTimetableJson => _loaded is null ? null : TimetableJson.Serialize(_loaded.Timetable);
 
     /// <summary>当前课表摘要（设置页「当前课表」那一行）。</summary>
     internal string DescribeTimetable()

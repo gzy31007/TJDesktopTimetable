@@ -50,6 +50,7 @@ internal static class ImportPage
         // ── 卡 1：当前课表
         var summary = new TextBlock
         {
+            Name = "ImportSummary",
             Text = imports.DescribeCurrent(),
             FontSize = 12,
             Opacity = 0.66,
@@ -57,7 +58,7 @@ internal static class ImportPage
             IsTextSelectionEnabled = true,
         };
 
-        var reload = new Button { Content = "重新载入", MinWidth = 96 };
+        var reload = new Button { Content = "重新载入课表", MinWidth = 120, Name = "ImportReload" };
         var clear = new Button { Content = "清空课表", MinWidth = 96 };
         var openFolder = new Button { Content = "打开数据目录", MinWidth = 120 };
         var dataButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -66,17 +67,24 @@ internal static class ImportPage
         dataButtons.Children.Add(openFolder);
 
         var dataStatus = StatusPanel();
+        dataStatus.Name = "ImportDataStatus";
 
         var dataBody = new StackPanel { Spacing = 10 };
         dataBody.Children.Add(summary);
         dataBody.Children.Add(dataButtons);
         dataBody.Children.Add(dataStatus);
 
-        var dataCard = SettingsView.Block(IconGlyph.Folder, "当前课表", null, dataBody, dark);
+        var dataCard = SettingsView.Block(
+            IconGlyph.Folder,
+            "当前课表",
+            "本机保存的这份课表。「重新载入课表」只重读本机文件，不会向学校取新数据",
+            dataBody,
+            dark);
 
         // ── 卡 2：从 1 系统获取
         var requestBox = new TextBox
         {
+            Name = "ImportRequest",
             Text = ImportService.LoadSavedRequest(),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
@@ -89,7 +97,13 @@ internal static class ImportPage
         };
 
         // 主操作放在卡片标题行右侧：不用滚动就能看见（放输入框下面会掉到首屏之外，截图实测过）
-        var fetch = new Button { Content = "获取我的课表", MinWidth = 132, Style = AccentButtonStyle() };
+        var fetch = new Button
+        {
+            Content = "重新获取课表",
+            MinWidth = 132,
+            Style = AccentButtonStyle(),
+            Name = "ImportFetch",
+        };
         var fetchRing = new ProgressRing { IsActive = false, Width = 20, Height = 20, Margin = new Thickness(4, 0, 0, 0) };
         var fetchAction = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         fetchAction.Children.Add(fetchRing);
@@ -112,20 +126,26 @@ internal static class ImportPage
                 + "     改用登录态取整学期课表与教务日历（课表页默认那条按周请求不带周次信息）。\n"
                 + "   · PowerShell 那份把登录态放在 $session.Cookies.Add(...) 行里，连请求一起复制过来即可；\n"
                 + "     只复制了地址（没有 cookie）时程序会明确提示你。\n"
-                + "4. 点「获取我的课表」。同济的学期 id 从请求里的 calendarId 自动取，所以「现在第几周」也是准的。\n"
+                + "4. 点「重新获取课表」。\n"
+                + "   · 同济请求里的 calendarId 只是学期编号：程序拿它去内置学期表里查开学日，查得到才排得出\n"
+                + "     「现在第几周」；查不到（例如还没进内置表的未来学期）就按 16 个教学周摆放，\n"
+                + "     挂件不再显示「第几周」；假期里则按全部教学周显示。\n"
+                + "   · 课表接口里的临时通知（调课 / 停课 / 补课之类的公告）不在导入范围内，这里只导入课程与上课安排。\n"
                 + "粘贴内容只保存在本机 " + ImportService.DataDirectory + "\\credentials.json，不上传、不进日志。",
         };
 
         var fetchStatus = StatusPanel();
+        fetchStatus.Name = "ImportFetchStatus";
 
         // ── 推荐路径：内置登录窗口（选学校 → 一个按钮；不用去浏览器抓请求，也不读别人的 cookie）
         // 学校用下拉框选，而不是每个学校一个按钮：按钮写死校名，再加一所学校就要再加一个按钮 + 一列回调。
-        var schoolCombo = new ComboBox { MinWidth = 220, SelectedIndex = 0 };
+        var schoolCombo = new ComboBox { MinWidth = 220, SelectedIndex = 0, Name = "ImportSchool" };
         schoolCombo.Items.Add("同济大学（1 系统）");
         schoolCombo.Items.Add("上海交通大学（学在交大）");
 
         var loginButton = new Button
         {
+            Name = "ImportLogin",
             Content = "登录并获取课表",
             MinWidth = 148,
             Style = AccentButtonStyle(),
@@ -146,7 +166,8 @@ internal static class ImportPage
         var loginHint = new TextBlock
         {
             Text = "在应用自己的窗口里打开所选学校的登录页（同济统一身份认证含短信 / 交大 jAccount），"
-                 + "课表随即自动抓取导入 —— 本应用不接触你的密码。",
+                 + "课表随即自动抓取导入 —— 本应用不接触你的密码。\n"
+                 + "没取到课表时，那个窗口里会写明原因：关掉它，回来再点一次这个按钮即可。",
             FontSize = StatusFontSize,
             Opacity = 0.66,
             TextWrapping = TextWrapping.Wrap,
@@ -176,7 +197,7 @@ internal static class ImportPage
         var fetchCard = SettingsView.Block(
             IconGlyph.Globe,
             "从学校系统获取",
-            "推荐内置登录（同济 / 交大）；也可以粘贴浏览器请求，用它的登录态抓一次",
+            "要新数据从这里取：内置登录（同济 / 交大）或粘贴浏览器请求。每次都是你点按钮才抓一次，没有后台定时同步",
             fetchBody,
             dark,
             fetchAction);
@@ -193,6 +214,7 @@ internal static class ImportPage
 
         var jsonBox = new TextBox
         {
+            Name = "ImportJson",
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             Height = 96,
@@ -204,7 +226,13 @@ internal static class ImportPage
         };
 
         var pick = new Button { Content = "选择 JSON 文件…", MinWidth = 132 };
-        var runImport = new Button { Content = "导入并应用", MinWidth = 108, Style = AccentButtonStyle() };
+        var runImport = new Button
+        {
+            Content = "导入并应用",
+            MinWidth = 108,
+            Style = AccentButtonStyle(),
+            Name = "ImportApply",
+        };
         var clearInput = new Button { Content = "清空输入", MinWidth = 96 };
         var importRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         importRow.Children.Add(pick);
@@ -212,6 +240,7 @@ internal static class ImportPage
 
         var fileList = new StackPanel { Spacing = 4 };
         var importStatus = StatusPanel();
+        importStatus.Name = "ImportResultStatus";
         var importBody = new StackPanel { Spacing = 10 };
         importBody.Children.Add(adapterCombo);
         importBody.Children.Add(jsonBox);
@@ -219,7 +248,13 @@ internal static class ImportPage
         importBody.Children.Add(fileList);
         importBody.Children.Add(importStatus);
 
-        var importCard = SettingsView.Block(IconGlyph.Document, "本地 JSON 导入", "解析结果直接落盘并替换桌面挂件上的课表", importBody, dark, runImport);
+        var importCard = SettingsView.Block(
+            IconGlyph.Document,
+            "本地 JSON 导入",
+            "导入会整份替换桌面挂件上的课表；解析或保存失败时保持原样（只在本机解析，不联网）",
+            importBody,
+            dark,
+            runImport);
 
         panel.Children.Add(SettingsView.Card([dataCard], dark));
         panel.Children.Add(SettingsView.Card([fetchCard], dark));
@@ -293,8 +328,9 @@ internal static class ImportPage
             }
             catch (Exception ex)
             {
-                AppLog.Error($"[import] 抓取时异常：{ex}");
-                Report(fetchStatus, ImportOutcome.Failure($"抓取时出错：{ex.Message}"), dark);
+                // 异常里可能带着请求地址之类的内容（请求本身含 Cookie），日志只记类型
+                AppLog.Error($"[import] 抓取时异常：{ex.GetType().Name}");
+                Report(fetchStatus, ImportOutcome.Failure($"抓取时出错（{ex.GetType().Name}），详见日志。"), dark);
             }
             finally
             {
@@ -333,6 +369,52 @@ internal static class ImportPage
             picked.Clear();
             RefreshFileList();
             Clear(importStatus);
+        };
+
+        // ── 内置登录窗口的结果回流
+        //    那个窗口的完成回调只写日志、不碰设置页，所以哪怕课表已经整份换掉，这一页也会一直
+        //    显示旧摘要（"什么都没发生"）。这里订阅 ImportService 的完成事件，把同一条结果铺到
+        //    "上次抓取结果" 与 "当前课表" 两处。
+        //    订阅挂在 Loaded / Unloaded 上：切页会重建整页，卸载时不退订就会把旧页连同控件一起留住。
+        var listening = false;
+        void ShowCapturedOutcome(ImportOutcome outcome)
+        {
+            Report(fetchStatus, outcome, dark);
+            summary.Text = imports.DescribeCurrent();
+        }
+
+        void OnCapturedOutcome(ImportOutcome outcome)
+        {
+            // 事件本来就出现在本进程 UI 线程；万一从别处来，先排队回 UI 线程再动控件。
+            // 排队期间这页可能已经被卸载（切设置页会重建整页）——排到时先看还在不在听，不在就什么都不做。
+            if (panel.DispatcherQueue.HasThreadAccess) ShowCapturedOutcome(outcome);
+            else
+            {
+                panel.DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!listening) return;
+                    ShowCapturedOutcome(outcome);
+                });
+            }
+        }
+
+        panel.Loaded += (_, _) =>
+        {
+            if (listening) return; // 同一份页被重复 Loaded 时不能重复挂
+
+            // 先订阅、再补读：页面构造到挂载之间若内置窗口已经交回结果，事件已经错过了，
+            // 只能靠 ImportService 留的那份缓存补上（顺序反了就会永远差这一次）。
+            imports.CapturedResponseCompleted += OnCapturedOutcome;
+            listening = true;
+
+            summary.Text = imports.DescribeCurrent();
+            if (imports.LastCapturedOutcome is { } missed) ShowCapturedOutcome(missed);
+        };
+        panel.Unloaded += (_, _) =>
+        {
+            if (!listening) return;
+            imports.CapturedResponseCompleted -= OnCapturedOutcome;
+            listening = false;
         };
 
         return panel;

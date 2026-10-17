@@ -21,10 +21,59 @@ internal static class SettingsStore
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    /// <summary>设置文件所在目录。</summary>
-    public static string Directory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "TJDesktopTimetable");
+    private static string DefaultDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TJDesktopTimetable");
+    private static string? _diagnosticDirectory;
+
+    /// <summary>设置、课表、凭据与 WebView profile 共用的目录；隔离验收不触碰用户目录。</summary>
+    public static string Directory => _diagnosticDirectory ?? DefaultDirectory;
+    internal static bool IsDiagnostic => _diagnosticDirectory is not null;
+
+    /// <summary>只在显式 session-check 模式启动、任何存储读取前调用。</summary>
+    internal static void UseDiagnosticDirectory(string path)
+    {
+        // Keep this opt-in seam on ordinary local paths: Windows device/UNC, short-name
+        // and trailing-dot/space aliases would defeat string overlap checks below.
+        if (!Path.IsPathFullyQualified(path) || path.StartsWith(@"\\", StringComparison.Ordinal)
+            || path.Contains('~') || path.Replace('/', '\\').Split('\\').Skip(1)
+                .Any(part => part.EndsWith('.') || part.EndsWith(' ') || part.Contains(':')))
+            throw new ArgumentException("验收目录必须为无别名的本机绝对路径。");
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        var real = Path.TrimEndingDirectorySeparator(Path.GetFullPath(DefaultDirectory));
+        if (full == Path.GetPathRoot(full)
+            || full.Equals(real, StringComparison.OrdinalIgnoreCase)
+            || full.StartsWith(real + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || real.StartsWith(full + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("验收目录不能覆盖或包含用户数据目录。");
+        // Reject aliases before touching stores or WebView profiles, including links below
+        // an existing diagnostic directory on a restart. Do not traverse a reparse point.
+        for (var ancestor = new DirectoryInfo(full); ancestor is not null; ancestor = ancestor.Parent)
+            RejectLink(ancestor);
+        var pending = new Stack<DirectoryInfo>();
+        if (System.IO.Directory.Exists(full)) pending.Push(new DirectoryInfo(full));
+        while (pending.TryPop(out var directory))
+        {
+            foreach (var entry in directory.EnumerateFileSystemInfos())
+            {
+                RejectLink(entry);
+                if (entry is DirectoryInfo child) pending.Push(child);
+            }
+        }
+        const string markerText = "TJDesktopTimetable synthetic session v1";
+        var marker = Path.Combine(full, ".tjt-session-check");
+        if (System.IO.Directory.Exists(full) && System.IO.Directory.EnumerateFileSystemEntries(full).Any()
+            && (!File.Exists(marker) || File.ReadAllText(marker) != markerText))
+            throw new ArgumentException("首次验收必须使用空目录；只允许复用本工具创建的隔离目录。");
+        System.IO.Directory.CreateDirectory(full);
+        if (!File.Exists(marker)) File.WriteAllText(marker, markerText);
+        _diagnosticDirectory = full;
+    }
+
+    private static void RejectLink(FileSystemInfo entry)
+    {
+        if (entry.LinkTarget is not null || (entry.Exists && (entry.Attributes & FileAttributes.ReparsePoint) != 0))
+            throw new ArgumentException("验收目录及其上下级不能包含符号链接或 junction。");
+    }
 
     /// <summary>设置文件路径。</summary>
     public static string FilePath => Path.Combine(Directory, "settings.json");

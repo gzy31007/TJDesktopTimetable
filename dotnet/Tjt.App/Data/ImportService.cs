@@ -66,6 +66,9 @@ internal sealed class ImportService
     /// </summary>
     public ImportOutcome ImportText(string? text, string? adapterId, IReadOnlyList<ImportFile>? files)
     {
+        // 这之后的结论来自粘贴/文件，不再属于"内置登录捕获"：别让重新挂载的页用它覆盖新结果
+        LastCapturedOutcome = null;
+
         var hasText = !string.IsNullOrWhiteSpace(text);
         var fileList = files?.Where(file => !string.IsNullOrWhiteSpace(file.Text)).ToList();
         if (!hasText && (fileList is null || fileList.Count == 0))
@@ -92,8 +95,8 @@ internal sealed class ImportService
         }
         catch (Exception ex)
         {
-            AppLog.Error($"[import] 导入异常：{ex}");
-            return ImportOutcome.Failure($"导入失败：{ex.Message}");
+            AppLog.Error($"[import] 导入异常：{ex.GetType().Name}");
+            return ImportOutcome.Failure($"导入失败（{ex.GetType().Name}），详见日志。");
         }
     }
 
@@ -102,9 +105,11 @@ internal sealed class ImportService
     /// </summary>
     public async Task<ImportOutcome> FetchAsync(string requestText, CancellationToken cancellationToken = default)
     {
+        LastCapturedOutcome = null; // 同上：这次抓取的结论自己会铺进本页，捕获缓存作废
+
         var effective = (requestText ?? string.Empty).Trim();
         if (effective.Length == 0) effective = CredentialsStore.LoadRequest();
-        if (effective.Length == 0) return ImportOutcome.Failure("先粘贴一条浏览器请求（F12 → Copy as cURL），再点「获取我的课表」。");
+        if (effective.Length == 0) return ImportOutcome.Failure("先粘贴一条浏览器请求（F12 → Copy as cURL），再点「重新获取课表」。");
 
         // 先存下来：下次打开设置窗口就能回显（内容含 Cookie，绝不进日志）
         CredentialsStore.SaveRequest(effective);
@@ -140,6 +145,47 @@ internal sealed class ImportService
     }
 
     /// <summary>
+    /// 最近一次内置登录捕获的结果（成功、失败都算）。没有捕获过、或之后又做了粘贴/本地动作时为 <c>null</c>。
+    ///
+    /// <para>为什么留一份：设置页是"先构造页面（取一次摘要）→ 挂进可视树（Loaded）才订阅"，
+    /// 内置窗口的结果完全可能落在这两步之间 —— 光靠事件会把那一次丢掉，页面上就一直是旧摘要。
+    /// 挂载时先订阅、再读一次这里补上。</para>
+    /// </summary>
+    public ImportOutcome? LastCapturedOutcome { get; private set; }
+
+    /// <summary>
+    /// 内置登录窗口交回一条捕获结果时发一次（<see cref="ApplyCapturedResponse"/> 的**每个**返回结果都发，
+    /// 成功、解析失败、空响应都算）。
+    ///
+    /// <para>为什么要有它：登录窗口自己的完成回调只写日志、不碰设置页，所以用户回到设置页时看到的是
+    /// 「什么都没发生」——包括成功之后那一页还显示旧表摘要。设置页挂着这个事件，收到结果就刷新
+    /// 「上次抓取结果」与「当前课表」两处。</para>
+    ///
+    /// <para><b>观察者抛异常不改变返回值</b>：这条结果可能已经把课表保存到本机了，
+    /// 不能因为某个界面订阅者出错就对用户说失败（谁出错谁自己进日志）。</para>
+    /// </summary>
+    public event Action<ImportOutcome>? CapturedResponseCompleted;
+
+    /// <summary>逐个通知订阅者，任何一个抛异常都只记类型名，不影响其它订阅者与返回值。</summary>
+    private void RaiseCapturedResponseCompleted(ImportOutcome outcome)
+    {
+        var handlers = CapturedResponseCompleted;
+        if (handlers is null) return;
+
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<ImportOutcome>)handler)(outcome);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error($"[import] 捕获响应完成回调异常：{ex.GetType().Name}");
+            }
+        }
+    }
+
+    /// <summary>
     /// 把**内置登录窗口捕获到的**课表响应直接导入（不经过粘贴框，也不写凭证文件）。
     ///
     /// <para>与 <see cref="FetchAsync"/> 的差别只在"响应从哪来"：那边是用户粘贴的请求、由我们发出去；
@@ -157,6 +203,19 @@ internal sealed class ImportService
         IReadOnlyList<FetchProbe>? probes = null,
         string adapterId = TongjiStudentAdapter.AdapterId,
         IReadOnlyList<ImportFile>? files = null)
+    {
+        var outcome = ApplyCapturedResponseCore(responseText, termId, probes, adapterId, files);
+        LastCapturedOutcome = outcome; // 先落缓存再发事件：挂载中的页靠事件，正在挂载的页靠缓存
+        RaiseCapturedResponseCompleted(outcome);
+        return outcome;
+    }
+
+    private ImportOutcome ApplyCapturedResponseCore(
+        string responseText,
+        string? termId,
+        IReadOnlyList<FetchProbe>? probes,
+        string adapterId,
+        IReadOnlyList<ImportFile>? files)
     {
         var rows = probes ?? [];
         if (string.IsNullOrWhiteSpace(responseText)) return ImportOutcome.Failure("捕获到的响应是空的。", rows);
@@ -183,22 +242,34 @@ internal sealed class ImportService
     /// <summary>清空已导入的课表：删文件 → 重新载入（回退到内置示例课表）。</summary>
     public ImportOutcome ClearTimetable()
     {
+        LastCapturedOutcome = null;
         TimetableStore.Clear();
         var ok = _reload();
         return new ImportOutcome(
             ok,
-            ok ? "已清空导入的课表；挂件回退到内置示例课表（再导入一次即替换）" : "已删除课表文件，但重新载入失败（详见日志）",
+            ok ? "已清空导入的课表；挂件回退到内置示例课表。" : "已删除课表文件，但重新载入本机课表失败（详见日志）",
             null,
             null,
             [],
             []);
     }
 
-    /// <summary>按载入顺序重新读一遍课表并重画（"重新载入"按钮）。</summary>
+    /// <summary>
+    /// 只读本机那份课表、重画一遍（「重新载入课表」按钮）。<b>不联网</b>：要向学校取新数据得走
+    /// <see cref="FetchAsync"/> 或内置登录窗口 —— 两个按钮说的话必须是两件事。
+    /// </summary>
     public ImportOutcome ReloadTimetable()
     {
+        LastCapturedOutcome = null;
+
         var ok = _reload();
-        return new ImportOutcome(ok, ok ? "已重新载入课表" : "重新载入失败（详见日志）", null, null, [], []);
+        return new ImportOutcome(
+            ok,
+            ok ? "已按本机保存的课表重新载入（没有向学校取新数据）" : "重新载入本机课表失败（详见日志）",
+            null,
+            null,
+            [],
+            []);
     }
 
     /// <summary>落成课表 → 交给外壳应用；顺带把诊断与探测行一起返回给 UI。</summary>
@@ -211,14 +282,22 @@ internal sealed class ImportService
         if (timetable.Courses.Count == 0)
         {
             AppLog.Line($"[import] 解析出 0 门课程 adapter={result.AdapterId}");
-            return new ImportOutcome(false, "没有解析出任何课程，请检查数据是否完整。", result, null, result.Diagnostics, probes);
+            return new ImportOutcome(
+                false,
+                "没有解析出任何课程：这次没有应用，当前课表保持不变（检查一下粘的是不是课表数据）。",
+                result,
+                null,
+                result.Diagnostics,
+                probes);
         }
 
+        // 「应用」= 整份替换 + 落盘成功。落盘失败时旧课表还在（_apply 不会先清空），所以文案必须
+        // 说"仍是旧表"，不能只说"解析成功"。
         var applied = _apply(timetable, result.AdapterName);
         AppLog.Line($"[import] adapter={result.AdapterId} {summary} applied={applied}");
         return new ImportOutcome(
             applied,
-            applied ? $"已应用 {summary} 到桌面挂件" : "解析成功，但写入课表文件失败（详见日志）",
+            applied ? $"已整份替换为 {summary}，并保存到本机（下次启动仍用它）" : "新表没有保存成功：当前课表仍是旧表（详见日志）",
             result,
             timetable,
             result.Diagnostics,

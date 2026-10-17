@@ -178,4 +178,55 @@ public class TongjiWebCaptureTests
 
         Assert.Equal("报表接口 findStudentTimetab，30261 字节，calendarId=122", text);
     }
+
+    // ── 失败分流（issue 13）：只有 HTTP 401/403 才算"有证据的登录失效" ─────────────────
+
+    [Theory]
+    [InlineData(401)]
+    [InlineData(403)]
+    public void 只有401和403算登录态失效(int status) => Assert.True(TongjiWebCapture.IsLoginExpired(status));
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(200)]
+    [InlineData(400)]
+    [InlineData(404)]
+    [InlineData(500)]
+    [InlineData(502)]
+    public void 别的状态码不归因登录态(int status) => Assert.False(TongjiWebCapture.IsLoginExpired(status));
+
+    [Fact]
+    public void 粘贴入口的恢复提示是回浏览器重新登录并重新复制请求()
+    {
+        var hint = TongjiWebCapture.RecoveryHint(FetchEntry.PastedRequest, "回浏览器重新登录后重新复制请求。");
+
+        Assert.Contains("重新复制", hint, StringComparison.Ordinal);
+        Assert.DoesNotContain("关掉这个登录窗口", hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void 内置登录入口的恢复提示只有关窗重开()
+    {
+        var hint = TongjiWebCapture.RecoveryHint(FetchEntry.BuiltInLogin, "回浏览器重新登录后重新复制请求。");
+
+        Assert.Equal(TongjiWebCapture.BuiltInLoginRestartGuidance, hint);
+        Assert.Contains("关掉这个登录窗口", hint, StringComparison.Ordinal);
+        Assert.Contains("「导入课表」页", hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void 内置登录入口不再把恢复路径指回复制请求()
+    {
+        // 内置入口的用户手上没有"浏览器里那条请求"可复制；出现「复制」就是把恢复路径指错了
+        var hint = TongjiWebCapture.RecoveryHint(FetchEntry.BuiltInLogin, "请重新复制请求。");
+
+        Assert.DoesNotContain("复制", hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void 内置登录入口不把重新加载页面说成恢复手段()
+    {
+        // 「重新加载页面」只是让页面重新加载，不会重来一次获取 —— 文案里不能把它当恢复承诺
+        Assert.DoesNotContain("重新加载页面", TongjiWebCapture.BuiltInLoginRestartGuidance, StringComparison.Ordinal);
+    }
 }

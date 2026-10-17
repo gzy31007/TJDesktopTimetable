@@ -55,7 +55,14 @@ internal static class TongjiFetcher
     /// </summary>
     /// <param name="spec">请求规格（<c>Source</c> 只进探测行与日志，用于说清"这条请求从哪来"）。</param>
     /// <param name="cancellationToken">调用方的取消。</param>
-    public static async Task<TongjiFetchOutcome> FetchSpecAsync(HttpRequestSpec spec, CancellationToken cancellationToken = default)
+    /// <param name="entry">
+    /// 这一份是从哪个入口取的 —— 只影响**失败后该怎么恢复**的文案：粘贴入口请用户回浏览器重新登录、
+    /// 重新复制请求；内置登录入口只能请用户关掉窗口重来。
+    /// </param>
+    public static async Task<TongjiFetchOutcome> FetchSpecAsync(
+        HttpRequestSpec spec,
+        CancellationToken cancellationToken = default,
+        FetchEntry entry = FetchEntry.PastedRequest)
     {
         ArgumentNullException.ThrowIfNull(spec);
         if (!Uri.TryCreate(spec.Url, UriKind.Absolute, out var uri))
@@ -76,7 +83,7 @@ internal static class TongjiFetcher
         int status;
         try
         {
-            using var client = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = true })
+            using var client = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = !SettingsStore.IsDiagnostic })
             {
                 Timeout = Timeout,
             };
@@ -101,9 +108,11 @@ internal static class TongjiFetcher
         if (status != 200)
         {
             var detail = text.Length > 0 ? $"：{Truncate(text, 120)}" : string.Empty;
-            var message = status is 401 or 403
-                ? "登录态已失效（HTTP 401/403）：请重新登录 1 系统，再复制一次请求。"
-                : $"服务端返回 HTTP {status}{detail}";
+            var message = TongjiWebCapture.IsLoginExpired(status)
+                ? $"登录态已失效（HTTP {status}）。" + TongjiWebCapture.RecoveryHint(
+                    entry, "请到 1.tongji.edu.cn 重新登录，再把那条课表请求整段重新复制一次，粘到上面的输入框里点「重新获取课表」。")
+                : $"服务端返回 HTTP {status}{detail}。" + TongjiWebCapture.RecoveryHint(
+                    entry, "请先在页面上确认课表能正常打开，再重新获取。");
             return Fail(message, probes);
         }
 
@@ -112,7 +121,8 @@ internal static class TongjiFetcher
         if (!verdict.Ok)
         {
             return Fail(
-                $"这份响应里没有个人课表数据（{verdict.Note}）。请在课表/选课页面刷新后，复制其中那条返回 200 且体积较大的请求。",
+                $"这份响应里没有个人课表数据（{verdict.Note}）。" + TongjiWebCapture.RecoveryHint(
+                    entry, "请在课表/选课页面刷新后，复制其中那条返回 200 且体积较大的请求。"),
                 probes);
         }
 

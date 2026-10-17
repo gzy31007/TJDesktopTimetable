@@ -98,7 +98,9 @@ internal sealed record AppStartupOptions(
     bool UpdateCheck = false,
     string? UpdateApiUrl = null,
     string? UpdateProxyUrl = null,
-    bool UpdateNotify = false)
+    bool UpdateNotify = false,
+    string? SessionCheckPath = null,
+    string? DiagnosticDirectory = null)
 {
     /// <summary>
     /// 解析命令行。
@@ -138,6 +140,8 @@ internal sealed record AppStartupOptions(
         var updateNotify = false;
         string? updateApi = null;
         string? updateProxy = null;
+        string? sessionCheck = null;
+        string? diagnosticDirectory = null;
 
         for (var i = 0; i < args.Length; i += 1)
         {
@@ -158,6 +162,8 @@ internal sealed record AppStartupOptions(
                 weekView = parsedView;
                 i += 1;
             }
+            else if (Matches(arg, "session-check") && i + 1 < args.Length) sessionCheck = args[++i];
+            else if (Matches(arg, "diagnostic-dir") && i + 1 < args.Length) diagnosticDirectory = args[++i];
             else if (Matches(arg, "log") && i + 1 < args.Length) logPath = args[++i];
             else if (Matches(arg, "dark")) dark = true;
             else if (Matches(arg, "light")) dark = false;
@@ -223,7 +229,9 @@ internal sealed record AppStartupOptions(
             UpdateCheck: updateCheck,
             UpdateApiUrl: updateApi,
             UpdateProxyUrl: updateProxy,
-            UpdateNotify: updateNotify);
+            UpdateNotify: updateNotify,
+            SessionCheckPath: sessionCheck,
+            DiagnosticDirectory: diagnosticDirectory);
     }
 
     /// <summary>支持 <c>--flag</c> / <c>-flag</c> / <c>/flag</c> 三种前缀。</summary>
