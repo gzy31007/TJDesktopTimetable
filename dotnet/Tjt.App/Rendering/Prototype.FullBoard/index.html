@@ -1,0 +1,173 @@
+<!doctype html>
+<!-- THROWAWAY / #19. Three structurally different grid renderers on this one page, ?variant=A|B|C.
+     No production code, personal timetable, network dependency, storage or approved readability verdict.
+     Run: python3 dotnet/Tjt.App/Rendering/Prototype.FullBoard/serve.py
+     Fixed-region source: BoardVisual.cs + NextClassSummary.cs + TjtCore/Layout.cs, base c47d9fe.
+     CSS px approximate logical DIP at browser 100%; browser typography is NOT WinUI typography. -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>整表纵向可见 · 抛弃式原型 #19</title>
+<style>
+*{box-sizing:border-box} :root{color-scheme:dark;font-family:"Segoe UI Variable","Segoe UI","Microsoft YaHei UI",sans-serif;color:#e4e7ed;background:#14181e;font-size:14px}body{margin:0;padding-bottom:92px}button,input,select{font:inherit}button,select,input[type=number]{border:1px solid #465160;background:#252d38;color:inherit;border-radius:6px;padding:6px 9px}button{cursor:pointer}button:hover{background:#344153}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #a8cdf5;outline-offset:3px}a{color:#a8cdf5}h1{font-size:24px;margin:8px 0;font-weight:650;letter-spacing:-.02em}p{margin:6px 0;line-height:1.6}.muted{color:#a8b3c3}.eyebrow{font-size:11px;letter-spacing:.12em;color:#a7c4d6}header.page{padding:24px 28px 16px;border-bottom:1px solid #323b47}.topline{display:flex;align-items:center;justify-content:space-between;gap:20px}.tag{border:1px solid #657486;color:#c2d6e6;border-radius:4px;padding:3px 7px;font-size:11px;white-space:nowrap}.controls{padding:16px 28px;display:flex;flex-wrap:wrap;gap:14px 24px;background:#1b212a;border-bottom:1px solid #323b47}.control{display:grid;gap:5px;font-size:12px}.control.wide{min-width:185px}.control span{color:#a8b3c3}.inputline{display:flex;align-items:center;gap:8px}.inputline input[type=number]{width:82px}.inputline input[type=range]{width:120px;accent-color:#a8cdf5}.toolbar{padding:12px 28px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.toolbar p{flex:1;min-width:260px}.metrics{display:flex;flex-wrap:wrap;gap:20px;padding:12px 28px;border-bottom:1px solid #323b47}.metric b{font-variant-numeric:tabular-nums;font-size:18px;font-weight:600}.metric span{display:block;color:#a8b3c3;font-size:11px;margin-top:3px}.notice{margin:12px 28px;padding-left:12px;border-left:3px solid #d6b67d;color:#e4d0ac;line-height:1.65;font-size:12px}.stage-scroll{overflow:auto;padding:20px 28px 28px;background:radial-gradient(ellipse at 35% 20%,#304052 0%,#202c36 40%,#182028 80%);min-height:400px}.stage-caption{font-size:11px;color:#bdcbd5;margin-bottom:10px}.widget{position:relative;flex-shrink:0;border-radius:10px;background:rgba(26,32,40,.94);box-shadow:0 15px 50px #0006;overflow:hidden;outline:1px solid #8297ad33;color:#e2e6ed;isolation:isolate}.widget-header{height:34px;display:flex;align-items:center;gap:16px;padding:0 8px 0 10px;white-space:nowrap;font-size:12px;background:#ffffff04}.widget-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0}.widget-tools{margin-left:auto;font-size:15px;letter-spacing:8px;color:#b6c2d0}.summary{height:30px;display:flex;align-items:center;gap:8px;margin:0 10px;font-size:12px;overflow:hidden;white-space:nowrap}.summary .marker{width:22px;flex-shrink:0;color:#a8c4ec}.summary .name,.summary .room{overflow:hidden;text-overflow:ellipsis;min-width:0}.summary .room{color:#a7b4c4}.summary .aux{color:#9eacbe;font-size:11px;flex-shrink:0}.days{position:absolute;left:64px;right:0;top:70px;height:28px;display:grid;grid-template-columns:repeat(7,1fr);font-size:12px;font-weight:600;line-height:26px;text-align:center}.days .today{color:#b4d3fc;background:#7fabdc0d;border-radius:5px}.days .weekend{color:#a0a9b7}.grid{position:absolute;left:64px;right:0;top:98px}.gridline{position:absolute;left:0;right:0;border-top:1px solid #a9c3df17}.vline{position:absolute;top:0;bottom:0;border-left:1px solid #a9c3df17}.slot{position:absolute;left:-60px;width:56px;display:flex;align-items:center;justify-content:center;white-space:nowrap;color:#9caaba;overflow:hidden;line-height:1.1}.slot.empty{color:#c1ad84}.empty-stripe{position:absolute;left:0;right:0;background:repeating-linear-gradient(135deg,#d6b67d06 0 4px,transparent 4px 8px);pointer-events:none}.block{position:absolute;border:1px solid var(--edge);background:var(--tint);color:var(--ink);border-radius:8px;padding:3px 6px;overflow:hidden;cursor:help;line-height:1.25}.block .course{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.block .room,.block .weeks{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.8;min-width:0}.block.variant-B .details{display:flex;gap:5px;align-items:baseline}.block.variant-B .room{flex:1}.block.variant-B .weeks{flex:1;text-align:right}.block.clipped{outline:1px dashed #f6bc7a;outline-offset:-3px}.hint{padding:10px 28px;font-size:12px;color:#a8b3c3;line-height:1.7}.state{padding:0 28px 24px}.state details{border-top:1px solid #37414f;padding-top:12px}.state summary{cursor:pointer}.state pre{white-space:pre-wrap;word-break:break-word;font:12px/1.6 ui-monospace,monospace;color:#b8c7d6;max-height:360px;overflow:auto}.feedback{padding:14px 28px;border-top:1px solid #323b47}.feedback label{display:block;margin-bottom:8px}.feedback textarea{display:block;width:min(100%,900px);height:70px;padding:10px;background:#1b212a;border:1px solid #465160;border-radius:6px;color:inherit;font:inherit;resize:vertical}.feedback button{margin-top:8px}.switcher{position:fixed;z-index:50;bottom:20px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;background:#e9edf2;color:#1c2735;border-radius:30px;padding:8px;box-shadow:0 6px 32px #0007;border:1px solid #fff9;max-width:95vw}.switcher button{background:transparent;color:#1c2735;border-color:#24384b22;border-radius:50%;width:38px;height:38px;padding:0;font-size:20px}.switcher button:hover{background:#cfdae7}.switcher .label{text-align:center;min-width:210px;font-weight:650;font-size:13px}.switcher small{display:block;font-weight:400;font-size:10px;color:#556172;margin-top:2px}.switcher[hidden]{display:none}#copy-status{margin-left:8px;color:#a8cdf5;font-size:12px}@media(max-width:700px){header.page,.controls,.metrics,.toolbar,.hint,.feedback,.state{padding-left:16px;padding-right:16px}.notice{margin-left:16px;margin-right:16px}.stage-scroll{padding-left:16px}.topline{display:block}.tag{display:inline-block;margin-top:8px}.switcher .label{min-width:180px}}
+</style>
+</head>
+<body>
+<header class="page"><div class="topline"><div><div class="eyebrow">WINDOWS WIDGET / DESIGN QUESTION 19</div><h1>整张课表，到多小还能看清？</h1></div><span class="tag">抛弃式原型 · 待用户评判</span></div><p class="muted">比较网格的空间分配，不重新设计挂件。上方信息与摘要保留，中间空节次不折叠。</p></header>
+<section class="controls" aria-label="比较条件">
+<label class="control wide"><span>虚构课表场景</span><select id="scene"><option value="full">完整跨度 · 第 1 至 11 节</option><option value="short">短跨度 · 第 1 至 4 节</option><option value="stress">密集对照 · 单节课 / 长课名 / 同格并排</option></select></label>
+<label class="control"><span>请求客户区宽度 · 逻辑单位</span><div class="inputline"><input id="width" type="number" min="720" max="1600" step="10" value="1080" aria-label="请求客户区宽度"><input id="width-range" type="range" min="720" max="1600" step="10" value="1080" aria-label="调整宽度"></div></label>
+<label class="control"><span>请求客户区高度 · 逻辑单位</span><div class="inputline"><input id="height" type="number" min="280" max="1100" step="2" value="600" aria-label="请求客户区高度"><input id="height-range" type="range" min="280" max="1100" step="2" value="600" aria-label="调整高度"></div></label>
+<label class="control"><span>候选节次下限 · 未认可</span><div class="inputline"><input id="floor" type="number" min="18" max="64" step="1" value="34" aria-label="候选节次行高下限"><input id="floor-range" type="range" min="18" max="64" step="1" value="34" aria-label="调整候选行高下限"></div></label>
+<label class="control"><span>候选课程名字号 · 未认可</span><div class="inputline"><input id="font" type="number" min="9" max="18" step="0.5" value="12" aria-label="候选课程名字号"><input id="font-range" type="range" min="9" max="18" step="0.5" value="12" aria-label="调整候选字号"></div></label>
+<label class="control"><span>外观比较</span><select id="theme"><option value="dark">深色</option><option value="light">浅色</option></select></label>
+</section>
+<section class="toolbar"><p id="strategy"></p><button id="reset">重置比较条件</button><button id="share">复制当前比较链接</button></section>
+<section class="metrics" aria-live="polite" id="metrics"></section>
+<div class="notice" id="warning"></div>
+<div class="stage-scroll"><div class="stage-caption" id="stage-caption"></div><article class="widget" id="widget" aria-label="虚构 Windows 课表挂件"><div class="widget-header"><div class="widget-title">示例大学 · 秋季学期</div><span>第 3 教学周</span><span>今日 2 节</span><span class="widget-tools" aria-hidden="true">◫ ⚙ ⋯</span></div><div class="summary"><span class="marker">今</span><span class="name">下一次上课：示例高等数学</span><span class="room">示例楼 A101</span><span class="aux">09-28 周一 08:00</span></div><div class="days" id="days"></div><div class="grid" id="grid"></div></article></div>
+<p class="hint">底部 ← → 切换方案，也可用键盘左右键。悬停或聚焦色块查看完整虚构安排。斜纹是整周均无课的节次，不是折叠区。虚线框表示浏览器测得文字溢出，该条件不可据此认定可读。页面可以滚动，挂件内部不滚动；预览不自动缩小来塞进页面。</p>
+<section class="state"><details open><summary>当前状态与高度预算 · 每次操作更新</summary><p id="formula"></p><p id="baseline" class="muted"></p><pre id="state"></pre></details></section>
+<section class="feedback"><label for="notes">记下你的判断，例如“B 完整跨度可读，但单节课教室太挤”。仅存于当前页面内存，不会自动上传。</label><textarea id="notes" placeholder="还没有任何被认可的行高、字号或最小高度。请在日常 Windows 屏幕上复核候选。"></textarea><button id="copy-feedback">复制状态与反馈</button><span id="copy-status" role="status"></span></section>
+<nav class="switcher" id="switcher" aria-label="仅原型环境的变体切换"><button id="previous" aria-label="上一个变体">←</button><div class="label"><span id="variant-label"></span><small>抛弃式原型 · 非应用工具栏</small></div><button id="next" aria-label="下一个变体">→</button></nav>
+<script>
+'use strict';
+// Deliberately simple and standalone. No storage, mutations, import pipeline or app settings.
+const variants = ['A','B','C'];
+const names = { A:'等高压缩 / 三行文字', B:'字号优先 / 两行排版', C:'内容分配 / 非等高节次' };
+const explanations = {
+ A:'A · 所有节次等高；三行文字整体缩小以适应最矮色块。观察省空间是否值得字号变小。',
+ B:'B · 保住候选字号；课名独占一行，教室与周次并列在下一行。空间不够就显示需要的候选高度，不偷偷缩字。',
+ C:'C · 保住候选字号和三行排版；有课节次留足文字空间，整周空节次保留候选下限。剩余空间优先分给有课节次。'
+};
+const defaults = { scene:'full', width:1080, height:600, floor:34, font:12, theme:'dark' };
+const starts = ['08:00','08:50','10:00','10:50','13:30','14:20','15:30','16:20','18:30','19:20','20:10'];
+const ends = ['08:45','09:35','10:45','11:35','14:15','15:05','16:15','17:05','19:15','20:05','20:55'];
+const $ = id => document.getElementById(id);
+const query = new URLSearchParams(location.search);
+let variant = variants.includes(query.get('variant')) ? query.get('variant') : 'A';
+for (const [key, value] of Object.entries(defaults)) {
+ const input = $(key), proposed = query.get(key);
+ if (input.type === 'number') {
+  if (proposed !== null && Number.isFinite(Number(proposed))) input.value = Math.min(+input.max,Math.max(+input.min,+proposed));
+ } else if (proposed !== null && [...input.options].some(o=>o.value===proposed)) input.value = proposed;
+ if ($(key+'-range')) $(key+'-range').value = input.value;
+}
+// No front-end production build exists here. Only file:// and loopback are prototype environments.
+// If these static assets are ever hosted publicly, do not ship the development switcher.
+const prototypeEnvironment = location.protocol==='file:' || ['127.0.0.1','localhost','[::1]'].includes(location.hostname);
+$('switcher').hidden = !prototypeEnvironment;
+const round = n => +n.toFixed(2);
+let latestState;
+function fixtures(scene) {
+ // Names, rooms and arrangements are fictional. Never read dotnet/fixtures or user settings.
+ const normal = [
+  {day:0,start:1,end:2,name:'示例高等数学',room:'示例楼 A101',color:0},
+  {day:1,start:4,end:5,name:'示例程序设计',room:'示例楼 B203',color:1},
+  {day:2,start:1,end:2,name:'示例大学物理',room:'示例楼 C302',color:2},
+  {day:3,start:7,end:7,name:'示例学术写作',room:'示例楼 D102',color:3},
+  {day:4,start:9,end:11,name:'示例晚间实验',room:'示例实验楼 E205',color:4}
+ ];
+ if (scene==='short') return [normal[0],{...normal[1],start:4,end:4},{...normal[2]}];
+ if (scene==='stress') return [
+  {...normal[0],end:1,name:'示例跨学科工程设计方法与实践',group:0,groups:3},
+  {...normal[0],end:1,name:'示例课程并排乙',room:'示例楼 A102',color:1,group:1,groups:3},
+  {...normal[0],end:1,name:'示例课程并排丙',room:'示例楼 A103',color:2,group:2,groups:3},
+  {...normal[1],start:4,end:4},normal[2],normal[3],normal[4],
+  {day:5,start:5,end:5,name:'示例材料科学与工程概论',room:'示例楼 F101',color:2},
+  {day:6,start:11,end:11,name:'示例夜间单节课',room:'示例楼 G204',color:3}
+ ];
+ return normal;
+}
+function paintUrl(input) {
+ const params = new URLSearchParams({variant,...Object.fromEntries(Object.keys(defaults).map(k=>[k,input[k]]))});
+ history.replaceState(null,'',location.pathname+'?'+params);
+}
+function render() {
+ const input = Object.fromEntries(Object.keys(defaults).map(k=>[k,$(k).type==='number'?+$(k).value:$(k).value]));
+ paintUrl(input);
+ const sessions = fixtures(input.scene), first = Math.min(...sessions.map(b=>b.start)), last = Math.max(...sessions.map(b=>b.end));
+ const rows = Array.from({length:last-first+1},(_,i)=>first+i), n=rows.length;
+ const occupied = rows.map(r=>sessions.some(b=>r>=b.start && r<=b.end));
+ const fontForBlock = b=>Math.min(input.font,Math.max(9.5,Math.min(12,(((input.width-64)/7/(b.groups||1))-2)/7)));
+ // B rearranges metadata into one line; C keeps three. Padding+border is 8 logical units.
+ // Row lower bounds are proposal parameters, never an accessibility/readability certification.
+ const textRequired = b => (fontForBlock(b)*1.25 + (variant==='B'?1:2)*Math.max(9,fontForBlock(b)-.5)*1.25 + 8 + 2) / (b.end-b.start+1);
+ const minimums = rows.map((r,i)=>variant==='A'?input.floor:Math.max(input.floor,...sessions.filter(b=>r>=b.start&&r<=b.end).map(textRequired)));
+ if (variant==='B') minimums.fill(Math.max(...minimums));
+ const fixed={topBar:34,summary:30,canvasTopPadding:6,weekdayHeader:28,bottomPadding:6};
+ const fixedHeight = Object.values(fixed).reduce((a,b)=>a+b,0);
+ const candidateMin = fixedHeight + minimums.reduce((a,b)=>a+b,0);
+ const actualHeight = Math.max(input.height,candidateMin);
+ const extra = actualHeight-candidateMin;
+ const weights = occupied.map(has=>variant==='C'?(has?1:.35):1), weightSum=weights.reduce((a,b)=>a+b,0);
+ const heights = minimums.map((h,i)=>h+extra*weights[i]/weightSum);
+ const tops=[0];heights.forEach(h=>tops.push(tops[tops.length-1]+h));
+ const gridHeight=tops.at(-1), cell=(input.width-64)/7;
+ $('widget').style.width=input.width+'px';$('widget').style.height=actualHeight+'px';
+ document.querySelector('.widget-header > span:nth-of-type(2)').textContent='今日 '+sessions.filter(b=>b.day===0).length+' 节';
+ $('widget').style.background=input.theme==='dark'?'rgba(26,32,40,.94)':'rgba(237,242,247,.97)';
+ $('widget').style.color=input.theme==='dark'?'#e2e6ed':'#233344';
+ $('days').innerHTML=['周一','周二','周三','周四','周五','周六','周日'].map((d,i)=>`<div class="${i===0?'today':i>=5?'weekend':''}">${d}</div>`).join('');
+ $('grid').style.height=gridHeight+'px';$('grid').replaceChildren();
+ rows.forEach((r,i)=>{
+  if (!occupied[i]) {const stripe=document.createElement('div');stripe.className='empty-stripe';Object.assign(stripe.style,{top:tops[i]+'px',height:heights[i]+'px'});$('grid').append(stripe);}
+  const line=document.createElement('div');line.className='gridline';line.style.top=tops[i]+'px';$('grid').append(line);
+  const label=document.createElement('div');label.className='slot'+(!occupied[i]?' empty':'');label.textContent=`${r} · ${starts[r-1]}`;Object.assign(label.style,{top:tops[i]+'px',height:heights[i]+'px',fontSize:Math.max(9,Math.min(13,heights[i]*.24))+'px'});$('grid').append(label);
+ });
+ const endline=document.createElement('div');endline.className='gridline';endline.style.top=gridHeight+'px';$('grid').append(endline);
+ for(let i=0;i<=7;i++){const line=document.createElement('div');line.className='vline';line.style.left=(i*cell)+'px';$('grid').append(line);}
+ const dark=[['#6598d52a','#75ade655','#bedbff'],['#7bb6a52a','#8cc9b655','#b4e7d8'],['#a68bd02a','#b79ae555','#d8c4fc'],['#c9a0672a','#e0b37455','#efd4a6'],['#cc89952a','#df9ba655','#f3c1cb']];
+ const light=[['#d5e6fc','#87a9d5','#244368'],['#d5eae0','#82b6a1','#235747'],['#e8dff7','#ac94c7','#543c71'],['#f2e3ca','#cfad77','#644a23'],['#f5dfe5','#ca9ba7','#713b4a']];
+ const palette=input.theme==='dark'?dark:light;
+ const blockStates=[];
+ sessions.forEach((b,index)=>{
+  const start=b.start-first,end=b.end-first+1,height=tops[end]-tops[start]-2;
+  const width=cell/(b.groups||1)-2, left=b.day*cell+(b.group||0)*cell/(b.groups||1)+1;
+  let font=fontForBlock(b);
+  if(variant==='A') font=Math.max(7,Math.min(font,(height-8)/(3*1.25)));
+  const block=document.createElement('div');block.className='block variant-'+variant;block.tabIndex=0;
+  const tip=`${b.name}\n${b.room}\n周${b.day+1} 第 ${b.start} 至 ${b.end} 节\n${starts[b.start-1]} 至 ${ends[b.end-1]}\n第 1 至 16 教学周 · 虚构安排`;
+  block.title=tip;block.setAttribute('aria-label',tip);
+  Object.assign(block.style,{left:left+'px',top:(tops[start]+1)+'px',width:width+'px',height:height+'px',fontSize:font+'px'});
+  ['--tint','--edge','--ink'].forEach((key,i)=>block.style.setProperty(key,palette[b.color][i]));
+  const course=document.createElement('div');course.className='course';course.textContent=b.name;
+  const room=document.createElement('div');room.className='room';room.textContent=b.room;room.style.fontSize=Math.max(7,font-.5)+'px';
+  const weeks=document.createElement('div');weeks.className='weeks';weeks.textContent='1–16 周';weeks.style.fontSize=Math.max(7,font-1)+'px';
+  const details=document.createElement('div');details.className='details';details.append(room,weeks);block.append(course,details);$('grid').append(block);
+  const clipped=block.scrollHeight>block.clientHeight+1;
+  if(clipped)block.classList.add('clipped');
+  blockStates.push({id:index,name:b.name,day:b.day+1,start:b.start,end:b.end,group:b.group||0,groups:b.groups||1,top:round(tops[start]),height:round(height),width:round(width),font:round(font),verticalTextClipped:clipped,horizontalEllipsis:[course,room,weeks].some(e=>e.scrollWidth>e.clientWidth+1)});
+ });
+ const clipped=blockStates.filter(b=>b.verticalTextClipped).length;
+ const fontRange=[Math.min(...blockStates.map(b=>b.font)),Math.max(...blockStates.map(b=>b.font))];
+ const underFont=fontRange[0]<input.font-.1;
+ const legacyRow=Math.max(34,Math.min(52,Math.floor((input.height-76)/n)));
+ const legacyRequired=fixedHeight+n*legacyRow;
+ latestState={prototype:true,verdict:'待用户浏览器比较及 Windows 确认，未认可任何下限',variant,strategy:names[variant],fixedDate:'2026-09-28 07:59 +08:00',weekView:'Current / 第 3 教学周',weekdays:'周一至周日',...input,actualClientLogical:{width:input.width,height:round(actualHeight)},fixedRegions:fixed,fixedHeight,rowCount:n,firstSlot:first,lastSlot:last,middleEmptySlots:rows.filter((_,i)=>!occupied[i]),rowGeometry:rows.map((slot,i)=>({slot,occupied:occupied[i],minimum:round(minimums[i]),height:round(heights[i]),top:round(tops[i])})),candidateMinHeight:round(candidateMin),formula:'固定区 104 + 每个节次候选下限之和；不是已认可的生产最小高度',gridHeight:round(gridHeight),allRowsVisible:Math.abs(actualHeight-(fixedHeight+gridHeight))<.1,verticalTextClippedCount:clipped,renderedCourseFontRange:fontRange.map(round),blocks:blockStates,browser:{viewportCss:{width:innerWidth,height:innerHeight},devicePixelRatio:devicePixelRatio,visualViewportScale:visualViewport?.scale??1,estimatedWidgetPhysicalPx:{width:round(input.width*devicePixelRatio),height:round(actualHeight*devicePixelRatio)},warning:'DPR 可能混合 OS 缩放与浏览器缩放，不能据此反推 Windows DPI。CSS px 仅用于近似逻辑 DIP。请手动保持浏览器 100%。'},legacyReference:{rowFloor:34,fontRule:'课程名由块宽决定，9.5 至 12，不随行高缩小',predictedRowHeight:legacyRow,predictedContentHeight:legacyRequired,predictedOverflow:Math.max(0,legacyRequired-input.height),staticEstimateOnly:true},persistence:'仅内存；URL 只保存比较条件；反馈不进入 URL'};
+ $('strategy').textContent=explanations[variant];$('variant-label').textContent=variant+' · '+names[variant];
+ const metrics=[['客户区实际高度',round(actualHeight)+'','逻辑单位；请求 '+input.height],['候选最小高度',round(candidateMin)+'','未认可；随场景与排版变化'],['节次行高',round(Math.min(...heights))+'–'+round(Math.max(...heights)),'逻辑单位；'+n+' 行均保留'],['实际课程名字号',fontRange.map(round).join('–'),'CSS px；并排块可能更小'],['固定信息区',fixedHeight+'','34 + 30 + 6 + 28 + 6']];
+ $('metrics').innerHTML=metrics.map(([label,value,sub])=>`<div class="metric"><b>${value}</b><span>${label}</span><span>${sub}</span></div>`).join('');
+ $('warning').textContent=(actualHeight>input.height+.1?`请求高度放不下当前候选下限，预览增加至 ${round(actualHeight)}；这是比较所需空间，不是空间不足时的产品契约。 `:'所有节次与色块几何均在客户区内，无纵向滚动。 ')+(underFont?'有课程名字号低于输入字号，请特别判断是否能读。 ':'')+(clipped?`${clipped} 个色块有纵向文字溢出，此条件未通过基本文字容纳检查。 `:'')+'浏览器 100% 比较；不得仅凭预览或截图认定 WinUI 可读性。';
+ $('stage-caption').textContent=`原尺寸预览，不自动适配缩小 · ${input.width} × ${round(actualHeight)} CSS px · DPR ${round(devicePixelRatio)} · 星期范围固定周一至周日`;
+ $('formula').textContent=`候选 Hmin = 顶栏 34 + 摘要 30 + 顶留白 6 + 星期头 28 + 底留白 6 + Σ(各节次下限) = ${round(candidateMin)}。改变候选行高/字号会改变此值，尚无获认可的生产阈值。`;
+ $('baseline').textContent=`现行静态参考：同尺寸下估算行高 ${legacyRow} DIP，内容需要 ${legacyRequired} DIP，预计超出 ${Math.max(0,legacyRequired-input.height)} DIP。现有 34 DIP 下限仅是代码基线。原型 A/B/C 均不是现行 WinUI 渲染器的等价复刻。`;
+ $('state').textContent=JSON.stringify(latestState,null,2);
+}
+function switchVariant(direction){variant=variants[(variants.indexOf(variant)+direction+variants.length)%variants.length];render();}
+$('previous').onclick=()=>switchVariant(-1);$('next').onclick=()=>switchVariant(1);
+window.addEventListener('keydown',event=>{if(event.target.closest('input,textarea,select,[contenteditable]'))return;if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();switchVariant(event.key==='ArrowLeft'?-1:1);}});
+for(const key of Object.keys(defaults)){
+ $(key).addEventListener('input',()=>{if($(key).type==='number'){if(!$(key).value)return;$(key).value=Math.max(+$(key).min,Math.min(+$(key).max,+$(key).value));$(key+'-range').value=$(key).value;}render();});
+ if($(key+'-range')) $(key+'-range').addEventListener('input',()=>{$(key).value=$(key+'-range').value;render();});
+}
+$('reset').onclick=()=>{for(const [key,value]of Object.entries(defaults)){$(key).value=value;if($(key+'-range'))$(key+'-range').value=value;}render();};
+async function copy(text){try{await navigator.clipboard.writeText(text);$('copy-status').textContent='已复制';}catch{const temp=document.createElement('textarea');temp.value=text;document.body.append(temp);temp.select();const ok=document.execCommand('copy');temp.remove();$('copy-status').textContent=ok?'已复制':'复制不可用，请手动选取状态文字';}}
+$('share').onclick=()=>copy(location.href);
+$('copy-feedback').onclick=()=>copy(JSON.stringify({feedback:$('notes').value,state:latestState},null,2));
+window.addEventListener('popstate',()=>location.reload());
+let resizeFrame;window.addEventListener('resize',()=>{cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(render);});
+render();
+</script>
+</body>
+</html>
