@@ -28,7 +28,7 @@
 <div class="stage-scroll"><div class="stage-caption" id="stage-caption"></div><article class="widget" id="widget" aria-label="虚构 Windows 课表挂件"><div class="widget-header"><div class="widget-title">示例大学 · 秋季学期</div><span>第 3 教学周</span><span>今日 2 节</span><span class="widget-tools" aria-hidden="true">◫ ⚙ ⋯</span></div><div class="summary"><span class="marker">今</span><span class="name">下一次上课：示例高等数学</span><span class="room">示例楼 A101</span><span class="aux">09-28 周一 08:00</span></div><div class="days" id="days"></div><div class="grid" id="grid"></div></article></div>
 <p class="hint">底部 ← → 切换方案，也可用键盘左右键。悬停或聚焦色块查看完整虚构安排。斜纹是整周均无课的节次，不是折叠区。虚线框表示浏览器测得文字溢出，该条件不可据此认定可读。页面可以滚动，挂件内部不滚动；预览不自动缩小来塞进页面。</p>
 <section class="state"><details open><summary>当前状态与高度预算 · 每次操作更新</summary><p id="formula"></p><p id="baseline" class="muted"></p><pre id="state"></pre></details></section>
-<section class="feedback"><label for="notes">记下你的判断，例如“B 完整跨度可读，但单节课教室太挤”。仅存于当前页面内存，不会自动上传。</label><textarea id="notes" placeholder="还没有任何被认可的行高、字号或最小高度。请在日常 Windows 屏幕上复核候选。"></textarea><button id="copy-feedback">复制状态与反馈</button><span id="copy-status" role="status"></span></section>
+<section class="feedback"><label for="notes">记下你的判断，例如“B 完整跨度可读，但单节课教室太挤”。仅存于当前页面内存，不会自动上传。</label><textarea id="notes" placeholder="C 的实际高 530 密集场景已获观感反馈；最小高度推导规则仍待确认。可继续记录不接受的退化。"></textarea><button id="copy-feedback">复制状态与反馈</button><span id="copy-status" role="status"></span></section>
 <nav class="switcher" id="switcher" aria-label="仅原型环境的变体切换"><button id="previous" aria-label="上一个变体">←</button><div class="label"><span id="variant-label"></span><small>抛弃式原型 · 非应用工具栏</small></div><button id="next" aria-label="下一个变体">→</button></nav>
 <script>
 'use strict';
@@ -58,6 +58,8 @@ for (const [key, value] of Object.entries(defaults)) {
 const prototypeEnvironment = location.protocol==='file:' || ['127.0.0.1','localhost','[::1]'].includes(location.hostname);
 $('switcher').hidden = !prototypeEnvironment;
 const round = n => +n.toFixed(2);
+// Keep time labels consistent even when C assigns different row heights.
+const timeLabelFont = 11;
 let latestState;
 function fixtures(scene) {
  // Names, rooms and arrangements are fictional. Never read dotnet/fixtures or user settings.
@@ -113,7 +115,7 @@ function render() {
  rows.forEach((r,i)=>{
   if (!occupied[i]) {const stripe=document.createElement('div');stripe.className='empty-stripe';Object.assign(stripe.style,{top:tops[i]+'px',height:heights[i]+'px'});$('grid').append(stripe);}
   const line=document.createElement('div');line.className='gridline';line.style.top=tops[i]+'px';$('grid').append(line);
-  const label=document.createElement('div');label.className='slot'+(!occupied[i]?' empty':'');label.textContent=`${r} · ${starts[r-1]}`;Object.assign(label.style,{top:tops[i]+'px',height:heights[i]+'px',fontSize:Math.max(9,Math.min(13,heights[i]*.24))+'px'});$('grid').append(label);
+  const label=document.createElement('div');label.className='slot'+(!occupied[i]?' empty':'');label.textContent=`${r} · ${starts[r-1]}`;Object.assign(label.style,{top:tops[i]+'px',height:heights[i]+'px',fontSize:timeLabelFont+'px'});$('grid').append(label);
  });
  const endline=document.createElement('div');endline.className='gridline';endline.style.top=gridHeight+'px';$('grid').append(endline);
  for(let i=0;i<=7;i++){const line=document.createElement('div');line.className='vline';line.style.left=(i*cell)+'px';$('grid').append(line);}
@@ -144,7 +146,7 @@ function render() {
  const underFont=fontRange[0]<input.font-.1;
  const legacyRow=Math.max(34,Math.min(52,Math.floor((input.height-76)/n)));
  const legacyRequired=fixedHeight+n*legacyRow;
- latestState={prototype:true,verdict:'待用户浏览器比较及 Windows 确认，未认可任何下限',variant,strategy:names[variant],fixedDate:'2026-09-28 07:59 +08:00',weekView:'Current / 第 3 教学周',weekdays:'周一至周日',...input,actualClientLogical:{width:input.width,height:round(actualHeight)},fixedRegions:fixed,fixedHeight,rowCount:n,firstSlot:first,lastSlot:last,middleEmptySlots:rows.filter((_,i)=>!occupied[i]),rowGeometry:rows.map((slot,i)=>({slot,occupied:occupied[i],minimum:round(minimums[i]),height:round(heights[i]),top:round(tops[i])})),candidateMinHeight:round(candidateMin),formula:'固定区 104 + 每个节次候选下限之和；不是已认可的生产最小高度',gridHeight:round(gridHeight),allRowsVisible:Math.abs(actualHeight-(fixedHeight+gridHeight))<.1,verticalTextClippedCount:clipped,renderedCourseFontRange:fontRange.map(round),blocks:blockStates,browser:{viewportCss:{width:innerWidth,height:innerHeight},devicePixelRatio:devicePixelRatio,visualViewportScale:visualViewport?.scale??1,estimatedWidgetPhysicalPx:{width:round(input.width*devicePixelRatio),height:round(actualHeight*devicePixelRatio)},warning:'DPR 可能混合 OS 缩放与浏览器缩放，不能据此反推 Windows DPI。CSS px 仅用于近似逻辑 DIP。请手动保持浏览器 100%。'},legacyReference:{rowFloor:34,fontRule:'课程名由块宽决定，9.5 至 12，不随行高缩小',predictedRowHeight:legacyRow,predictedContentHeight:legacyRequired,predictedOverflow:Math.max(0,legacyRequired-input.height),staticEstimateOnly:true},persistence:'仅内存；URL 只保存比较条件；反馈不进入 URL'};
+ latestState={prototype:true,verdict:'用户倾向 C，认可默认文字及实际高 530 的密集场景观感；左侧时间已统一字号，最小高度规则待最终确认',timeLabelFont,variant,strategy:names[variant],fixedDate:'2026-09-28 07:59 +08:00',weekView:'Current / 第 3 教学周',weekdays:'周一至周日',...input,actualClientLogical:{width:input.width,height:round(actualHeight)},fixedRegions:fixed,fixedHeight,rowCount:n,firstSlot:first,lastSlot:last,middleEmptySlots:rows.filter((_,i)=>!occupied[i]),rowGeometry:rows.map((slot,i)=>({slot,occupied:occupied[i],minimum:round(minimums[i]),height:round(heights[i]),top:round(tops[i])})),candidateMinHeight:round(candidateMin),formula:'固定区 104 + 每个节次候选下限之和；不是已认可的生产最小高度',gridHeight:round(gridHeight),allRowsVisible:Math.abs(actualHeight-(fixedHeight+gridHeight))<.1,verticalTextClippedCount:clipped,renderedCourseFontRange:fontRange.map(round),blocks:blockStates,browser:{viewportCss:{width:innerWidth,height:innerHeight},devicePixelRatio:devicePixelRatio,visualViewportScale:visualViewport?.scale??1,estimatedWidgetPhysicalPx:{width:round(input.width*devicePixelRatio),height:round(actualHeight*devicePixelRatio)},warning:'DPR 可能混合 OS 缩放与浏览器缩放，不能据此反推 Windows DPI。CSS px 仅用于近似逻辑 DIP。请手动保持浏览器 100%。'},legacyReference:{rowFloor:34,fontRule:'课程名由块宽决定，9.5 至 12，不随行高缩小',predictedRowHeight:legacyRow,predictedContentHeight:legacyRequired,predictedOverflow:Math.max(0,legacyRequired-input.height),staticEstimateOnly:true},persistence:'仅内存；URL 只保存比较条件；反馈不进入 URL'};
  $('strategy').textContent=explanations[variant];$('variant-label').textContent=variant+' · '+names[variant];
  const metrics=[['客户区实际高度',round(actualHeight)+'','逻辑单位；请求 '+input.height],['候选最小高度',round(candidateMin)+'','未认可；随场景与排版变化'],['节次行高',round(Math.min(...heights))+'–'+round(Math.max(...heights)),'逻辑单位；'+n+' 行均保留'],['实际课程名字号',fontRange.map(round).join('–'),'CSS px；并排块可能更小'],['固定信息区',fixedHeight+'','34 + 30 + 6 + 28 + 6']];
  $('metrics').innerHTML=metrics.map(([label,value,sub])=>`<div class="metric"><b>${value}</b><span>${label}</span><span>${sub}</span></div>`).join('');
