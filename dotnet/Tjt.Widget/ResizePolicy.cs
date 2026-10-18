@@ -98,29 +98,36 @@ public static class ResizePolicy
     }
 
     /// <summary>
-    /// 缩放目标尺寸（DIP 整数）。窗口尺寸<strong>一律取整 DIP</strong>：
-    /// <c>settings.json</c> 存的就是 DIP，小数会让"存下去 → 恢复回来"每次磨掉一点，
-    /// 也就是 Electron 侧踩过的尺寸棘轮。
+    /// 缩放目标尺寸，取整并限制下限。默认使用 DIP；若外壳传物理像素，须同时传同单位的最小尺寸。
+    /// 本函数不转换 DPI。DIP 持久化仍由外壳负责，避免尺寸反复转换后的棘轮。
     /// </summary>
-    /// <param name="width">当前宽（DIP）。</param>
-    /// <param name="height">当前高（DIP）。</param>
-    public static WindowBounds ClampSize(double width, double height) =>
-        new(0, 0,
-            Math.Max(MinWidth, (int)Math.Round(width)),
-            Math.Max(MinHeight, (int)Math.Round(height)));
+    /// <param name="width">当前宽。</param>
+    /// <param name="height">当前高。</param>
+    /// <param name="minWidth">同单位的最小宽度，必须为正。</param>
+    /// <param name="minHeight">同单位的最小高度，必须为正。</param>
+    public static WindowBounds ClampSize(double width, double height,
+        int minWidth = MinWidth, int minHeight = MinHeight)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minWidth);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minHeight);
+        return new(0, 0,
+            Math.Max(minWidth, (int)Math.Round(width)),
+            Math.Max(minHeight, (int)Math.Round(height)));
+    }
 
     /// <summary>
-    /// 从一个角/边解算出**期望外框**（DIP）。
+    /// 从一个角/边解算出期望外框。默认使用 DIP；外壳也可传同单位的物理像素外框、位移和最小尺寸。
     ///
-    /// <para>缩放"从哪条边拉"决定哪条边不动：拉左/上边时右下角固定，拉右/下边时左上角固定。
-    /// 位置同样取整 DIP —— 否则 <c>AppWindow.Move</c> 每帧都被四舍五入一次，
-    /// 拖动过程中窗口会以 1px 为单位抖动。</para>
+    /// <para>拉左/上边时右下角固定，拉右/下边时左上角固定。位置和尺寸取整，本函数不转换 DPI。</para>
     /// </summary>
-    /// <param name="start">手势开始时的外框（DIP）。</param>
+    /// <param name="start">手势开始时的外框。</param>
     /// <param name="grip">抓取边。</param>
-    /// <param name="dx">光标位移 X（DIP）。</param>
-    /// <param name="dy">光标位移 Y（DIP）。</param>
-    public static WindowBounds Resolve(WindowBounds start, ResizeGrip grip, double dx, double dy)
+    /// <param name="dx">光标位移 X。</param>
+    /// <param name="dy">光标位移 Y。</param>
+    /// <param name="minWidth">与 start 同单位的最小宽度，必须为正。</param>
+    /// <param name="minHeight">与 start 同单位的最小高度，必须为正。</param>
+    public static WindowBounds Resolve(WindowBounds start, ResizeGrip grip, double dx, double dy,
+        int minWidth = MinWidth, int minHeight = MinHeight)
     {
         ArgumentNullException.ThrowIfNull(start);
 
@@ -154,7 +161,7 @@ public static class ResizePolicy
         }
 
         // 尺寸先夹到下限，再按"哪条边不动"把被夹掉的部分还回去
-        var clamped = ClampSize(width, height);
+        var clamped = ClampSize(width, height, minWidth, minHeight);
         if (grip is ResizeGrip.Left or ResizeGrip.TopLeft or ResizeGrip.BottomLeft) left = right - clamped.Width;
         if (grip is ResizeGrip.Top or ResizeGrip.TopLeft or ResizeGrip.TopRight) top = bottom - clamped.Height;
 

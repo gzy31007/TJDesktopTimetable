@@ -169,4 +169,73 @@ public class ResizePolicyTests
         Assert.Equal(ResizePolicy.MinHeight, size.Height);
         Assert.True(size.IsUsable);
     }
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(2.0)]
+    [InlineData(1.333333)]
+    public void 外壳可传DPI换算后的物理像素最小值且不被再次缩放(double scale)
+    {
+        var minWidth = (int)Math.Ceiling(ResizePolicy.MinWidth * scale);
+        var minHeight = (int)Math.Ceiling(ResizePolicy.MinHeight * scale);
+        var clamped = ResizePolicy.ClampSize(1, 1, minWidth, minHeight);
+        Assert.Equal(minWidth, clamped.Width);
+        Assert.Equal(minHeight, clamped.Height);
+        var large = ResizePolicy.ClampSize(1000.4, 900.6, minWidth, minHeight);
+        Assert.Equal(1000, large.Width);
+        Assert.Equal(901, large.Height);
+    }
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(2.0)]
+    public void 各抓取边缩到物理像素下限时保持对边固定(double scale)
+    {
+        var start = Window();
+        var minWidth = (int)Math.Ceiling(ResizePolicy.MinWidth * scale);
+        var minHeight = (int)Math.Ceiling(ResizePolicy.MinHeight * scale);
+        foreach (var grip in Enum.GetValues<ResizeGrip>().Where(grip => grip != ResizeGrip.None))
+        {
+            var left = grip is ResizeGrip.Left or ResizeGrip.TopLeft or ResizeGrip.BottomLeft;
+            var right = grip is ResizeGrip.Right or ResizeGrip.TopRight or ResizeGrip.BottomRight;
+            var top = grip is ResizeGrip.Top or ResizeGrip.TopLeft or ResizeGrip.TopRight;
+            var bottom = grip is ResizeGrip.Bottom or ResizeGrip.BottomLeft or ResizeGrip.BottomRight;
+            var result = ResizePolicy.Resolve(start, grip, left ? 5000 : right ? -5000 : 0,
+                top ? 5000 : bottom ? -5000 : 0, minWidth, minHeight);
+            Assert.Equal(left || right ? minWidth : start.Width, result.Width);
+            Assert.Equal(top || bottom ? minHeight : start.Height, result.Height);
+            if (left) Assert.Equal(start.X + start.Width, result.X + result.Width);
+            else Assert.Equal(start.X, result.X);
+            if (top) Assert.Equal(start.Y + start.Height, result.Y + result.Height);
+            else Assert.Equal(start.Y, result.Y);
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 240, "minWidth")]
+    [InlineData(-1, 240, "minWidth")]
+    [InlineData(320, 0, "minHeight")]
+    [InlineData(320, -1, "minHeight")]
+    public void 可选最小尺寸必须为正且两个入口都验证(int minWidth, int minHeight, string parameter)
+    {
+        var clampError = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ResizePolicy.ClampSize(1000, 700, minWidth, minHeight));
+        Assert.Equal(parameter, clampError.ParamName);
+        var resolveError = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ResizePolicy.Resolve(Window(), ResizeGrip.BottomRight, 0, 0, minWidth, minHeight));
+        Assert.Equal(parameter, resolveError.ParamName);
+    }
+
+    [Fact]
+    public void 可选最小值缺省与显式旧值一致且无抓取边不改变外框()
+    {
+        Assert.Equal(ResizePolicy.ClampSize(100, 150), ResizePolicy.ClampSize(100, 150, 320, 240));
+        Assert.Equal(ResizePolicy.Resolve(Window(), ResizeGrip.TopLeft, 5000, 5000),
+            ResizePolicy.Resolve(Window(), ResizeGrip.TopLeft, 5000, 5000, 320, 240));
+        Assert.Equal(Window(), ResizePolicy.Resolve(Window(), ResizeGrip.None, 100, -200, 640, 480));
+    }
 }

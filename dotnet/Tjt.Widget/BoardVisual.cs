@@ -6,7 +6,7 @@ namespace Tjt.Widget;
 /// <summary>挂件网格几何（TS 侧 <see cref="Tjt.Core.Layout.FitGeometry"/> 的返回结构；行列数保留以便调用方自查）。</summary>
 /// <param name="GutterWidth">左侧节次标签列宽。</param>
 /// <param name="CellWidth">单天列宽。</param>
-/// <param name="RowHeight">单节行高。</param>
+/// <param name="RowHeight">旧布局的单节行高；内容布局仅表示基础候选，实际值见 BoardVisual.Rows。</param>
 /// <param name="HeaderHeight">表头（星期）高度。</param>
 /// <param name="Rows">网格行数。</param>
 /// <param name="Cols">网格列数。</param>
@@ -70,7 +70,11 @@ public sealed record BlockVisual(
     double FontSize,
     bool IsSpecial,
     bool IsStacked,
-    BlockTint Tint);
+    BlockTint Tint)
+{
+    /// <summary>内容布局的三行真实量测高度；旧等高布局为 null。</summary>
+    public BlockContentGeometry? Content { get; init; }
+}
 
 /// <summary>顶部信息条（对应渲染层 WidgetApp.vue 的 <c>.widget-bar</c>）。</summary>
 /// <param name="Title">学期名（如 <c>2026-2027学年第1学期</c>）。</param>
@@ -107,12 +111,18 @@ public sealed record BoardVisual(
     bool NeedsHorizontalScroll,
     bool NeedsVerticalScroll)
 {
+    /// <summary>各节次几何；Top 相对 Grid.Top，画网格时应使用此集合。</summary>
+    public IReadOnlyList<BoardRowGeometry> Rows { get; init; } = [];
+
+    /// <summary>全部内容免滚动所需的客户区高度，含顶栏、摘要、星期头、上下留白及外壳量测的客户区不可绘制留白。</summary>
+    public double RequiredHeight { get; init; }
+
     public NextClassVisual NextClass { get; init; } = NextClassSummary.Build(
         new NextClassGroup(NextClassStatus.InformationInsufficient, null, [], ""), 0);
 }
 
 /// <summary>把 <see cref="BoardState"/> 编译成 <see cref="BoardVisual"/>。</summary>
-public static class BoardVisualBuilder
+public static partial class BoardVisualBuilder
 {
     /// <summary>节次标签在行内的下移比例（渲染层 <c>slotTop()</c> 用的 0.32）。</summary>
     private const double SlotLabelTopRatio = 0.32;
@@ -145,9 +155,11 @@ public static class BoardVisualBuilder
     /// <param name="nowMinutes">当前分钟数；给了且落在节次范围内才画"当前时间线"。</param>
     /// <param name="minCellWidth">列宽下限（与核心库一致）。</param>
     /// <param name="availableHeight">
-    /// 可用总高（含顶部条）；<c>null</c> 表示"不限高"（按列宽算出的行高为准）。
-    /// 给了就按它压缩行高，把课表铺满窗口高度。
+    /// 可用总高（含顶部条）；旧布局按它压缩行高，内容布局只据此判断是否需要临时滚动。
+    /// <c>null</c> 表示不限高。
     /// </param>
+    /// <param name="includeNextClassRow">是否预算独立摘要行。</param>
+    /// <param name="contentLayout">显式启用三行内容预算。平台外壳提供真实文字量测，不传则保留旧布局。</param>
     public static BoardVisual Build(
         BoardState state,
         double availableWidth,
@@ -155,9 +167,13 @@ public static class BoardVisualBuilder
         int? nowMinutes = null,
         double minCellWidth = 72,
         double? availableHeight = null,
-        bool includeNextClassRow = false)
+        bool includeNextClassRow = false,
+        BoardContentLayout? contentLayout = null)
     {
         ArgumentNullException.ThrowIfNull(state);
+        if (contentLayout is not null)
+            return BuildContent(state, availableWidth, dark, nowMinutes, minCellWidth,
+                availableHeight, includeNextClassRow, contentLayout);
 
         // Linux 外壳仍只渲染原顶栏；Windows 显式为独立摘要行预留高度。
         var summaryHeight = includeNextClassRow ? NextClassSummary.RowHeight : 0;
@@ -236,6 +252,9 @@ public static class BoardVisualBuilder
             NeedsHorizontalScroll: canvasWidth > availableWidth + 0.5,
             NeedsVerticalScroll: availableHeight is { } h && canvasHeight + HeaderHeight + summaryHeight > h + 0.5)
         {
+            Rows = state.Rows.Select((row, position) => new BoardRowGeometry(
+                row.Index, position * geometry.RowHeight, geometry.RowHeight)).ToArray(),
+            RequiredHeight = canvasHeight + HeaderHeight + summaryHeight,
             NextClass = NextClassSummary.Build(state.NextClass, availableWidth),
         };
     }
