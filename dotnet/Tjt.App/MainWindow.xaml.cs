@@ -22,8 +22,8 @@ namespace Tjt.App;
 /// <see cref="BoardRenderer"/>（数据由 <c>Tjt.Widget</c> 算好）。
 ///
 /// <para><b>自适应</b>：窗口尺寸一变就按新尺寸重建整棵可视树（语义与渲染层重新计算布局一致）。
-/// 纵向会把行高压到刚好铺满（下限 34），横向保持最小列宽 72、装不下就横向滚动 ——
-/// 也就是说"缩窗口"不会把格子压成一条缝，而是先压行高、再出滚动条。</para>
+/// 纵向按三行文字实测高度分配非等高节次，装不下时临时滚动；不随高度缩字或撑窗。
+/// 横向保持既有最小列宽 72，装不下就横向滚动。</para>
 ///
 /// <para><b>尺寸换算的坑</b>：XAML 的 <c>Width</c>/<c>Height</c> 是 DIP，而 <c>AppWindow.ResizeClient</c>
 /// 要物理像素。150% 缩放下直接把 DIP 当像素用，窗口会比预期小一半、网格被裁掉。</para>
@@ -68,8 +68,8 @@ public sealed partial class MainWindow : Window
     /// <summary>最近一次新版本检查的结论（见 <see cref="CurrentUpdate"/>）。</summary>
     private UpdateCheckResult? _update;
     private DesktopLayer? _layer;
-    private WindowBounds _targetBounds = new(0, 0, DefaultWidth, DefaultHeight);
-    private bool _userSizedRecently;
+    private bool _workAreaRefreshQueued;
+    private bool _fittingWorkArea;
     private BackdropHelper? _backdrop;
     private WindowDrag? _drag;
     private WindowEdgeResize? _edgeResize;
@@ -81,12 +81,15 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // 共享几何和字体量测使用连续 DIP；避免各文字行、画布和固定区独立取整累积。
+        Host.UseLayoutRounding = false;
+        Host.Loaded += (_, _) => DispatcherQueue.TryEnqueue(() => Render("内容挂载后复核字高"));
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(null);
         ConfigureWindowChrome();
         // 任务栏 / Alt-Tab 也读窗口图标（挂件自己没有标题栏，但这两个地方会用上）
         WindowIcon.Apply(this);
-        SizeChanged += OnSizeChanged;
+        Host.SizeChanged += OnContentSizeChanged;
         Closed += (_, _) => Teardown();
         _nowTimer.Interval = NowRefreshInterval;
         _nowTimer.Tick += OnClockTick;
@@ -346,6 +349,7 @@ public sealed partial class MainWindow : Window
         // 4.5) `--size WxH` 只覆盖**尺寸**（位置保持上一步的结果：同一个 --size 在任何机器上
         //      都能得到可预期的窗口，不会被上次保存的坐标带到屏幕外）。诊断实例不写设置。
         ApplyStartupSize();
+        FitWindowToWorkArea();
 
         // 5) 贴桌面层（owner 挂 SHELLDLL_DefView）+ 5 秒 owner 巡检 + 事件通道
         var desktopLayer = startup.DesktopLayer ?? _settings.DesktopLayer;
@@ -375,7 +379,7 @@ public sealed partial class MainWindow : Window
         _tearingDown = true;
         _nowTimer.Stop();
         _nowTimer.Tick -= OnClockTick;
-        SizeChanged -= OnSizeChanged;
+        Host.SizeChanged -= OnContentSizeChanged;
         if (_resumeNotification != nint.Zero)
         {
             var notification = _resumeNotification;
@@ -426,6 +430,11 @@ public sealed partial class MainWindow : Window
         var client = ClientSizeDip(handle);
         var widthDip = client.Width > 1 ? client.Width : DefaultWidth;
         var heightDip = client.Height > 1 ? client.Height : DefaultHeight;
+        // 部分 WinUI 无框窗口仍保留 1 个物理像素给 XAML 岛之外的客户区。
+        // 取实际差值而不是硬编码 DPI 常量，计入客户区免滚动预算。
+        var clientInsetHeight = Host.IsLoaded && Host.XamlRoot is { } xamlRoot
+            ? Math.Max(0, AppWindow.ClientSize.Height - Math.Round(xamlRoot.Size.Height * _dpiScale)) / _dpiScale
+            : 0;
 
         var board = Tjt.Core.Layout.BuildBoard(
             _loaded.Timetable.Courses,
@@ -446,11 +455,14 @@ public sealed partial class MainWindow : Window
             nowMinutes,
             minCellWidth: 72,
             availableHeight: heightDip,
-            includeNextClassRow: true);
+            includeNextClassRow: true,
+            contentLayout: new BoardContentLayout((font, semibold, width, text) =>
+                BoardRenderer.MeasureContentLine(font, semibold, width, text, Host.XamlRoot), clientInsetHeight));
 
         _currentWeek = board.CurrentWeek;
 
-        var root = BoardRenderer.Render(visual, IsDark(), BuildActions(), _root);
+        var root = BoardRenderer.Render(visual, IsDark(), BuildActions(), _root,
+            BoardScrollIdentity.Create(board, WeekViewEnabled, WeekendEnabled));
         if (!ReferenceEquals(_root, root))
         {
             Host.Children.Clear();
@@ -469,7 +481,7 @@ public sealed partial class MainWindow : Window
             visual.Geometry.RowHeight,
             visual.NeedsHorizontalScroll || visual.NeedsVerticalScroll);
 
-        AppLog.Line($"[relayout] {reason} client={widthDip:0}x{heightDip:0}dip colW={visual.Geometry.CellWidth:0} rowH={visual.Geometry.RowHeight:0.#} scroll={visual.NeedsHorizontalScroll}/{visual.NeedsVerticalScroll} blocks={visual.Blocks.Count}");
+        AppLog.Line(FormattableString.Invariant($"[relayout] {reason} client={widthDip:0.###}x{heightDip:0.###}dip required={visual.RequiredHeight:0.###}dip rows={string.Join(",", visual.Rows.Select(row => row.Height.ToString("0.###", CultureInfo.InvariantCulture)))} colW={visual.Geometry.CellWidth:0} scroll={visual.NeedsHorizontalScroll}/{visual.NeedsVerticalScroll} blocks={visual.Blocks.Count}"));
 
         // 周次视图的 ASCII 锚点（验收脚本靠它断言视图 / 日期 / 当前周 / 今日节数；不得出现中文）
         AppLog.Line(
@@ -539,7 +551,7 @@ public sealed partial class MainWindow : Window
     };
 
     /// <summary>窗口尺寸变化 → 重排（带一点去抖，拖动缩放时不必每帧都重建）。</summary>
-    private void OnSizeChanged(object sender, WindowSizeChangedEventArgs args) => Render("窗口尺寸变化");
+    private void OnContentSizeChanged(object sender, SizeChangedEventArgs args) => Render("窗口内容尺寸变化");
 
     /// <summary>
     /// 订阅三类窗口消息，把"用户开始拖动"、"拖动结束"、"窗口失活"变成事件。
@@ -560,7 +572,7 @@ public sealed partial class MainWindow : Window
             onEnd: () =>
             {
                 // 先存位置再落点：落点会改 z-order，但不动坐标
-                _userSizedRecently = true;
+                FitWindowToWorkArea();
                 SaveBounds("缩放结束");
                 _layer?.ResumeAfterInteraction("resize-end");
             });
@@ -574,8 +586,7 @@ public sealed partial class MainWindow : Window
         MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmExitSizeMove, () =>
         {
             // 先把新位置写盘，再落点：落点可能改变 z-order，但不改坐标。
-            // 标记"用户调过" → SaveBounds 会存实测外框（他想要的就是当前这个尺寸）。
-            _userSizedRecently = true;
+            FitWindowToWorkArea();
             SaveBounds("拖动结束");
             _layer?.ResumeAfterInteraction("exit-size-move");
         });
@@ -604,6 +615,9 @@ public sealed partial class MainWindow : Window
 
         _clockUnsubscribe.Add(MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmTimeChange,
             () => QueueClockRefresh("system-time-change")));
+        _clockUnsubscribe.Add(MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmDisplayChange, QueueWorkAreaRefresh));
+        _clockUnsubscribe.Add(MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmSettingChange, QueueWorkAreaRefresh));
+        _clockUnsubscribe.Add(MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmDpiChanged, QueueWorkAreaRefresh));
         _clockUnsubscribe.Add(MessageHook.Subscribe(hwnd, NativeMethods.Constants.WmShowWindow, (shown, _) =>
         {
             if (shown != nint.Zero) QueueClockRefresh("window-show-message");
@@ -626,15 +640,14 @@ public sealed partial class MainWindow : Window
         AppWindow.ResizeClient(new SizeInt32(
             (int)Math.Ceiling(clientWidth * _dpiScale),
             (int)Math.Ceiling(clientHeight * _dpiScale)));
-        _targetBounds = _targetBounds with { Width = clientWidth, Height = clientHeight };
         AppLog.Line($"[window] --size 显式尺寸 {clientWidth}x{clientHeight}dip（位置沿用上一步；本实例不写设置）");
     }
 
     /// <summary>
     /// 恢复上次保存的位置与尺寸。
     ///
-    /// 校验两件事：尺寸可用、且**至少有一部分落在某个显示器的工作区内**
-    /// —— 否则拔掉外接屏之后挂件会恢复到看不见的地方。
+    /// 优先用无损物理外框与保存比例恢复，兼容旧的整数 DIP 字段。
+    /// 恢复后检查整个外框，必要时适配当前工作区。
     /// </summary>
     private bool RestoreSavedBounds()
     {
@@ -643,73 +656,80 @@ public sealed partial class MainWindow : Window
             return false;
         }
 
-        // 保存的是外框：换算成 ResizeClient 需要的客户区（首帧没有校正值时先按外框试一次，
-        // 随后由 SaveBounds 实测出来的 FrameCorrection 收敛）。
-        var correction = _settings.FrameCorrection ?? new WindowBounds(0, 0, 15, 45);
-        var clientWidth = Math.Max(320, bounds.Width - correction.Width);
-        var clientHeight = Math.Max(240, bounds.Height - correction.Height);
-
+        var positionScale = _settings.BoundsScale is > 0 and <= 8 ? _settings.BoundsScale.Value : _dpiScale;
+        var savedPixels = _settings.BoundsPixels;
+        var exact = savedPixels is { Width: > 0, Height: > 0 } && _settings.BoundsScale is > 0 and <= 8;
         AppWindow.Move(new PointInt32(
-            (int)Math.Ceiling(bounds.X * _dpiScale),
-            (int)Math.Ceiling(bounds.Y * _dpiScale)));
-        AppWindow.ResizeClient(new SizeInt32(
-            (int)Math.Ceiling(clientWidth * _dpiScale),
-            (int)Math.Ceiling(clientHeight * _dpiScale)));
+            exact ? savedPixels!.X : (int)Math.Round(bounds.X * positionScale),
+            exact ? savedPixels!.Y : (int)Math.Round(bounds.Y * positionScale)));
+        var hwnd = WindowNative.GetWindowHandle(this);
+        var dpi = NativeMethods.GetDpiForWindow(hwnd);
+        _dpiScale = dpi > 0 ? dpi / NativeMethods.DefaultDpi : 1.0;
+        var restored = exact
+            ? WindowPlacement.RestorePhysicalBounds(savedPixels!, positionScale, _dpiScale)
+            : new WindowBounds(0, 0,
+                (int)Math.Round(Math.Max(ResizePolicy.MinWidth, bounds.Width) * _dpiScale),
+                (int)Math.Round(Math.Max(ResizePolicy.MinHeight, bounds.Height) * _dpiScale));
+        AppWindow.Resize(new SizeInt32(restored.Width, restored.Height));
+        FitWindowToWorkArea();
 
-        _targetBounds = bounds;
-
-        if (!IsVisibleOnSomeDisplay(bounds))
-        {
-            return false;
-        }
-
-        AppLog.Line($"[window] 已恢复上次位置 bounds={bounds} correction={correction} → 请求 client={clientWidth}x{clientHeight}dip，实际={AppWindow.ClientSize.Width}x{AppWindow.ClientSize.Height}px");
+        AppLog.Line($"[window] 已恢复外框 bounds={bounds} positionScale={positionScale:0.###}");
         AppLog.Line($"[window] 恢复后实测 {MeasureGeometry()}");
         return true;
     }
 
-    /// <summary>
-    /// 保存的位置是否还看得见（至少左上角落在某个显示器上）。
-    ///
-    /// 不需要枚举所有显示器：<see cref="DisplayArea.GetFromPoint"/> 在"该点不在任何显示器上"时
-    /// 会返回 <see cref="DisplayAreaFallback.Primary"/>，据此就能判定。WASDK 1.8 **没有**
-    /// <c>DisplayArea.FindAll()</c>，而构造 <c>DisplayId</c> 的投影类型也不稳（真机实测两次编译错），
-    /// 所以走这条更简单也更稳的路。
-    /// </summary>
-    private bool IsVisibleOnSomeDisplay(WindowBounds bounds)
+    /// <summary>仅按实际屏幕工作区适配外框，不按课表高度扩缩。</summary>
+    private void FitWindowToWorkArea()
     {
-        // 左上角往内收一点：贴边摆放时 (x, y) 可能刚好在边界外半个像素
-        var x = bounds.X + 8;
-        var y = bounds.Y + 8;
-        var area = DisplayArea.GetFromPoint(new PointInt32(x, y), DisplayAreaFallback.None);
-        if (area is null)
-        {
-            AppLog.Line($"[window] 保存的位置 ({x},{y}) 不在任何显示器上，回退右下角");
-            return false;
-        }
-
+        if (_fittingWorkArea || _tearingDown) return;
+        var hwnd = WindowNative.GetWindowHandle(this);
+        if (!NativeMethods.GetWindowRect(hwnd, out var rect)) return;
+        var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest);
+        if (area is null) return;
+        var dpi = NativeMethods.GetDpiForWindow(hwnd);
+        _dpiScale = dpi > 0 ? dpi / NativeMethods.DefaultDpi : 1.0;
+        var minWidth = (int)Math.Ceiling(ResizePolicy.MinWidth * _dpiScale);
+        var minHeight = (int)Math.Ceiling(ResizePolicy.MinHeight * _dpiScale);
         var work = area.WorkArea;
-        var inside = x >= work.X && x < work.X + work.Width && y >= work.Y && y < work.Y + work.Height;
-        if (!inside)
+        if (work.Width < minWidth || work.Height < minHeight)
         {
-            AppLog.Line($"[window] 保存的位置 ({x},{y}) 落在工作区之外（work={work.X},{work.Y} {work.Width}x{work.Height}），回退右下角");
+            AppLog.Line("[window-fit] unsupported work area below basic window minimum");
+            return;
         }
+        var current = new WindowBounds(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        var fitted = WindowPlacement.FitToWorkArea(current,
+            new WindowBounds(work.X, work.Y, work.Width, work.Height), minWidth, minHeight);
+        if (current == fitted) return;
+        _fittingWorkArea = true;
+        try
+        {
+            NativeMethods.SetWindowPos(hwnd, nint.Zero, fitted.X, fitted.Y, fitted.Width, fitted.Height,
+                NativeMethods.Constants.SwpNoZOrder | NativeMethods.Constants.SwpNoActivate);
+            AppLog.Line($"[window-fit] px={current} -> {fitted} scale={_dpiScale:0.###}");
+        }
+        finally { _fittingWorkArea = false; }
+    }
 
-        return inside;
+    /// <summary>默认窗口过程先处理 DPI 建议矩形，再合并显示/工作区通知并重新量测。</summary>
+    private void QueueWorkAreaRefresh()
+    {
+        if (_tearingDown || _workAreaRefreshQueued) return;
+        _workAreaRefreshQueued = true;
+        if (!DispatcherQueue.TryEnqueue(() =>
+        {
+            _workAreaRefreshQueued = false;
+            if (_tearingDown) return;
+            FitWindowToWorkArea();
+            SaveBounds("工作区或DPI变化");
+            Render("工作区或DPI变化");
+        })) _workAreaRefreshQueued = false;
     }
 
     /// <summary>
     /// 把位置与尺寸写进设置（DIP，外框口径）。
     ///
-    /// <para><b>为什么分两种口径</b>：Windows 会把窗口外框 snap 到一个**最小尺寸**，
-    /// 所以 `ResizeClient(期望值)` 之后实测外框可能比期望大一点点。如果把 snap 后的尺寸当
-    /// "用户尺寸"存回去，下次恢复就更大一点 —— 实测每跑一次长 30 DIP，是正反馈不是收敛。
-    /// 因此：</para>
-    /// <list type="bullet">
-    /// <item><description>**用户刚拖过 / 缩放过**（<c>WM_EXITSIZEMOVE</c>）→ 存实测外框（他想要的就是这个）；</description></item>
-    /// <item><description>否则 → 存**期望外框**，并把"实测外框 - 客户区"记成校正值，
-    /// 下次恢复用它把外框换算成 <c>ResizeClient</c> 要的客户区。</description></item>
-    /// </list>
+    /// 保存与恢复都使用外框口径；另记坐标比例以支持混合 DPI 和负屏幕坐标。
+    /// 工作区适配后的实测尺寸覆盖旧值，回大屏不自动恢复。
     /// </summary>
     private void SaveBounds(string reason)
     {
@@ -720,7 +740,9 @@ public sealed partial class MainWindow : Window
         if (!NativeMethods.IsWindow(hwnd)) return;
         if (!NativeMethods.GetWindowRect(hwnd, out var outer)) return;
 
-        var scale = _dpiScale > 0 ? _dpiScale : 1.0;
+        var dpi = NativeMethods.GetDpiForWindow(hwnd);
+        var scale = dpi > 0 ? dpi / NativeMethods.DefaultDpi : 1.0;
+        var pixels = new WindowBounds(outer.Left, outer.Top, outer.Right - outer.Left, outer.Bottom - outer.Top);
         var measured = new WindowBounds(
             (int)Math.Round(outer.Left / scale),
             (int)Math.Round(outer.Top / scale),
@@ -734,23 +756,11 @@ public sealed partial class MainWindow : Window
             Math.Max(0, measured.Width - (int)Math.Round(client.Width / scale)),
             Math.Max(0, measured.Height - (int)Math.Round(client.Height / scale)));
 
-        // 位置永远按实测存（拖动就是位置变化的唯一来源）。
-        //
-        // 尺寸**一律存"期望值"**，绝不存实测值：Windows 会把窗口 snap 到不小于某个最小尺寸，
-        // 若把 snap 后的尺寸当成期望值，用户每拖一次窗口就变大一点（实测 552x497 就是这么来的
-        // —— 经典棘轮）。用户拖过之后，用"实测 - 边框校正"反推出他真正想要的尺寸。
-        var size = _userSizedRecently
-            ? new WindowBounds(0, 0,
-                Math.Max(320, measured.Width - correction.Width),
-                Math.Max(240, measured.Height - correction.Height))
-            : _targetBounds;
-
-        var stored = size with { X = measured.X, Y = measured.Y };        _targetBounds = stored;
-        _userSizedRecently = false;
-        AppLog.Line($"[settings] 保存 bounds={stored} correction={correction} measured={measured}（reason={reason}）");
-
-        if (_settings.Bounds == stored && _settings.FrameCorrection == correction) return;
-        _settings = _settings with { Bounds = stored, FrameCorrection = correction };
+        // 恢复同样使用外框，不再往返扣边框；适配结果就是下次尺寸，不保留屏幕变小前的目标。
+        AppLog.Line($"[settings] 保存 bounds={measured} scale={scale:0.###} correction={correction}（reason={reason}）");
+        if (_settings.Bounds == measured && _settings.FrameCorrection == correction
+            && _settings.BoundsScale == scale && _settings.BoundsPixels == pixels) return;
+        _settings = _settings with { Bounds = measured, FrameCorrection = correction, BoundsScale = scale, BoundsPixels = pixels };
         SettingsStore.Save(_settings);
     }
 
@@ -834,6 +844,7 @@ public sealed partial class MainWindow : Window
             onStart: () => _layer?.SuspendForInteraction("drag-start"),
             onEnd: () =>
             {
+                FitWindowToWorkArea();
                 SaveBounds("拖动结束");
                 _layer?.ResumeAfterInteraction("drag-end");
             });

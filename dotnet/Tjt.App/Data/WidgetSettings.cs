@@ -89,17 +89,20 @@ internal sealed record WidgetSettings
     /// <summary>
     /// 窗口**外框**位置与尺寸（DIP）；<c>null</c> = 首次启动，用默认右下角。
     ///
-    /// <para>存外框而不是客户区：`AppWindow.ResizeClient` 收的是客户区尺寸，而 Windows 允许的
-    /// 最小窗口尺寸是按**外框**算的 —— 存客户区会让"恢复 → 又被系统抬高 → 再存"循环放大。
-    /// 恢复时用 <see cref="FrameCorrection"/> 把外框换算回客户区。</para>
+    /// <para>保存和恢复都使用外框，不经客户区换算。工作区适配后的尺寸覆盖此值。</para>
     /// </summary>
     public WindowBounds? Bounds { get; init; }
+
+    /// <summary>保存 Bounds 时的 DPI 比例。只用于恢复屏幕物理坐标；旧设置缺省时沿用当前比例。</summary>
+    public double? BoundsScale { get; init; }
+
+    /// <summary>无损保存的物理外框；与 BoundsScale 配合恢复，避免非整数 DPI 的取整棘轮。</summary>
+    public WindowBounds? BoundsPixels { get; init; }
 
     /// <summary>
     /// 外框尺寸 - 客户区尺寸（DIP，取实测值）。
     ///
-    /// 用来把保存的外框尺寸换算成 <c>ResizeClient</c> 需要的客户区尺寸。
-    /// 首次运行没有这个值（按 0 试一次），随后由 <see cref="WidgetSettings"/> 的记录自适应收敛。
+    /// 保留既有字段的读写兼容与诊断用途；恢复外框不再依赖校正值。
     /// </summary>
     public WindowBounds? FrameCorrection { get; init; }
 

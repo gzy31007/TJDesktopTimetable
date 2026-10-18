@@ -109,6 +109,9 @@ internal static partial class NativeMethods
         /// <summary>系统设置变化（工作区 / 任务栏；<c>WM_SETTINGCHANGE</c>）。</summary>
         public const uint WmSettingChange = 0x001A;
 
+        /// <summary>窗口 DPI 变化（WM_DPICHANGED）。</summary>
+        public const uint WmDpiChanged = 0x02E0;
+
         /// <summary>电源状态广播（<c>WM_POWERBROADCAST</c>）。</summary>
         public const uint WmPowerBroadcast = 0x0218;
 

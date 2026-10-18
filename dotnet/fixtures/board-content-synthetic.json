@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "metadata": {
+    "synthetic": true,
+    "termStart": "2026-09-14",
+    "today": "2026-09-21",
+    "purpose": "Windows mounted-board diagnostics only; entirely fictional courses and rooms, no personal data.",
+    "coverage": [
+      "Visible range 1-11 in all and current views; slot 9 deliberately empty between occupied slots.",
+      "Single-slot and multi-slot cards, three parallel cards, empty room with a retained middle line, long names.",
+      "Odd-only and even-only sessions change content when switching all/current/odd/even views."
+    ]
+  },
+  "term": {
+    "id": "synthetic-board-term",
+    "name": "虚构排版验收学期",
+    "year": 2026,
+    "termNo": 1,
+    "totalWeeks": 16,
+    "startDate": "2026-09-14",
+    "slots": [
+      { "index": 1, "begin": "08:00", "end": "08:45" },
+      { "index": 2, "begin": "08:50", "end": "09:35" },
+      { "index": 3, "begin": "10:00", "end": "10:45" },
+      { "index": 4, "begin": "10:50", "end": "11:35" },
+      { "index": 5, "begin": "13:30", "end": "14:15" },
+      { "index": 6, "begin": "14:20", "end": "15:05" },
+      { "index": 7, "begin": "15:30", "end": "16:15" },
+      { "index": 8, "begin": "16:20", "end": "17:05" },
+      { "index": 9, "begin": "18:30", "end": "19:15" },
+      { "index": 10, "begin": "19:20", "end": "20:05" },
+      { "index": 11, "begin": "20:10", "end": "20:55" }
+    ]
+  },
+  "courses": [
+    {
+      "id": "synthetic-single-long",
+      "name": "虚构超长课程名称用于检查单节色块的实际字号省略与三行排版",
+      "teachers": [],
+      "sessions": [
+        { "id": "synthetic-single-long-session", "day": 1, "startSlot": 1, "endSlot": 1, "weeks": 65535, "room": "虚构云朵教室" }
+      ]
+    },
+    {
+      "id": "synthetic-spanning",
+      "name": "虚构跨节实验",
+      "teachers": [],
+      "sessions": [
+        { "id": "synthetic-spanning-session", "day": 2, "startSlot": 2, "endSlot": 4, "weeks": 65535, "room": "虚构纸舟实验室" }
+      ]
+    },
+    {
+      "id": "synthetic-parallel-cloud",
+      "name": "虚构并排云朵课程",
+      "teachers": [],
+      "sessions": [
+        { "id": "synthetic-parallel-cloud-session", "day": 3, "startSlot": 5, "endSlot": 6, "weeks": 65535, "room": "虚构云朵教室" }
+      ]
+    },
+    {
+      "id": "synthetic-parallel-empty-room",
+      "name": "虚构空教室课程的名称同样刻意写得很长以检查并排文本",
+      "teachers": [],
+      "sessions": [
+        { "id": "synthetic-parallel-empty-room-session", "day": 3, "startSlot": 5, "endSlot": 6, "weeks": 65535, "room": "" }
+      ]
+    },
+    {
+      "id": "synthetic-parallel-paper",
+      "name": "虚构并排纸舟课程",
+      "teachers": [],
+      "sessions": [
+        { "id": "synthetic-parallel-paper-session", "day": 3, "startSlot": 5, "endSlot": 6, "weeks": 65535, "room": "虚构纸舟教室" }
+      ]
+    },
+    {
+      "id": "synthetic-odd",
+      "name": "虚构单周构想",
+      "teachers": [],
+      "sessions": [
+        { "id": "synthetic-odd-session", "day": 4, "startSlot": 7, "endSlot": 7, "weeks": 21845, "room": "虚构积木教室" }
+      ]
+    },
+    {
+      "id": "synthetic-even",
+      "name": "虚构双周构想",
+      "teachers": [],
+      "sessions": [
+        { "id": "synthetic-even-session", "day": 4, "startSlot": 8, "endSlot": 8, "weeks": 43690, "room": "虚构风筝教室" }
+      ]
+    },
+    {
+      "id": "synthetic-late-span",
+      "name": "虚构晚间跨节课程",
+      "teachers": [],
+      "sessions": [
+        { "id": "synthetic-late-span-session", "day": 5, "startSlot": 10, "endSlot": 11, "weeks": 65535, "room": "虚构星光教室" }
+      ]
+    },
+    {
+      "id": "synthetic-last-empty-room",
+      "name": "虚构末节空教室",
+      "teachers": [],
+      "sessions": [
+        { "id": "synthetic-last-empty-room-session", "day": 1, "startSlot": 11, "endSlot": 11, "weeks": 65535, "room": "" }
+      ]
+    }
+  ],
+  "source": {
+    "adapterId": "generic-json",
+    "adapterVersion": "1.0.0",
+    "importedAt": "2026-09-21T00:00:00.000Z"
+  }
+}

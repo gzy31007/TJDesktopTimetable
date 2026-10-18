@@ -183,11 +183,15 @@ internal sealed class WindowEdgeResize
             return;
         }
 
+        var dpi = NativeMethods.GetDpiForWindow(_hwnd);
+        var scale = dpi > 0 ? dpi / NativeMethods.DefaultDpi : 1.0;
         var target = ResizePolicy.Resolve(
             _originWindow,
             _grip,
             (double)(cursor.X - _originCursor.X),
-            (double)(cursor.Y - _originCursor.Y));
+            (double)(cursor.Y - _originCursor.Y),
+            minWidth: (int)Math.Ceiling(ResizePolicy.MinWidth * scale),
+            minHeight: (int)Math.Ceiling(ResizePolicy.MinHeight * scale));
 
         NativeMethods.SetWindowPos(
             _hwnd,

@@ -29,13 +29,34 @@ internal static class BoardRenderer
     /// <summary>顶部条下方的分隔线高度。</summary>
     private const double HeaderRuleHeight = 1;
 
+    /// <summary>与实际课程行共用 TextBlock 配置，按 Windows 字体度量单行高度。</summary>
+    internal static double MeasureContentLine(double fontSize, bool semibold, double width, string text,
+        XamlRoot? xamlRoot)
+    {
+        var label = ContentLine(text, fontSize, semibold);
+        if (xamlRoot is not null) label.XamlRoot = xamlRoot;
+        label.Measure(new Windows.Foundation.Size(width, double.PositiveInfinity));
+        return label.DesiredSize.Height;
+    }
+
+    private static TextBlock ContentLine(string text, double fontSize, bool semibold) => new()
+    {
+        Text = text,
+        UseLayoutRounding = false,
+        FontSize = fontSize,
+        FontWeight = semibold ? FontWeights.SemiBold : FontWeights.Normal,
+        MaxLines = 1,
+        TextTrimming = TextTrimming.CharacterEllipsis,
+        TextWrapping = TextWrapping.NoWrap,
+    };
+
     /// <summary>
     /// 渲染整块课表：返回可直接塞进窗口的根元素。
     /// </summary>
     /// <param name="visual">呈现模型。</param>
     /// <param name="dark">是否深色主题。</param>
     public static FrameworkElement Render(BoardVisual visual, bool dark, WidgetActions? actions = null,
-        FrameworkElement? previous = null)
+        FrameworkElement? previous = null, string? contentIdentity = null)
     {
         ArgumentNullException.ThrowIfNull(visual);
         actions ??= new WidgetActions();
@@ -56,11 +77,23 @@ internal static class BoardRenderer
         }
         shell.Summary = visual.NextClass;
         shell.Dark = dark;
-        var previousScroller = root.Children.Count > 2 ? root.Children[2] as ScrollViewer : null;
-        var oldHorizontalOffset = previousScroller?.HorizontalOffset ?? 0;
-        var oldVerticalOffset = previousScroller?.VerticalOffset ?? 0;
+        // 上一轮渲染的滚动查看器：外壳记下的那一个最可靠；按行号兜底只用于外壳尚未记录的历史状态。
+        var previousScroller = shell.Scroller ?? root.Children.OfType<ScrollViewer>().FirstOrDefault();
+        // 连续重绘可能发生在替代控件 Loaded 之前；此时它的零偏移不是用户的新阅读位置。
+        var oldHorizontalOffset = previousScroller is { IsLoaded: true }
+            ? previousScroller.HorizontalOffset : shell.PendingHorizontalOffset;
+        var oldVerticalOffset = previousScroller is { IsLoaded: true }
+            ? previousScroller.VerticalOffset : shell.PendingVerticalOffset;
+        var sameContent = shell.ContentIdentity == contentIdentity;
+        shell.ContentIdentity = contentIdentity;
 
-        var canvas = BuildCanvas(visual, dark);
+        // 星期表头从画布里独立出来：纵向滚动只带走节次 / 网格 / 色块 / 时间线，表头留在原处。
+        // 固定区高度取 Grid.Top（顶部呼吸位 + 星期头），滚动画布同步扣掉这一截，
+        // 于是整块课表的纵向预算与「表头画在画布里」时完全一致。
+        var fixedRegion = visual.Grid.Top;
+        var dayStrip = BuildDayHeaderStrip(visual, dark);
+        var dayHost = BuildDayHeaderHost(dayStrip, fixedRegion);
+        var canvas = BuildCanvas(visual, dark, fixedRegion);
         // 网格可能比可用空间大（列宽或行高到了下限）—— 用 ScrollViewer 兜住，
         // 与渲染层 `.f-scroll` 的表现一致；装得下时滚动条不会出现。
         //
@@ -76,21 +109,54 @@ internal static class BoardRenderer
             HorizontalScrollBarVisibility = visual.NeedsHorizontalScroll
                 ? ScrollBarVisibility.Auto
                 : ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = visual.NeedsVerticalScroll
-                ? ScrollBarVisibility.Auto
-                : ScrollBarVisibility.Disabled,
+            // Auto 按真实内容范围开关；Disabled 会把测量范围压到视口，掩盖像素舍入造成的裁剪。
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollMode = ScrollMode.Auto,
             VerticalScrollMode = ScrollMode.Auto,
             Padding = new Thickness(0),
         };
-        Grid.SetRow(scroller, 2);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(scroller, "BoardScrollViewer");
+        scroller.Loaded += (_, _) => AppLog.Line(FormattableString.Invariant(
+            $"[board-scroll] required={visual.RequiredHeight:0.###}dip viewport={scroller.ViewportWidth:0.###}x{scroller.ViewportHeight:0.###}dip extent={scroller.ExtentWidth:0.###}x{scroller.ExtentHeight:0.###}dip range={scroller.ScrollableWidth:0.###}/{scroller.ScrollableHeight:0.###} offset={scroller.HorizontalOffset:0.###}/{scroller.VerticalOffset:0.###} enabled={visual.NeedsHorizontalScroll}/{visual.NeedsVerticalScroll}"));
+        Grid.SetRow(scroller, 3);
+        shell.PendingHorizontalOffset = sameContent ? oldHorizontalOffset : 0;
+        shell.PendingVerticalOffset = sameContent ? oldVerticalOffset : 0;
+        shell.Scroller = scroller;
         if (previousScroller is not null)
         {
-            root.Children.Remove(previousScroller);
-            scroller.Loaded += (_, _) => scroller.ChangeView(
-                Math.Clamp(oldHorizontalOffset, 0, scroller.ScrollableWidth),
-                Math.Clamp(oldVerticalOffset, 0, scroller.ScrollableHeight), null, disableAnimation: true);
+            scroller.Loaded += (_, _) =>
+            {
+                if (!ReferenceEquals(shell.Scroller, scroller)) return;
+                scroller.ChangeView(
+                    Math.Clamp(shell.PendingHorizontalOffset, 0, scroller.ScrollableWidth),
+                    Math.Clamp(shell.PendingVerticalOffset, 0, scroller.ScrollableHeight),
+                    null, disableAnimation: true);
+            };
         }
+
+        // 横向：表头与内容共用同一个 HorizontalOffset。表头用「裁剪宿主 + 平移」跟随，
+        // 不额外加一条横向滚动条（不加高），也没有让旧表头继续滚动再拿覆盖层遮住的把戏。
+        var dayShift = new TranslateTransform();
+        dayStrip.RenderTransform = dayShift;
+        void SyncDayHeader(double offset) => dayShift.X = -Math.Max(0, offset);
+        SyncDayHeader(shell.PendingHorizontalOffset);
+        scroller.ViewChanged += (_, _) => SyncDayHeader(scroller.HorizontalOffset);
+        // 裁剪边界必须等于**内容视口**宽而不是客户区宽：纵向滚动条若占宽，
+        // 内容视口会窄一截，表头按客户区宽铺开就会比内容多露出右侧一列。
+        void FitDayHeader()
+        {
+            var width = scroller.ViewportWidth > 0 ? scroller.ViewportWidth : dayHost.ActualWidth;
+            if (width <= 0) return;
+            dayHost.Clip = new RectangleGeometry
+            { Rect = new Windows.Foundation.Rect(0, 0, width, fixedRegion) };
+        }
+        dayHost.SizeChanged += (_, _) => FitDayHeader();
+        scroller.SizeChanged += (_, _) => FitDayHeader();
+        scroller.Loaded += (_, _) => FitDayHeader();
+
+        ClearScrollRegion(root);
+        Grid.SetRow(dayHost, 2);
+        root.Children.Add(dayHost);
         root.Children.Add(scroller);
 
         // 边缘光标条放在**独立覆盖层**里，和整块课表同处一格（z 序在后 → 盖在上面）。
@@ -132,14 +198,29 @@ internal static class BoardRenderer
         internal Grid Body { get; } = new();
         internal NextClassVisual? Summary { get; set; }
         internal bool Dark { get; set; }
+        internal string? ContentIdentity { get; set; }
+        internal ScrollViewer? Scroller { get; set; }
+        internal double PendingHorizontalOffset { get; set; }
+        internal double PendingVerticalOffset { get; set; }
 
         internal BoardShell()
         {
+            UseLayoutRounding = false;
             Body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(NextClassSummary.RowHeight) });
+            // 固定星期头：Auto 行由宿主 Height（= visual.Grid.Top）撑开，和滚动区严格分段、互不重叠。
+            Body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             Children.Add(Body);
         }
+    }
+
+    /// <summary>摘掉上一轮渲染追加在摘要行之下的滚动区（固定星期头 + 滚动查看器）。</summary>
+    private static void ClearScrollRegion(Grid root)
+    {
+        for (var index = root.Children.Count - 1; index >= 0; index -= 1)
+            if (root.Children[index] is FrameworkElement element && Grid.GetRow(element) >= 2)
+                root.Children.RemoveAt(index);
     }
 
     private static bool SameSummary(NextClassVisual first, NextClassVisual second) =>
@@ -451,13 +532,53 @@ internal static class BoardRenderer
         return button;
     }
 
-    /// <summary>网格画布（尺寸已由呈现模型算好，单位 DIP）。</summary>
-    private static Canvas BuildCanvas(BoardVisual visual, bool dark)
+    /// <summary>固定星期头的内容画布：宽同整块画布，左右溢出交给宿主裁剪，纵向只有「呼吸位 + 表头」那一段。</summary>
+    private static Canvas BuildDayHeaderStrip(BoardVisual visual, bool dark)
+    {
+        var strip = new Canvas
+        {
+            Width = visual.CanvasWidth,
+            Height = visual.Grid.Top,
+            UseLayoutRounding = false,
+            VerticalAlignment = VerticalAlignment.Top,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(Colors.Transparent),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(strip, "BoardWeekdayHeaderStrip");
+        DrawHeaders(strip, visual, dark);
+        return strip;
+    }
+
+    /// <summary>
+    /// 固定星期头的宿主：高度就是原画布里「呼吸位 + 星期头」那一段，宽度对齐内容视口并裁掉溢出。
+    /// 表头**不**放进滚动查看器，所以纵向滚动不会带走它，也不需要拿覆盖层去遮仍在滚动的旧画布。
+    /// </summary>
+    private static Grid BuildDayHeaderHost(Canvas strip, double height)
+    {
+        var host = new Grid
+        {
+            Height = height,
+            UseLayoutRounding = false,
+            // 透明背景与滚动画布一致：参与命中测试但不吞事件，表头不额外接手势。
+            Background = new SolidColorBrush(Colors.Transparent),
+            // 先按 0 宽裁剪，等布局拿到内容视口宽再放开：否则首帧会按整块画布宽溢出窗口。
+            Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, 0, 0) },
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(host, "BoardWeekdayHeader");
+        host.Children.Add(strip);
+        return host;
+    }
+
+    /// <summary>
+    /// 滚动区画布（尺寸已由呈现模型算好，单位 DIP）。星期头已移出画布，
+    /// 其余元素的 Y 统一减去 <paramref name="yShift"/>（= 固定区高度），相对位置保持不变。
+    /// </summary>
+    private static Canvas BuildCanvas(BoardVisual visual, bool dark, double yShift)
     {
         var canvas = new Canvas
         {
             Width = visual.CanvasWidth,
-            Height = visual.CanvasHeight,
+            Height = visual.CanvasHeight - yShift,
             // ⚠️ 显式 Top/Left 对齐：Canvas 有固定尺寸，而默认的 Stretch 只是"占满槽位"——
             // 尺寸小于槽位时它会被**居中**（真机实测：1100×760 的窗口里画布 612 dip、槽位 726 dip，
             // 于是整块课表下移 57 dip，表头离头部条 57 dip，顶部那 6 dip 呼吸位等于白设）。
@@ -466,18 +587,17 @@ internal static class BoardRenderer
             Background = new SolidColorBrush(Colors.Transparent),
         };
 
-        DrawHeaders(canvas, visual, dark);
-        DrawSlotLabels(canvas, visual, dark);
-        DrawGrid(canvas, visual, dark);
-        DrawBlocks(canvas, visual);
+        DrawSlotLabels(canvas, visual, dark, yShift);
+        DrawGrid(canvas, visual, dark, yShift);
+        DrawBlocks(canvas, visual, yShift);
         // 时间线最后画：它压在课程块之上一点点才看得见（渲染层把它放在块下面，
         // 但桌面挂件的信息密度下，一条细线穿过色块更实用；这是有意的差异）。
-        DrawNowLine(canvas, visual, dark);
+        DrawNowLine(canvas, visual, dark, yShift);
 
         return canvas;
     }
 
-    /// <summary>星期列头；今日用强调色 + 下划线。</summary>
+    /// <summary>星期列头；今日用强调色 + 下划线。画在固定区画布上，不属于滚动内容。</summary>
     private static void DrawHeaders(Canvas canvas, BoardVisual visual, bool dark)
     {
         foreach (var day in visual.Days)
@@ -514,13 +634,9 @@ internal static class BoardRenderer
     }
 
     /// <summary>
-    /// 左侧节次标签（"3 · 10:00"）；"正在上"的那一节用强调色加粗。
-    ///
-    /// <para>文字**居中**而不是右对齐：行高被压小时字号跟着变小（<c>RowHeight × 0.24</c>），
-    /// 右对齐会让"文字与窗口左边缘的那片空白"随字号变小而变大（真机反馈："第一列时间与窗口的
-    /// 边距过大"）；居中后左右空白对称，字号怎么变都稳定。右侧留 8dip 给"正在上"的竖条标记。</para>
+    /// 左侧节次标签（"3 · 10:00"）；固定 11 DIP，居中且右侧留 8 DIP 给当前节次标记。
     /// </summary>
-    private static void DrawSlotLabels(Canvas canvas, BoardVisual visual, bool dark)
+    private static void DrawSlotLabels(Canvas canvas, BoardVisual visual, bool dark, double yShift)
     {
         foreach (var slot in visual.Slots)
         {
@@ -528,14 +644,14 @@ internal static class BoardRenderer
             var text = new TextBlock
             {
                 Text = slot.Text,
-                FontSize = Math.Max(9, visual.Geometry.RowHeight * 0.24),
+                FontSize = BoardContentLayout.TimeFontSize,
                 Width = visual.Geometry.GutterWidth - 8,
                 TextAlignment = TextAlignment.Center,
                 Foreground = new SolidColorBrush(Parse(slot.IsCurrent ? accent : TintPalette.TextSoft(dark))),
                 FontWeight = slot.IsCurrent ? FontWeights.SemiBold : FontWeights.Normal,
             };
             Canvas.SetLeft(text, 4);
-            Canvas.SetTop(text, visual.Grid.Top + slot.Top);
+            Canvas.SetTop(text, visual.Grid.Top + slot.Top - yShift);
             canvas.Children.Add(text);
 
             if (!slot.IsCurrent) continue;
@@ -548,20 +664,20 @@ internal static class BoardRenderer
                 Fill = new SolidColorBrush(Parse(accent)),
             };
             Canvas.SetLeft(marker, visual.Geometry.GutterWidth - 4);
-            Canvas.SetTop(marker, visual.Grid.Top + slot.Top + 3);
+            Canvas.SetTop(marker, visual.Grid.Top + slot.Top + 3 - yShift);
             canvas.Children.Add(marker);
         }
     }
 
     /// <summary>网格：底色只由 1px 分隔线表达，周末列与今日列淡染。</summary>
-    private static void DrawGrid(Canvas canvas, BoardVisual visual, bool dark)
+    private static void DrawGrid(Canvas canvas, BoardVisual visual, bool dark, double yShift)
     {
         var line = Parse(TintPalette.GridLine(dark));
         var stroke = Parse(TintPalette.Stroke(dark));
         var weekend = new SolidColorBrush(Parse(TintPalette.WeekendCell(dark)));
         var today = new SolidColorBrush(Parse(TintPalette.TodayCell(dark)));
 
-        for (var row = 0; row < visual.Slots.Count; row += 1)
+        foreach (var row in visual.Rows)
         {
             for (var col = 0; col < visual.Days.Count; col += 1)
             {
@@ -569,13 +685,13 @@ internal static class BoardRenderer
                 var cell = new Rectangle
                 {
                     Width = day.Width,
-                    Height = visual.Geometry.RowHeight,
+                    Height = row.Height,
                     Fill = day.IsToday ? today : day.IsWeekend ? weekend : null,
                     Stroke = new SolidColorBrush(line),
                     StrokeThickness = 1,
                 };
                 Canvas.SetLeft(cell, day.Left);
-                Canvas.SetTop(cell, visual.Grid.Top + (row * visual.Geometry.RowHeight));
+                Canvas.SetTop(cell, visual.Grid.Top + row.Top - yShift);
                 canvas.Children.Add(cell);
             }
         }
@@ -590,12 +706,12 @@ internal static class BoardRenderer
             RadiusY = 12,
         };
         Canvas.SetLeft(frame, visual.Grid.Left);
-        Canvas.SetTop(frame, visual.Grid.Top);
+        Canvas.SetTop(frame, visual.Grid.Top - yShift);
         canvas.Children.Add(frame);
     }
 
     /// <summary>当前时间指示线（横穿网格 + 左侧圆点）。</summary>
-    private static void DrawNowLine(Canvas canvas, BoardVisual visual, bool dark)
+    private static void DrawNowLine(Canvas canvas, BoardVisual visual, bool dark, double yShift)
     {
         if (visual.NowLineTop is not { } top) return;
         var accent = Parse(TintPalette.Accent(dark));
@@ -610,7 +726,7 @@ internal static class BoardRenderer
             Opacity = 0.8,
         };
         Canvas.SetLeft(line, visual.Grid.Left);
-        Canvas.SetTop(line, top);
+        Canvas.SetTop(line, top - yShift);
         canvas.Children.Add(line);
 
         var dot = new Ellipse
@@ -620,14 +736,14 @@ internal static class BoardRenderer
             Fill = new SolidColorBrush(accent),
         };
         Canvas.SetLeft(dot, visual.Grid.Left - 5);
-        Canvas.SetTop(dot, top - 2.5);
+        Canvas.SetTop(dot, top - 2.5 - yShift);
         canvas.Children.Add(dot);
     }
 
     /// <summary>
     /// 课程色块：按 <see cref="BlockVisual.Frame"/> 摆放；非全周课用更实的描边表达"特殊"。
     /// </summary>
-    private static void DrawBlocks(Canvas canvas, BoardVisual visual)
+    private static void DrawBlocks(Canvas canvas, BoardVisual visual, double yShift)
     {
         foreach (var block in visual.Blocks)
         {
@@ -645,41 +761,25 @@ internal static class BoardRenderer
             };
 
             var stack = new StackPanel { Spacing = 0 };
-            stack.Children.Add(new TextBlock
+            void AddLine(string text, double size, bool semibold, string ink, double? height)
             {
-                Text = block.DisplayName,
-                FontSize = block.FontSize,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Parse(tint.Ink)),
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                TextWrapping = TextWrapping.NoWrap,
-            });
-            if (block.Room is { Length: > 0 } room)
-            {
-                stack.Children.Add(new TextBlock
-                {
-                    Text = room,
-                    FontSize = Math.Max(9, block.FontSize - 0.5),
-                    Foreground = new SolidColorBrush(Parse(tint.InkSoft)),
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    TextWrapping = TextWrapping.NoWrap,
-                });
+                var label = ContentLine(text, size, semibold);
+                label.Foreground = new SolidColorBrush(Parse(ink));
+                // 高度和量测使用同一配置；空教室也占中间文字行，不挤掉最后一行。
+                if (height is { } measuredHeight) label.Height = measuredHeight;
+                stack.Children.Add(label);
             }
-
-            stack.Children.Add(new TextBlock
-            {
-                Text = block.WeeksLabel,
-                FontSize = Math.Max(9, block.FontSize - 1),
-                Foreground = new SolidColorBrush(Parse(tint.InkSoft)),
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                TextWrapping = TextWrapping.NoWrap,
-            });
+            AddLine(block.DisplayName, block.FontSize, true, tint.Ink, block.Content?.NameHeight);
+            AddLine(string.IsNullOrEmpty(block.Room) ? " " : block.Room,
+                Math.Max(9, block.FontSize - 0.5), false, tint.InkSoft, block.Content?.RoomHeight);
+            AddLine(block.WeeksLabel, Math.Max(9, block.FontSize - 1), false,
+                tint.InkSoft, block.Content?.WeeksHeight);
 
             card.Child = stack;
             ToolTipService.SetToolTip(card, block.Tooltip);
 
             Canvas.SetLeft(card, block.Frame.Left);
-            Canvas.SetTop(card, block.Frame.Top);
+            Canvas.SetTop(card, block.Frame.Top - yShift);
             canvas.Children.Add(card);
         }
     }
