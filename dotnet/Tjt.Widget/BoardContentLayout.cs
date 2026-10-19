@@ -14,7 +14,7 @@ public sealed record BlockContentGeometry(double NameHeight, double RoomHeight, 
 /// 本库只计算几何，不依赖任何 UI 框架，也不根据可用窗口高度缩字或压缩内容。
 /// </summary>
 /// <param name="MeasureLineHeight">外壳提供的单行文字高度量测。</param>
-/// <param name="ClientInsetHeight">外壳量测的客户区不可绘制纵向留白，单位 DIP，有限且非负。只增加客户区高度需求，不改变画布几何。</param>
+/// <param name="ClientInsetHeight">外壳量测的客户区不可绘制纵向留白，单位 DIP，有限且非负。增加自然客户区高度需求，并从可用高度中扣除后再分配富余空间。</param>
 public sealed record BoardContentLayout(Func<double, bool, double, string, double> MeasureLineHeight,
     double ClientInsetHeight = 0)
 {
@@ -77,6 +77,18 @@ public static partial class BoardVisualBuilder
             foreach (var i in item.Covered) heights[i] += deficit / item.Covered.Length;
         }
 
+        // 自然内容需求仍是滚动门槛；展示几何可在此基础上消耗客户区富余高度。
+        // 固定区、上下留白及不可绘制区只扣一次，空课表不生成虚构节次。
+        var requiredHeight = HeaderHeight + (includeNextClassRow ? NextClassSummary.RowHeight : 0)
+            + CanvasTopPadding + basis.Geometry.HeaderHeight + heights.Sum() + GridBottomPadding
+            + contentLayout.ClientInsetHeight;
+        if (heights.Length > 0 && availableHeight is { } available && double.IsFinite(available)
+            && available > requiredHeight)
+        {
+            var extraPerRow = (available - requiredHeight) / heights.Length;
+            for (var i = 0; i < heights.Length; i++) heights[i] += extraPerRow;
+        }
+
         var rows = new List<BoardRowGeometry>(state.Rows.Count);
         var gridHeight = 0d;
         for (var i = 0; i < heights.Length; i++)
@@ -98,8 +110,6 @@ public static partial class BoardVisualBuilder
             Top = rows[i].Top + rows[i].Height * SlotLabelTopRatio,
         }).ToArray();
         var canvasHeight = CanvasTopPadding + basis.Geometry.HeaderHeight + gridHeight + GridBottomPadding;
-        var requiredHeight = HeaderHeight + (includeNextClassRow ? NextClassSummary.RowHeight : 0)
-            + canvasHeight + contentLayout.ClientInsetHeight;
         return basis with
         {
             Geometry = basis.Geometry with { RowHeight = BoardContentLayout.BaseRowHeight },

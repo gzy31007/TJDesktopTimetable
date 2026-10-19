@@ -114,7 +114,7 @@ public sealed record BoardVisual(
     /// <summary>各节次几何；Top 相对 Grid.Top，画网格时应使用此集合。</summary>
     public IReadOnlyList<BoardRowGeometry> Rows { get; init; } = [];
 
-    /// <summary>全部内容免滚动所需的客户区高度，含顶栏、摘要、星期头、上下留白及外壳量测的客户区不可绘制留白。</summary>
+    /// <summary>全部内容免滚动所需的客户区高度，含顶栏、摘要、星期头、上下留白及外壳量测的客户区不可绘制留白。内容布局中是自然可读需求，不随富余高度拉伸而增加。</summary>
     public double RequiredHeight { get; init; }
 
     public NextClassVisual NextClass { get; init; } = NextClassSummary.Build(
@@ -155,7 +155,7 @@ public static partial class BoardVisualBuilder
     /// <param name="nowMinutes">当前分钟数；给了且落在节次范围内才画"当前时间线"。</param>
     /// <param name="minCellWidth">列宽下限（与核心库一致）。</param>
     /// <param name="availableHeight">
-    /// 可用总高（含顶部条）；旧布局按它压缩行高，内容布局只据此判断是否需要临时滚动。
+    /// 可用总高（含顶部条）；旧布局按它压缩行高，内容布局保留自然可读下限并均分富余高度到各行，不足时临时滚动。
     /// <c>null</c> 表示不限高。
     /// </param>
     /// <param name="includeNextClassRow">是否预算独立摘要行。</param>

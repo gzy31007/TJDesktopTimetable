@@ -159,21 +159,46 @@ public partial class BoardVisualTests
         Assert.Equal(visual.Rows, other.Rows);
     }
 
+    [Fact]
+    public void 单节网格和色块消耗新增客户区高度但自然需求与字体不变()
+    {
+        var term = new Term("probe", "fictional", 2026, 1, 16,
+            [new Slot(1, "08:00", "08:45")], "2026-09-14");
+        var board = Layout.BuildBoard([ContentCourse("课程")], term,
+            new BoardOptions { Today = "2026-09-14", WeekView = WeekView.All, FirstSlot = 1, LastSlot = 1 });
+        var content = new BoardContentLayout((font, bold, width, text) => 20);
+        var natural = ContentVisual(board, content: content);
+        var stretched = ContentVisual(board, height: 374, content: content);
+        Assert.Equal(174, natural.RequiredHeight);
+        Assert.Equal(270, stretched.Grid.Height);
+        Assert.Equal(268, Assert.Single(stretched.Blocks).Frame.Height);
+        Assert.Equal(310, stretched.CanvasHeight);
+        Assert.Equal(174, stretched.RequiredHeight);
+        Assert.Equal(natural.Blocks[0].Content, stretched.Blocks[0].Content);
+        Assert.Equal(natural.Blocks[0].FontSize, stretched.Blocks[0].FontSize);
+        Assert.False(stretched.NeedsVerticalScroll);
+    }
+
     [Theory]
     [InlineData(-0.01, true)]
     [InlineData(0, false)]
     [InlineData(0.01, false)]
     [InlineData(300, false)]
-    public void 低等高门槛只改变临时滚动不压行压字或拉伸(double delta, bool scroll)
+    public void 低等高门槛保留自然需求且只在富余时扩展展示(double delta, bool scroll)
     {
         var board = ContentBoard(ContentCourse("单节"), ContentCourse("跨节", 3, 5));
         var basis = ContentVisual(board);
         var visual = ContentVisual(board, height: basis.RequiredHeight + delta);
         Assert.Equal(scroll, visual.NeedsVerticalScroll);
         Assert.Equal(basis.RequiredHeight, visual.RequiredHeight);
-        Assert.Equal(basis.CanvasHeight, visual.CanvasHeight);
-        Assert.Equal(basis.Rows, visual.Rows);
-        Assert.Equal(basis.Blocks, visual.Blocks);
+        Assert.Equal(basis.CanvasHeight + Math.Max(0, delta), visual.CanvasHeight, 6);
+        Assert.Equal(basis.Grid.Height + Math.Max(0, delta), visual.Grid.Height, 6);
+        if (delta <= 0)
+        {
+            Assert.Equal(basis.Rows, visual.Rows);
+            Assert.Equal(basis.Blocks, visual.Blocks);
+        }
+        AssertRowGeometry(visual);
         Assert.False(basis.NeedsVerticalScroll);
     }
 
@@ -190,14 +215,65 @@ public partial class BoardVisualTests
         var visual = ContentVisual(board, height: required + delta, now: 502, content: content);
         Assert.Equal(required, visual.RequiredHeight);
         Assert.Equal(scroll, visual.NeedsVerticalScroll);
-        Assert.Equal(basis.Rows, visual.Rows);
-        Assert.Equal(basis.Geometry, visual.Geometry);
-        Assert.Equal(basis.Grid, visual.Grid);
-        Assert.Equal(basis.CanvasHeight, visual.CanvasHeight);
-        Assert.Equal(basis.CanvasWidth, visual.CanvasWidth);
-        Assert.Equal(basis.Slots, visual.Slots);
-        Assert.Equal(basis.Blocks, visual.Blocks);
-        Assert.Equal(basis.NowLineTop, visual.NowLineTop);
+        // 同样的净可绘制高度应产生相同几何；不可绘制留白不得分给网格。
+        var drawable = ContentVisual(board, height: basis.RequiredHeight + delta, now: 502);
+        Assert.Equal(drawable.Rows, visual.Rows);
+        Assert.Equal(drawable.Geometry, visual.Geometry);
+        Assert.Equal(drawable.Grid, visual.Grid);
+        Assert.Equal(drawable.CanvasHeight, visual.CanvasHeight);
+        Assert.Equal(drawable.CanvasWidth, visual.CanvasWidth);
+        Assert.Equal(drawable.Slots, visual.Slots);
+        Assert.Equal(drawable.Blocks, visual.Blocks);
+        Assert.Equal(drawable.NowLineTop, visual.NowLineTop);
+        Assert.Equal(basis.CanvasHeight + Math.Max(0, delta), visual.CanvasHeight, 6);
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 0)]
+    [InlineData(true, 0.6666666666666666)]
+    public void 非等高跨节并排与空节次随窗口增减保持全部几何一致(bool summary, double inset)
+    {
+        var board = ContentBoard(ContentCourse("首节"), ContentCourse("并排"),
+            ContentCourse("跨节", 3, 4, Weekday.Tuesday), ContentCourse("末节", 5));
+        var content = MeasuredContent with { ClientInsetHeight = inset };
+        var natural = ContentVisual(board, summary: summary, now: 502, content: content);
+        // 无课的第 2 节也保留。先拉高，再缩到需滚动，最后恢复高窗口。
+        foreach (var delta in new[] { 200d, -100, 0, 350, 200 })
+        {
+            var height = natural.RequiredHeight + delta;
+            var visual = ContentVisual(board, height, summary, now: 502, content: content);
+            var extra = Math.Max(0, delta);
+            Assert.Equal(natural.RequiredHeight, visual.RequiredHeight);
+            Assert.Equal(delta < 0, visual.NeedsVerticalScroll);
+            Assert.Equal(natural.Grid.Height + extra, visual.Grid.Height, 6);
+            Assert.Equal(6, visual.HeaderTop);
+            Assert.Equal(34, visual.Grid.Top);
+            Assert.Equal(Math.Max(natural.RequiredHeight, height),
+                34 + (summary ? 30 : 0) + visual.CanvasHeight + inset, 6);
+            Assert.Equal(visual.CanvasHeight - 6, visual.Grid.Top + visual.Grid.Height, 6);
+            Assert.Equal(new[] { 1, 2, 3, 4, 5 }, visual.Rows.Select(row => row.Index));
+            Assert.True(visual.Rows[0].Height > visual.Rows[1].Height);
+            for (var i = 0; i < visual.Rows.Count; i++)
+            {
+                Assert.True(visual.Rows[i].Height >= natural.Rows[i].Height);
+                Assert.Equal(visual.Rows[i].Top + visual.Rows[i].Height * 0.32, visual.Slots[i].Top, 6);
+            }
+            Assert.Equal(34 + visual.Rows[0].Height * 22 / 45, visual.NowLineTop!.Value, 6);
+            foreach (var block in visual.Blocks)
+            {
+                var source = board.Blocks.Single(b => b.CourseId == block.CourseId);
+                var covered = visual.Rows.Where(row => row.Index >= source.StartSlot && row.Index <= source.EndSlot).ToArray();
+                var original = natural.Blocks.Single(b => b.Key == block.Key);
+                Assert.Equal(visual.Grid.Top + covered[0].Top + 1, block.Frame.Top, 6);
+                Assert.Equal(covered.Sum(row => row.Height) - 2, block.Frame.Height, 6);
+                Assert.Equal(original.Frame.Left, block.Frame.Left);
+                Assert.Equal(original.Frame.Width, block.Frame.Width);
+                Assert.Equal(original.FontSize, block.FontSize);
+                Assert.Equal(original.Content, block.Content);
+            }
+            AssertRowGeometry(visual);
+        }
     }
 
     [Fact]
@@ -262,6 +338,38 @@ public partial class BoardVisualTests
     {
         var visual = ContentVisual(ContentBoard(ContentCourse("首节")), now: now);
         Assert.Null(visual.NowLineTop);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    public void 未提供有限高度不拉伸或生成非有限几何(double? height)
+    {
+        var board = ContentBoard(ContentCourse("课程"));
+        var natural = ContentVisual(board);
+        var visual = ContentVisual(board, height);
+        Assert.Equal(natural.Rows, visual.Rows);
+        Assert.Equal(natural.Blocks, visual.Blocks);
+        Assert.Equal(natural.CanvasHeight, visual.CanvasHeight);
+        Assert.Equal(natural.RequiredHeight, visual.RequiredHeight);
+    }
+
+    [Fact]
+    public void 空课表有节次时填满而零行不虚构网格()
+    {
+        var board = ContentBoard();
+        var visual = ContentVisual(board, height: 500);
+        Assert.Equal(396, visual.Grid.Height);
+        Assert.Empty(visual.Blocks);
+        AssertRowGeometry(visual);
+        var empty = ContentVisual(board with { Rows = [] }, height: 500);
+        Assert.Equal(0, empty.Grid.Height);
+        Assert.Empty(empty.Rows);
+        Assert.Equal(40, empty.CanvasHeight);
+        Assert.Equal(104, empty.RequiredHeight);
+        Assert.False(empty.NeedsVerticalScroll);
     }
 
     [Fact]
