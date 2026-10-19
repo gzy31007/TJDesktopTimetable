@@ -237,18 +237,23 @@ public static class UpdateCheck
             return new UpdateCheckResult(UpdateStatus.UpToDate, Normalize(current), normalizedLatest, release, null);
         }
 
-        var skipped = ParseVersion(skippedVersion);
-        if (skipped is not null && normalizedLatest <= Normalize(skipped))
-        {
-            return new UpdateCheckResult(UpdateStatus.Skipped, Normalize(current), normalizedLatest, release, null);
-        }
-
-        return new UpdateCheckResult(
+        return ApplySkippedVersion(new UpdateCheckResult(
             UpdateStatus.UpdateAvailable,
             Normalize(current),
             normalizedLatest,
             release,
-            ChoosePlatformPackage(release, packageSuffix));
+            ChoosePlatformPackage(release, packageSuffix)), skippedVersion);
+    }
+
+    /// <summary>按分发时的最新设置撤回提示，避免请求期间的“跳过”被旧响应覆盖。</summary>
+    public static UpdateCheckResult ApplySkippedVersion(UpdateCheckResult result, string? skippedVersion)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var skipped = ParseVersion(skippedVersion);
+        return result.HasUpdate && result.Latest is { } latest
+            && skipped is not null && Normalize(latest) <= Normalize(skipped)
+            ? result with { Status = UpdateStatus.Skipped, Package = null }
+            : result;
     }
 
     /// <summary>
@@ -301,7 +306,7 @@ public static class UpdateCheck
     public static string NotificationBody(UpdateCheckResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
-        return $"当前 v{result.Current}，点这条通知打开「关于」页下载。";
+        return $"当前 v{result.Current}，在挂件顶部点「下载新版」；点击通知查看「关于」。";
     }
 
     /// <summary>

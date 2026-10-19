@@ -17,6 +17,19 @@ public sealed record WidgetActions
     /// <summary>重新载入课表（改过 fixture / 设置之后不用重启）。</summary>
     public Action? Refresh { get; init; }
 
+    /// <summary>
+    /// 「下载新版」：<c>null</c> = 没有待提示的新版本，顶部条不出现这个按钮。
+    ///
+    /// <para>用"回调的有无"表达可见性，而不是再传一个 <c>HasUpdate</c> 布尔：两个入参总有
+    /// 一方忘记同步的时候，结果就是按钮出现了却点不动（或者点得动却该消失）。渲染层只需要
+    /// 知道"有没有活可干"，判断留给外壳。</para>
+    ///
+    /// <para>打开哪个地址由外壳在**点击时**按当时的结论算 —— 链接挑选规则（安装包直链 /
+    /// Release 页 / 仓库首页的兜底顺序、镜像前缀）只存在于 <c>UpdateCheck</c> 一处，
+    /// 挂件顶部与托盘因此不会跳出两个不同的地址。</para>
+    /// </summary>
+    public Action? DownloadUpdate { get; init; }
+
     /// <summary>把挂件放回默认位置（右下角）。</summary>
     public Action? ResetPosition { get; init; }
 

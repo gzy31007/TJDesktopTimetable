@@ -46,12 +46,13 @@ internal static class UpdateChecker
     public static async Task<UpdateCheckResult?> CheckAsync(
         string? apiUrl = null,
         string? skippedVersion = null,
-        string? proxyPrefix = null)
+        string? proxyPrefix = null,
+        CancellationToken cancellationToken = default)
     {
         var explicitApi = !string.IsNullOrWhiteSpace(apiUrl);
         var url = explicitApi ? apiUrl!.Trim() : UpdateCheck.LatestReleaseApiUrl;
 
-        var (body, source) = await FetchWithFallbackAsync(url, explicitApi, proxyPrefix).ConfigureAwait(false);
+        var (body, source) = await FetchWithFallbackAsync(url, explicitApi, proxyPrefix, cancellationToken).ConfigureAwait(false);
         if (body is null) return null;
 
         var result = UpdateCheck.Evaluate(CurrentVersion(), body, skippedVersion);
@@ -68,10 +69,12 @@ internal static class UpdateChecker
     private static async Task<(string? Body, string Source)> FetchWithFallbackAsync(
         string url,
         bool explicitApi,
-        string? proxyPrefix)
+        string? proxyPrefix,
+        CancellationToken cancellationToken)
     {
-        var body = await FetchAsync(url, DirectTimeout, "直连").ConfigureAwait(false);
+        var body = await FetchAsync(url, DirectTimeout, "直连", cancellationToken).ConfigureAwait(false);
         if (body is not null) return (body, "直连");
+        cancellationToken.ThrowIfCancellationRequested();
 
         // `--update-api` 是诊断 / 验收开关，指哪打哪，不替它加兜底（否则 D 例那种"故意连不上"
         // 会跑去打真镜像，依赖真网络）。显式给了 `--update-proxy` 才强制兜底。
@@ -83,16 +86,17 @@ internal static class UpdateChecker
         if (string.Equals(proxyUrl, url, StringComparison.OrdinalIgnoreCase)) return (null, "直连");
 
         AppLog.Line($"[update] 直连未拿到响应，改用镜像兜底：{proxyUrl}");
-        body = await FetchAsync(proxyUrl, ProxyTimeout, "镜像").ConfigureAwait(false);
+        body = await FetchAsync(proxyUrl, ProxyTimeout, "镜像", cancellationToken).ConfigureAwait(false);
         return (body, "镜像");
     }
 
     /// <summary>GET 一次；非 2xx、超时、DNS 失败都返回 <c>null</c>，只留一行日志。</summary>
-    private static async Task<string?> FetchAsync(string url, TimeSpan timeout, string label)
+    private static async Task<string?> FetchAsync(string url, TimeSpan timeout, string label, CancellationToken cancellationToken)
     {
         try
         {
-            using var cts = new CancellationTokenSource(timeout);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(timeout);
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             // GitHub 要求带 User-Agent（不带直接 403）；再带一版当前版本，方便出问题时对方排查
             request.Headers.TryAddWithoutValidation("User-Agent", UpdateCheck.UserAgent(CurrentVersion()));
@@ -108,6 +112,7 @@ internal static class UpdateChecker
 
             return body;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             // 静默：无网 / 超时 / DNS 失败都走这里，只留一行日志

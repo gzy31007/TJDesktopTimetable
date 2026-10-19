@@ -125,6 +125,19 @@ public class UpdateCheckTests
     }
 
     [Fact]
+    public void 请求期间跳过版本后按最新设置撤回提示且更高版本不受影响()
+    {
+        var available = UpdateCheck.Evaluate("1.2.0", SampleJson);
+        var skipped = UpdateCheck.ApplySkippedVersion(available, "v1.3.0.0");
+        Assert.Equal(UpdateStatus.Skipped, skipped.Status);
+        Assert.False(skipped.HasUpdate);
+        Assert.Null(skipped.Package);
+        Assert.Equal(UpdateStatus.UpdateAvailable, UpdateCheck.ApplySkippedVersion(available, "1.2.0").Status);
+        var current = UpdateCheck.Evaluate("1.3.0", SampleJson);
+        Assert.Equal(current, UpdateCheck.ApplySkippedVersion(current, "1.3.0"));
+    }
+
+    [Fact]
     public void 响应不可用时结论是InvalidResponse()
     {
         var result = UpdateCheck.Evaluate("1.2.0.0", "<html>404</html>");
@@ -248,6 +261,8 @@ public class UpdateCheckTests
         Assert.Equal("发现新版本 v1.3.0", UpdateCheck.NotificationTitle(result));
         Assert.Contains("1.2.0", UpdateCheck.NotificationBody(result));
         Assert.Contains("关于", UpdateCheck.NotificationBody(result));
+        Assert.Contains("挂件顶部", UpdateCheck.NotificationBody(result));
+        Assert.Contains("下载新版", UpdateCheck.NotificationBody(result));
         // NOTIFYICONDATAW 的定长缓冲：标题 ≤ 63、正文 ≤ 255（超了会被 TrayIcon 截断）
         Assert.True(UpdateCheck.NotificationTitle(result).Length <= 63);
         Assert.True(UpdateCheck.NotificationBody(result).Length <= 255);

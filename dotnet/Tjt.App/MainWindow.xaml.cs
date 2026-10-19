@@ -67,6 +67,9 @@ public sealed partial class MainWindow : Window
 
     /// <summary>最近一次新版本检查的结论（见 <see cref="CurrentUpdate"/>）。</summary>
     private UpdateCheckResult? _update;
+
+    /// <summary>「下载新版」的实际动作（由 <see cref="SetUpdateDownloader"/> 注入；<c>null</c> = 还没接上）。</summary>
+    private Action? _downloadUpdate;
     private DesktopLayer? _layer;
     private bool _workAreaRefreshQueued;
     private bool _fittingWorkArea;
@@ -793,6 +796,10 @@ public sealed partial class MainWindow : Window
         OpenSettings = () => _openSettings?.Invoke(_settings, IsDark(), SettingsWindow.PageGeneral),
         OpenImport = () => _openSettings?.Invoke(_settings, IsDark(), SettingsWindow.PageImport),
         Refresh = () => ReloadTimetable(),
+        // 「下载新版」只在这个**当前结果**里真有新版、且外壳已经把动作接上时才出现：
+        // 传 null 顶部条就不建这颗按钮，所以按钮的有无就是"有没有新版"的唯一真相，
+        // 不存在"按钮在但版本早被跳过"的中间态。
+        DownloadUpdate = _update is { HasUpdate: true } && _downloadUpdate is { } download ? download : null,
         ResetPosition = () =>
         {
             PlaceBottomRight();
@@ -1050,12 +1057,26 @@ public sealed partial class MainWindow : Window
     internal string LastDisposition => _layer?.LastDisposition ?? "none";
 
     /// <summary>
-    /// 最近一次新版本检查的结论（<c>null</c> = 还没查到 / 查失败 / 被跳过）。
+    /// 最近一次新版本检查的结论（<c>null</c> = 还没查到）。
     ///
     /// <para>由 <see cref="App"/> 在后台查完后经 <see cref="ApplyUpdateResult"/> 灌进来；
-    /// 托盘菜单项与设置窗口「关于」页都读它，保证两个入口说的是同一件事。</para>
+    /// 顶部条「下载新版」（<see cref="BuildActions"/>）、托盘菜单项与设置窗口「关于」页都读它，
+    /// 保证几处入口说的是同一件事 —— **它不是快照**：每次重排都重新读。</para>
     /// </summary>
     internal UpdateCheckResult? CurrentUpdate => _update;
+
+    /// <summary>
+    /// 接上「下载新版」的实际动作（由 <see cref="App"/> 在 <see cref="Initialize"/> 前注入）。
+    ///
+    /// <para>窗口不认识下载页：它只保存一个回调，点按钮就调它；接上之后再重排一次，
+    /// 让已经查到的结论立刻变成顶部条上那颗按钮。</para>
+    /// </summary>
+    internal void SetUpdateDownloader(Action download)
+    {
+        ArgumentNullException.ThrowIfNull(download);
+        _downloadUpdate = download;
+        Render("接上更新下载入口");
+    }
 
     /// <summary>是否已经用到「跳过此版本」（跳过之后不再提示，直到出现更高的版本）。</summary>
     internal bool UpdateSkipped => _update is { Status: UpdateStatus.Skipped };
@@ -1065,21 +1086,41 @@ public sealed partial class MainWindow : Window
     /// </summary>
     internal void ApplyUpdateResult(UpdateCheckResult? result)
     {
+        // null = 查失败 / 没网：**保留上一次的结论**，别把已经查到的提示抹掉
         if (result is null) return;
+        var hadUpdate = _update?.HasUpdate ?? false;
         _update = result;
         AppLog.Line(
             $"[update] 应用结论 {result.Status}：本机 {result.Current} / 线上 {result.Latest?.ToString() ?? "?"}"
             + (result.Package is null ? "" : $" / 包 {result.Package.Name}"));
+        // 顶部条上那颗「下载新版」的有无只看 HasUpdate：结论一变就重绘顶部条，
+        // 否则得等下一次与更新无关的重排（例如时钟跨节）才会补上。
+        if (result.HasUpdate != hadUpdate) Render("新版本结论变化");
     }
 
     /// <summary>
     /// 记住「跳过此版本」：写进设置（落盘），并立刻撤掉当前提示。
+    ///
+    /// <para>顺序要紧：<see cref="ApplySettings"/> 与 <see cref="Render"/> 都会重排顶部条，
+    /// 而顶部条读的是 <see cref="CurrentUpdate"/>。所以**先把"跳过"结论写进 <c>_update</c>，
+    /// 再落盘、再重排**。反过来（先重排、后改状态）会留下一帧"顶部条还挂着「下载新版」"的
+    /// 陈旧画面，那颗按钮点开的是同一条下载页 —— 用户刚关掉的提示又出现在挂件上。</para>
+    ///
+    /// <para>保留一条 <see cref="UpdateStatus.Skipped"/> 结论而不是置 <c>null</c>：托盘与
+    /// 「关于」页因此说"已跳过 vX"，和顶部条上按钮消失这件事口径一致；置 <c>null</c> 会让
+    /// 界面退回"没查到"，跟用户刚做过的操作对不上。</para>
     /// </summary>
     internal void SkipUpdateVersion(string version)
     {
         AppLog.Line($"[update] 跳过版本 {version}");
+        var hadUpdate = _update is { HasUpdate: true };
+        // 调用方都是从当前结论里取版本号的，所以这里一定有结论；真没有就只落盘，
+        // 不造一条编出来的 Current（界面说"没查到"好过说错版本号）。
+        if (_update is { } previous) _update = previous with { Status = UpdateStatus.Skipped };
         ApplySettings(_settings with { SkippedVersion = version });
-        _update = null;
+        // ApplySettings 只在主题 / 周末 / 周次视图这类变化时才重排，跳过版本不在其中 ——
+        // 顶部条上确实挂着按钮时必须显式重绘一次，否则它会原样留在画面上。
+        if (hadUpdate) Render("跳过新版本");
     }
 
     /// <summary>客户区尺寸（DIP）。</summary>

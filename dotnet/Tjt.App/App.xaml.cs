@@ -52,6 +52,7 @@ public partial class App : Application
     private TrayIcon? _tray;
     private ImportService? _imports;
     private TongjiLoginWindow? _loginWindow;
+    private UpdateCheckScheduler? _updateChecks;
 
     /// <summary>本次运行已经弹过系统通知的版本（同一版本只提醒一次，见 <see cref="UpdateCheck.ShouldNotify"/>）。</summary>
     private string? _notifiedUpdateVersion;
@@ -166,6 +167,7 @@ public partial class App : Application
             var window = new MainWindow();
             _windows.Add(window);
             window.SetSettingsOpener(ShowSettings);
+            window.SetUpdateDownloader(() => OpenUpdatePage(window));
             window.Initialize(options, loaded);
 
             if (options.SessionCheckPath is not null)
@@ -327,60 +329,37 @@ public partial class App : Application
 
     /* ---------------------------------------------------------- 新版本检查（DeskBox 同款） */
 
-    /// <summary>启动后延迟多久查一次：DeskBox 是 45 秒，我们启动开销小，12 秒足够错开启动高峰。</summary>
-    private static readonly TimeSpan UpdateCheckDelay = TimeSpan.FromSeconds(12);
+    /// <summary>启动后延迟检查，此后持续运行期间每六小时重查；每次读取当前开关。</summary>
+    private void ScheduleUpdateCheck(MainWindow widget) => _ = UpdateScheduler(widget).Start();
 
-    /// <summary>
-    /// 后台查一次新版本：**失败静默**（只记日志），结论交给 <see cref="ApplyUpdateResult"/> 分发。
-    /// </summary>
-    private void ScheduleUpdateCheck(MainWindow widget)
+    private UpdateCheckScheduler UpdateScheduler(MainWindow widget)
     {
-        if (!widget.CurrentSettings.CheckUpdates)
-        {
-            AppLog.Line("[update] 设置里关掉了「检查新版本」，本次不查");
-            return;
-        }
-
-        var apiUrl = Startup.UpdateApiUrl;
-        var proxyUrl = Startup.UpdateProxyUrl;
-        var skipped = widget.CurrentSettings.SkippedVersion;
-        _ = Task.Run(async () =>
-        {
-            try
+        if (_updateChecks is not null) return _updateChecks;
+        _updateChecks = new UpdateCheckScheduler(
+            () => widget.CurrentSettings.CheckUpdates,
+            async cancellation =>
             {
-                await Task.Delay(UpdateCheckDelay).ConfigureAwait(false);
-                var result = await UpdateChecker.CheckAsync(apiUrl, skipped, proxyUrl).ConfigureAwait(false);
-                if (result is null) return;
-                widget.DispatcherQueue.TryEnqueue(() => ApplyUpdateResult(widget, result));
-            }
-            catch (Exception ex)
-            {
-                AppLog.Line($"[update] 后台检查异常（静默）：{ex.Message}");
-            }
-        });
+                // 仅网络层离开 UI 上下文。await 返回后再读设置、更新控件，不捕获长期快照。
+                var result = await UpdateChecker.CheckAsync(
+                    Startup.UpdateApiUrl, proxyPrefix: Startup.UpdateProxyUrl, cancellationToken: cancellation);
+                if (!cancellation.IsCancellationRequested && result is not null) ApplyUpdateResult(widget, result);
+            },
+            ex => AppLog.Line($"[update] 检查异常（静默）：{ex.Message}"));
+        widget.Closed += (_, _) => _updateChecks.Dispose();
+        return _updateChecks;
     }
 
-    /// <summary>手动查一次（设置页「关于」的按钮）；<paramref name="onDone"/> 在 UI 线程回调，用来重画那一页。</summary>
-    private void CheckUpdatesNow(MainWindow widget, Action? onDone = null)
+    /// <summary>手动检查与自动检查共用并发门禁；即使关闭自动检查仍可手动检查。</summary>
+    private async void CheckUpdatesNow(MainWindow widget, Action? onDone = null)
     {
-        var apiUrl = Startup.UpdateApiUrl;
-        var proxyUrl = Startup.UpdateProxyUrl;
-        var skipped = widget.CurrentSettings.SkippedVersion;
-        _ = Task.Run(async () =>
-        {
-            var result = await UpdateChecker.CheckAsync(apiUrl, skipped, proxyUrl).ConfigureAwait(false);
-            widget.DispatcherQueue.TryEnqueue(() =>
-            {
-                // result 为 null = 没查到（网络失败）：保留上一次结论，只把 UI 刷新回去
-                if (result is not null) ApplyUpdateResult(widget, result);
-                onDone?.Invoke();
-            });
-        });
+        await UpdateScheduler(widget).CheckNowAsync();
+        onDone?.Invoke();
     }
 
     /// <summary>结论分发：挂件（状态）→ 托盘（菜单项 + 提示 + 系统通知）→ 设置窗口（重画关于页）。</summary>
     private void ApplyUpdateResult(MainWindow widget, UpdateCheckResult result)
     {
+        result = UpdateCheck.ApplySkippedVersion(result, widget.CurrentSettings.SkippedVersion);
         widget.ApplyUpdateResult(result);
         NotifyUpdate(result);
         _tray?.SetMenu(1, BuildTrayMenu(widget));
@@ -444,17 +423,16 @@ public partial class App : Application
         OpenSjtuLogin: () => ShowSchoolLogin(LoginSchool.Sjtu, widget.CurrentIsDark),
         DescribeUpdate: () => DescribeUpdate(widget),
         CheckUpdates: () => CheckUpdatesNow(widget, RefreshSettingsWindows),
-        OpenUpdatePage: () => OpenUpdatePage(widget),
         SkipUpdate: () => SkipUpdate(widget),
-        HasUpdate: widget.CurrentUpdate is { HasUpdate: true });
+        HasUpdate: () => widget.CurrentUpdate is { HasUpdate: true });
 
     /// <summary>「关于」页那一行的文本（与托盘提示同源：都读 <c>widget.CurrentUpdate</c>）。</summary>
     private static string DescribeUpdate(MainWindow widget)
     {
-        if (widget.CurrentUpdate is not { } result) return "还没检查（启动后会自动查一次）";
+        if (widget.CurrentUpdate is not { } result) return "还没检查（自动检查开启时，启动后及运行期间会定期检查）";
         return result.Status switch
         {
-            UpdateStatus.UpdateAvailable => $"有新版本 v{result.Latest}（当前 {result.Current}）",
+            UpdateStatus.UpdateAvailable => $"有新版本 v{result.Latest}（当前 {result.Current}）；在挂件顶部点「下载新版」",
             UpdateStatus.Skipped => $"已跳过 v{result.Latest}；更高的版本仍会提示",
             UpdateStatus.UpToDate => $"已是最新（当前 {result.Current}）",
             _ => "检查失败（网络或响应异常，已静默处理）",
@@ -475,10 +453,17 @@ public partial class App : Application
     /// <summary>打开下载页：优先给本平台的包，没有对应资产时退回 Release 页面。</summary>
     private static void OpenUpdatePage(MainWindow widget)
     {
-        var url = widget.CurrentUpdate is { } result ? UpdateCheck.DownloadUrlFor(result) : UpdateCheck.RepoUrl;
+        if (widget.CurrentUpdate is not { HasUpdate: true } result) return;
+        var url = UpdateCheck.DownloadUrlFor(result);
         try
         {
             AppLog.Line($"[update] 打开下载页：{url}");
+            if (SettingsStore.IsDiagnostic)
+            {
+                // 隔离 UI 验收只捕获生产点击目标，不下载或执行安装器。
+                File.WriteAllText(Path.Combine(SettingsStore.Directory, "update-download.txt"), url);
+                return;
+            }
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
         }
         catch (Exception ex)

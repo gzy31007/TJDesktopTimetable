@@ -45,6 +45,17 @@ public partial class App
             for (var i = 0; i < steps.Length; i++)
             {
                 var step = steps[i];
+                // 更新动作有自己的观察路径（会切到「关于」页，见 RunUpdateSessionStep）：必须在下面
+                // 按导入页控件名取值之前分叉 —— 否则 Find ImportResultStatus 会去找一页不存在的控件。
+                if (step.Action is { } action && action.StartsWith("update-", StringComparison.Ordinal))
+                {
+                    var updateObservation = await RunUpdateSessionStep(widget, _settingsWindows.Single(), step, i);
+                    observations.Add(updateObservation);
+                    File.WriteAllText(Path.Combine(SettingsStore.Directory, $"step-{i}.json"),
+                        JsonSerializer.Serialize(updateObservation));
+                    AppLog.Line($"[session-check] step={i} action={action} observed (update)");
+                    continue;
+                }
                 var settings = _settingsWindows.Single();
                 FileStream? fileLock = null;
                 object? boardAction = null;

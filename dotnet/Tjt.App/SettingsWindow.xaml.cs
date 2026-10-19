@@ -54,7 +54,7 @@ public sealed partial class SettingsWindow : Window
     private int _shownPage;
 
     /// <summary>
-    /// 设置窗口需要外壳配合的三件事 + 导入编排。
+    /// 设置窗口需要外壳配合的几件事 + 导入编排。
     /// </summary>
     /// <param name="Apply">应用新设置（外壳负责落盘 + 立即生效）。</param>
     /// <param name="ResetPosition">把挂件放回屏幕右下角。</param>
@@ -76,14 +76,17 @@ public sealed partial class SettingsWindow : Window
         /// <summary>点「检查更新」；查完由外壳回头调 <see cref="RefreshCurrentPage"/>。</summary>
         Action? CheckUpdates = null,
 
-        /// <summary>打开下载页（优先本平台的包，没有资产时退回 Release 页面）。</summary>
-        Action? OpenUpdatePage = null,
-
         /// <summary>「跳过此版本」：外壳负责记住被跳过的版本号并更新两个入口。</summary>
         Action? SkipUpdate = null,
 
-        /// <summary>构造这一页时"是否真的有新版本"（决定要不要显示下载 / 跳过按钮）。</summary>
-        bool HasUpdate = false);
+        /// <summary>
+        /// "此刻是否真有新版本" —— **每次建页都现问一次**，不是构造时的快照。
+        ///
+        /// <para>「关于」页的「跳过此版本」按钮只看它：点完「检查更新」后外壳会重画这一页，
+        /// 那时再问一次才能反映刚查到的结论；如果它是 <c>bool</c> 快照，页面会一直停在
+        /// 打开窗口那一刻的旧状态。</para>
+        /// </summary>
+        Func<bool>? HasUpdate = null);
 
     /// <summary>构造设置窗口。</summary>
     /// <param name="current">当前设置（用来回显）。</param>
@@ -533,10 +536,15 @@ public sealed partial class SettingsWindow : Window
     }
 
     /// <summary>
-    /// 「关于」页的新版本一行：状态文本 + （有更新时）下载 / 跳过此版本。
+    /// 「关于」页的新版本一行：状态文本 + 手动「检查更新」+（真有新版本时）「跳过此版本」。
     ///
-    /// <para>状态与按钮能力都由外壳提供：设置窗口不认识网络、也不碰托盘 —— 两个入口说的是同一件事
-    /// （同一份 <c>UpdateCheckResult</c>），不会出现"设置页说有新版、托盘没有"。</para>
+    /// <para>**这里没有下载按钮**：下载入口只留一个 —— 挂件顶部那颗「下载新版」
+    /// （见 <c>BoardRenderer.BuildUpdateButton</c>）。两个入口各给一个"下载"会让用户
+    /// 分不清该点哪个，也容易出现一处说"有新版"、另一处点了没反应。</para>
+    ///
+    /// <para>状态与按钮能力都由外壳提供，而且 <c>HasUpdate</c> 是**每次建页都现问**的委托：
+    /// 点完「检查更新」外壳会重画这一页，那时问到的才是刚查出来的结论；要是 <c>bool</c>
+    /// 快照，页面会停在打开窗口那一刻的旧状态。</para>
     /// </summary>
     private FrameworkElement BuildUpdateRow(bool dark)
     {
@@ -552,12 +560,8 @@ public sealed partial class SettingsWindow : Window
         };
         buttons.Children.Add(check);
 
-        if (_host.HasUpdate)
+        if (_host.HasUpdate?.Invoke() == true)
         {
-            var download = new Button { Content = "下载", MinWidth = 80 };
-            download.Click += (_, _) => _host.OpenUpdatePage?.Invoke();
-            buttons.Children.Add(download);
-
             var skip = new Button { Content = "跳过此版本", MinWidth = 110 };
             skip.Click += (_, _) => _host.SkipUpdate?.Invoke();
             buttons.Children.Add(skip);

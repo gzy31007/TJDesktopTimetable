@@ -34,6 +34,7 @@
   -->
   <ItemGroup>
     <Compile Include="..\Tjt.App\Data\ImportService.cs" Link="Linked\ImportService.cs" />
+    <Compile Include="..\Tjt.App\Data\UpdateCheckScheduler.cs" Link="Linked\UpdateCheckScheduler.cs" />
   </ItemGroup>
 
   <ItemGroup>

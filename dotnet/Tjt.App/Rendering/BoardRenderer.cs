@@ -29,6 +29,11 @@ internal static class BoardRenderer
     /// <summary>顶部条下方的分隔线高度。</summary>
     private const double HeaderRuleHeight = 1;
 
+    /// <summary>
+    /// 顶部条「下载新版」按钮的 AutomationId —— 隔离实机验收靠它定位，改它等于改验收契约。
+    /// </summary>
+    internal const string UpdateButtonId = "DownloadUpdateButton";
+
     /// <summary>与实际课程行共用 TextBlock 配置，按 Windows 字体度量单行高度。</summary>
     internal static double MeasureContentLine(double fontSize, bool semibold, double width, string text,
         XamlRoot? xamlRoot)
@@ -321,6 +326,7 @@ internal static class BoardRenderer
     ///
     /// 动作按钮是这个窗口唯一的交互入口（没有系统标题栏）：
     /// 刷新课表、以及一个 <c>⋯</c> 溢出菜单（设置 / 恢复默认位置 / 贴桌面层 / 隐藏 / 退出）。
+    /// 查到新版本时右侧还会多一个「下载新版」（见 <see cref="BuildUpdateButton"/>）。
     /// </summary>
     private static FrameworkElement BuildHeaderBar(BoardHeader header, bool dark, WidgetActions actions)
     {
@@ -380,13 +386,20 @@ internal static class BoardRenderer
         row.Background = new SolidColorBrush(Colors.Transparent); // 空白处也要能命中指针
         actions.AttachDragArea?.Invoke(row);
 
-        // ── 右：动作按钮（刷新 + ⋯ 菜单）
+        // ── 右：动作按钮（有新版本时先出现「下载新版」，然后才是刷新 + ⋯ 菜单）
         var right = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 2,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        // 有没有新版只看外壳给没给回调（见 WidgetActions.DownloadUpdate）：没有就整块不建，
+        // 顶部条在"没新版"时的排布与以前逐像素一致。
+        if (actions.DownloadUpdate is { } download)
+        {
+            right.Children.Add(BuildUpdateButton(dark, download));
+        }
+
         right.Children.Add(BuildIconButton(IconGlyph.Refresh, dark, "重新载入课表", actions.Refresh));
         right.Children.Add(BuildOverflowButton(dark, actions));
 
@@ -443,6 +456,57 @@ internal static class BoardRenderer
         button.IsTabStop = false;
         button.UseSystemFocusVisuals = false;
         if (action is not null) button.Click += (_, _) => action();
+        return button;
+    }
+
+    /// <summary>
+    /// 顶部条的「下载新版」文本按钮（强调色）：只在真有新版本时**存在**
+    /// （回调由外壳按 <c>CurrentUpdate.HasUpdate</c> 决定给不给），所以它的有无本身就是
+    /// "有没有新版"的信号，不用再单独传一个布尔。
+    ///
+    /// <para><b>窗口拖到最小宽度（320 DIP）也不让位</b>：它在右侧 <c>Auto</c> 列里，左半边是
+    /// <c>Star</c>，于是被压缩掉的只有左侧标题（那里本来就有
+    /// <see cref="TextTrimming.CharacterEllipsis"/>，会截成省略号），按钮自己不参与收缩。
+    /// 宽度是"文字自然宽 + 左右各 8 DIP"，没写死数字，换字号也不用跟着改。</para>
+    ///
+    /// <para><b>排在刷新 / ⋯ 之前</b>：两颗图标按钮的横向位置因此恒定 —— 新版提示出现或消失时，
+    /// 用户的手不必重新找"刷新"。</para>
+    ///
+    /// <para><b>AutomationId = <see cref="UpdateButtonId"/></b>：隔离实机验收按它定位（与
+    /// <c>BoardScrollViewer</c> 同一套做法）。同样不占 Tab 焦点、不画焦点框。</para>
+    /// </summary>
+    private static Button BuildUpdateButton(bool dark, Action download)
+    {
+        var button = new Button
+        {
+            Content = new TextBlock
+            {
+                Text = "下载新版",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                // 颜色写在文字上而不是按钮上：悬停态由模板改的是按钮的 Foreground，
+                // 那样一悬停强调色就被换成普通前景色，看起来像变成了另一个控件。
+                Foreground = new SolidColorBrush(Parse(TintPalette.Accent(dark))),
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+            // 与图标按钮同高：两者底边对齐，顶部条看起来是一条而不是高低不一
+            Height = 26,
+            Padding = new Thickness(8, 0, 8, 0),
+            MinWidth = 0,
+            Margin = new Thickness(0, 0, 4, 0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(6),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(button, UpdateButtonId);
+        // 内容是一整个 TextBlock，读屏器不总是能从中推出名字；显式给一句，
+        // 让无障碍名字与隔离验收断言的是同一句。
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, "下载新版");
+        ToolTipService.SetToolTip(button, "打开新版本的下载页");
+        button.IsTabStop = false;
+        button.UseSystemFocusVisuals = false;
+        button.Click += (_, _) => download();
         return button;
     }
 
