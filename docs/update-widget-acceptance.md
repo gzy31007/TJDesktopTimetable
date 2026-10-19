@@ -40,6 +40,14 @@ Windows 外壳启动约 12 秒后检查，随后每轮完成后间隔 6 小时�
 
 本地辅助脚本 `.tools/update-session-check.ps1` 和观测 `.artifacts/issue26-implement/evidence/` 不入提交；摘要、完整 session、计划、合成响应、API 计数与应用日志已留在工作区。Windows 原始目录为 `C:\tjt-tools\issue26-ui-20261020-narrow-final` 和 `C:\tjt-tools\issue26-ui-20261020-wide`。首次窄窗口的控件断言通过，但 HttpListener 清理卡住并报 PSRemotingTransportException，未将该次计为完整验收；修正本地脚本的显式停止路由后，窄窗口重跑退出 0，数据哈希检查完成。此修正不涉及产品代码。
 
+## 用户人工操作补记（2026-10-20 01:25）
+
+用户反馈已验收跳过新版本，并数次点击下载。使用同一出货应用、虚构示例课表和独立目录 `C:\tjt-tools\issue26-manual-20261020\data`，以合成 v99.0.0 展示 800×520 DIP 的深色挂件；未连接真实发布 API，未启用托盘、自启或周期检查。
+
+日志记录两次由用户触发的下载入口调用，目标均为上文 v99.0.0 的 proxy 安装器直链。随后出现“跳过版本 99.0.0”及立即重绘记录，隔离设置已保存 `SkippedVersion: "99.0.0"`；结束时从实际挂件 XAML 读取的文字已不含“下载新版”。这证明入口调用与跳过落盘/撤回，不证明浏览器或安装包下载成功，也不把未反馈的观感项目记为人工通过。
+
+人工操作结束后，通过既有 `board-manual` 完成标记正常退出（退出 0），本地合成 API 已停止。真实 settings/timetable/credentials 三文件哈希与启动前一致。原始日志、结束观测和核对摘要归档于工作区 `.artifacts/issue26-implement/evidence/manual/`，未提交或上传。
+
 ## 对抗式检查
 
 - [x] 边界：无结果/已最新不显示；新版出现与消失实时重绘；320 DIP 不裁下载按钮。
