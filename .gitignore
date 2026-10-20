@@ -2,6 +2,9 @@ node_modules/
 dist/
 out/
 release/
+# 发布控制面脚本不是构建产物；Python 缓存仍忽略。
+!scripts/release/
+__pycache__/
 .pnpm-store/
 .cache/
 *.tsbuildinfo

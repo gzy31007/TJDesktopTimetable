@@ -1,6 +1,6 @@
 name: Release (WinUI)
 
-# v* tag → 发布自包含的 WinUI 挂件（解压即用，不需要预装 .NET 或 Windows App Runtime）。
+# 统一发布入口调用 → 产出自包含的 WinUI 资产，不操作 Release。
 #
 # 为什么自包含：框架依赖版要求用户装 .NET 10 桌面运行时 **且** Windows App Runtime 1.8 —— 那条路
 # 对"下载一个 zip 就能用"来说太贵。`WindowsAppSDKSelfContained=true` + `--self-contained` 把两者
@@ -11,25 +11,43 @@ name: Release (WinUI)
 #   TJDesktopTimetable-v<版本>-win-x64.zip       ← 自包含 zip，给想手动解压的人
 # 「新版本提示」优先给 setup.exe（`UpdateCheck.WindowsPackageSuffixes`），找不到才退回 zip。
 #
-# 只做构建与发布，**不跑运行时冒烟**：GitHub runner 上 WASDK 引导路径会挂住且无输出（见 build-csharp.yml
-# 里的说明），运行时验证走本机 `.tools/build-winui.ps1 -RunSmoke` + `verify-import.ps1` +
-# `verify-installer.ps1`（后者覆盖装/启动/卸载/覆盖升级/运行中安装四个场景）。
+# 只做构建与打包，**不跑运行时冒烟**：GitHub runner 上 WASDK 引导路径会挂住且无输出（见 build-csharp.yml
+# 里的说明），运行时验证走 scripts/acceptance/Invoke-Acceptance.ps1。
 
+# 仅由统一 release.yml 调用；本平台无 Release 写权限。
 on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      fail-build:
+        default: false
+        type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - name: Verify source and isolated fault
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          FAIL_BUILD: ${{ inputs.fail-build }}
+        run: |
+          if ((git rev-parse HEAD) -ne $env:EXPECTED_SHA) { throw 'Source SHA mismatch' }
+          if ($env:FAIL_BUILD -eq 'true') {
+            if ($env:GITHUB_REF -notlike 'refs/heads/release-gate-test/*') { throw 'Faults are rehearsal-only' }
+            throw 'Intentional isolated platform failure'
+          }
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -50,7 +68,7 @@ jobs:
         run: |
           $exe = 'publish\Tjt.App.exe'
           if (-not (Test-Path $exe)) { throw "publish 产物里没有 Tjt.App.exe" }
-          # 版本号取自 Directory.Build.props（Release tag 与它应当一致；不一致时以产物为准并提示）
+          # 版本号取自 Directory.Build.props（Release tag 与它应当一致；由调用方硬门禁校验一致）
           $version = (Select-String -Path 'dotnet\Directory.Build.props' -Pattern '<Version>([^<]+)</Version>').Matches[0].Groups[1].Value
           $name = "TJDesktopTimetable-v$version-win-x64"
           $readme = @(
@@ -84,34 +102,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit=$LASTEXITCODE)" }
           Get-ChildItem 'TJDesktopTimetable-*-setup.exe' | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
 
-      - name: 创建/更新 Release 并上传资产
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = '${{ github.ref_name }}'
-          $version = (Select-String -Path 'dotnet\Directory.Build.props' -Pattern '<Version>([^<]+)</Version>').Matches[0].Groups[1].Value
-          $zip = Get-ChildItem 'TJDesktopTimetable-v*-win-x64.zip' | Select-Object -First 1
-          $setup = Get-ChildItem 'TJDesktopTimetable-v*-setup.exe' | Select-Object -First 1
-          if (-not $zip) { throw "没有 zip 产物" }
-          if (-not $tag.StartsWith('v')) { throw "不是 tag 触发（ref=$tag），跳过发布" }
-          $notes = "docs/releases/$tag.md"
-          gh release view $tag --repo '${{ github.repository }}' 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            # 注意：不要把这个数组叫 $args —— PowerShell 的自动变量，会被悄悄吃掉
-            $ghArgs = @('release', 'create', $tag, '--repo', '${{ github.repository }}', '--title', "TJDesktopTimetable $tag", '--verify-tag')
-            # 预发布 tag（v1.4.0-beta.1）必须显式标 prerelease：否则 GitHub 的 /releases/latest
-            # 会把它当最新正式版，所有正式用户的「新版本提示」都会蹦出一个 beta。
-            if ($tag -match '-') { $ghArgs += '--prerelease' }
-            if (Test-Path $notes) { $ghArgs += @('--notes-file', $notes) } else { $ghArgs += @('--generate-notes') }
-            & gh @ghArgs
-            if ($LASTEXITCODE -ne 0) {
-              # 与 release-linux.yml 并发时可能撞车（同一个 tag 两个工作流）：只要 Release 已存在就继续
-              gh release view $tag --repo '${{ github.repository }}' 2>$null
-              if ($LASTEXITCODE -ne 0) { throw "创建 Release $tag 失败（既没建出来也读不到）" }
-            }
-          }
-          $assets = @($zip.FullName)
-          if ($setup) { $assets += $setup.FullName } else { Write-Warning '没有 setup.exe 产物：本次只上传 zip' }
-          gh release upload $tag @assets --repo '${{ github.repository }}' --clobber
-          gh release view $tag --repo '${{ github.repository }}'
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            TJDesktopTimetable-v*-win-x64.zip
+            TJDesktopTimetable-v*-setup.exe
+          if-no-files-found: error
+          retention-days: 7

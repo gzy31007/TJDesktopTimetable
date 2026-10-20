@@ -246,6 +246,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\acceptance\Inv
 
 运行环境、WSL 调用、单项模式、缓存和失败日志见[安全验收运行器](docs/acceptance-runner.md)。仅安全回归不需 WinUI；GitHub Actions 跑同一套入库测试。历史 `.tools` 本机脚本不再作为正式入口。
 
+发布链路、同提交测试、完整资产核对、人工审批与隔离故障演练见[发布硬门禁](docs/release-gate.md)。测试分支验证不代表主分支已启用；历史发布工作流的权限边界见该文档。
+
 改代码前请先读 [`AGENTS.md`](AGENTS.md)：那里有分层硬约束、以及这几年踩过的坑（层级层、材质、DPI、Win32 层级、验证脚本）。
 
 ## 扩展其他学校

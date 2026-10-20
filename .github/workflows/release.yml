@@ -1,0 +1,147 @@
+name: Release gate
+
+# 唯一发布入口。测试分支只演练，哪怕误审批也不能公开。
+on:
+  push:
+    tags: ['v*']
+    branches: ['release-gate-test/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.prepare.outputs.tag }}
+      sha: ${{ steps.prepare.outputs.sha }}
+      rehearsal: ${{ steps.prepare.outputs.rehearsal }}
+      fault: ${{ steps.prepare.outputs.fault }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Gate regression
+        run: python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
+      - name: Prepare immutable candidate
+        id: prepare
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, subprocess, xml.etree.ElementTree as ET
+          version = ET.parse('dotnet/Directory.Build.props').findtext('.//Version')
+          rehearsal = os.environ['GITHUB_REF_TYPE'] == 'branch'
+          scenario = os.environ['GITHUB_REF_NAME'].rsplit('/', 1)[-1] if rehearsal else 'none'
+          if rehearsal and scenario not in {'success', 'version-mismatch', 'missing-asset', 'platform-failure'}:
+              raise SystemExit('Unknown isolated rehearsal scenario')
+          fault = 'none' if scenario == 'success' else scenario
+          tag = (f"gate-test-{os.environ['GITHUB_RUN_ID']}-v{version}" if rehearsal
+                 else os.environ['GITHUB_REF_NAME'])
+          if scenario == 'version-mismatch':
+              tag = f"gate-test-{os.environ['GITHUB_RUN_ID']}-v0.0.0"
+          subprocess.run(['python3', 'scripts/release/gate.py', 'prepare',
+                          '--sha', os.environ['SOURCE_SHA'], '--tag', tag,
+                          '--run-id', os.environ['GITHUB_RUN_ID'],
+                          '--rehearsal', str(rehearsal).lower(), '--fault', fault], check=True)
+          PY
+
+  ci:
+    needs: preflight
+    uses: ./.github/workflows/build-csharp.yml
+
+  windows:
+    needs: preflight
+    uses: ./.github/workflows/release-winui.yml
+    with:
+      sha: ${{ needs.preflight.outputs.sha }}
+
+  linux:
+    needs: preflight
+    uses: ./.github/workflows/release-linux.yml
+    with:
+      sha: ${{ needs.preflight.outputs.sha }}
+      fail-build: ${{ needs.preflight.outputs.fault == 'platform-failure' }}
+
+  draft:
+    needs: [preflight, ci, windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          # 缺资产演练复用真实平台构建，只故意不交付 Linux 资产给统一收尾。
+          pattern: ${{ needs.preflight.outputs.fault == 'missing-asset' && 'release-windows' || 'release-*' }}
+          path: release-assets
+          merge-multiple: true
+      - name: Create draft and read back verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.sha }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          REHEARSAL: ${{ needs.preflight.outputs.rehearsal }}
+        run: >-
+          python3 scripts/release/gate.py draft
+          --sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --run-id "$GITHUB_RUN_ID"
+          --rehearsal "$REHEARSAL" --assets release-assets --manifest release-manifest.json
+      - name: Immutable handoff to approval
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-manifest
+          path: release-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+  rehearsal-review:
+    if: ${{ needs.preflight.outputs.rehearsal == 'true' }}
+    needs: [preflight, ci, windows, linux, draft]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Rehearsal never publishes
+        run: echo 'Verified draft only. This rehearsal job cannot publish a Release.'
+
+  publish:
+    if: ${{ needs.preflight.outputs.rehearsal == 'false' }}
+    needs: [preflight, ci, windows, linux, draft]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-manifest
+          path: verified-manifest
+      - name: Revalidate after human approval and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.sha }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          REHEARSAL: ${{ needs.preflight.outputs.rehearsal }}
+        run: >-
+          python3 scripts/release/gate.py publish
+          --sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --run-id "$GITHUB_RUN_ID"
+          --rehearsal "$REHEARSAL" --manifest verified-manifest/release-manifest.json
