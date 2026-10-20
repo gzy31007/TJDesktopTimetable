@@ -607,7 +607,8 @@ def list_releases(gh: Any, ctx: GateContext) -> list[Mapping[str, Any]]:
     for page in range(1, 101):
         body = gh.api("GET", _repo_path(ctx, f"/releases?per_page=100&page={page}"))
         if body is None:
-            break
+            # 404 只代表"这次查询失败"，不代表"没有 Release"：清单拿不全就不能判既存。
+            raise GateError(f"Release 清单第 {page} 页返回 404，无法确认是否已存在同 tag Release")
         if not isinstance(body, list):
             raise GateError(f"Release 清单第 {page} 页不是数组")
         collected.extend(body)

@@ -1603,6 +1603,65 @@ class ReleaseLookupTests(GateTestCase):
             gate.list_releases(BadGh(), make_ctx())
 
 
+class ReleaseListFailureTests(GateTestCase):
+    """清单 404 是 fail closed：比"看起来像空清单"严格。"""
+
+    def _draft_with(self, gh: FakeGh) -> None:
+        with self.assertRaises(gate.GateError) as caught:
+            self.draft(make_ctx(), gh)
+        self.assertIn("404", str(caught.exception))
+
+    def test_list_releases_raises_on_404(self) -> None:
+        class NotFoundGh(FakeGh):
+            def api(self, method: str, path: str, payload: Any = None) -> Any:
+                if "per_page=" in path:
+                    return None
+                return super().api(method, path, payload)
+
+        with self.assertRaises(gate.GateError) as caught:
+            gate.list_releases(NotFoundGh(), make_ctx())
+        self.assertIn("404", str(caught.exception))
+
+    def test_draft_fails_closed_when_first_page_is_404(self) -> None:
+        class FirstPage404Gh(FakeGh):
+            def api(self, method: str, path: str, payload: Any = None) -> Any:
+                if "/releases?per_page=" in path and path.endswith("page=1"):
+                    self.requests.append((method, path, payload))
+                    return None
+                return super().api(method, path, payload)
+
+        gh = FirstPage404Gh(tags={TAG: SHA})
+        self._draft_with(gh)
+        self.assertEqual(gh.release_posts(), [])
+        self.assertEqual(gh.uploads, [])
+        self.assertFalse(self.manifest_path().exists())
+
+    def test_draft_fails_closed_when_second_page_is_404(self) -> None:
+        class SecondPage404Gh(FakeGh):
+            def api(self, method: str, path: str, payload: Any = None) -> Any:
+                if "/releases?per_page=" in path and path.endswith("page=2"):
+                    self.requests.append((method, path, payload))
+                    return None
+                return super().api(method, path, payload)
+
+        gh = SecondPage404Gh(tags={TAG: SHA})
+        for index in range(100):  # 第一页满 100 条，逼出第二页请求
+            release_id = 20000 + index
+            gh.releases[release_id] = seeded_release(f"v0.1.{index}", release_id=release_id)
+            gh.assets[release_id] = []
+        self._draft_with(gh)
+        self.assertEqual(gh.release_posts(), [])
+        self.assertEqual(gh.uploads, [])
+        self.assertFalse(self.manifest_path().exists())
+        self.assertTrue(
+            any("/releases?per_page=" in path and path.endswith("page=2") for _, path, _ in gh.requests)
+        )
+
+    def test_list_releases_accepts_empty_array_as_end(self) -> None:
+        gh = FakeGh()
+        self.assertEqual(gate.list_releases(gh, make_ctx()), [])
+
+
 # --------------------------------------------------------------------------- draft
 
 
