@@ -68,15 +68,19 @@ public partial class App : Application
     public App()
     {
         Startup = AppStartupOptions.Parse(Environment.GetCommandLineArgs());
-        // Fail closed before any store/profile access. Neither flag works on its own.
+        // Fail closed before any store/profile access. Smoke may opt into the same isolation
+        // without a session plan; it exits before tray, autostart and automatic update setup.
         if (Startup.SessionCheckPath is not null || Startup.DiagnosticDirectory is not null)
         {
-            if (Startup.SessionCheckPath is null || Startup.DiagnosticDirectory is null
-                || Startup.Smoke || Startup.LoginCheckUrl is not null || Startup.FetchCheckPath is not null
+            var isolatedSmoke = Startup.Smoke && Startup.SessionCheckPath is null;
+            if (Startup.DiagnosticDirectory is null || (!isolatedSmoke && Startup.SessionCheckPath is null)
+                || (Startup.Smoke && Startup.SessionCheckPath is not null)
+                || Startup.LoginCheckUrl is not null || Startup.FetchCheckPath is not null
                 || Startup.ImportPath is not null || Startup.FixturePath is not null
                 || Startup.UpdateCheck || Startup.UpdateNotify)
-                throw new ArgumentException("session-check 仅与独立 diagnostic-dir 配对使用，不混用其他诊断入口。");
-            RequireLoopback(Startup.SjtuHost ?? throw new ArgumentException("session-check 必须显式指定 loopback sjtu-host。"));
+                throw new ArgumentException("diagnostic-dir 必须与独立 smoke 或 session-check 配对，不混用其他诊断入口。");
+            if (!isolatedSmoke)
+                RequireLoopback(Startup.SjtuHost ?? throw new ArgumentException("session-check 必须显式指定 loopback sjtu-host。"));
             SettingsStore.UseDiagnosticDirectory(Startup.DiagnosticDirectory);
         }
         AppLog.UseFile(Startup.LogPath);

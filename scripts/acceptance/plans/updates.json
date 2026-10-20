@@ -1,0 +1,9 @@
+[
+  {"status":200,"body":{"tag_name":"v99.0.0","html_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v99.0.0","draft":false,"prerelease":false,"assets":[{"name":"package-v99.0.0-setup.exe","browser_download_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/download/v99.0.0/package-setup.exe"},{"name":"package-v99.0.0-win-x64.zip","browser_download_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/download/v99.0.0/package-win-x64.zip"}]}},
+  {"status":200,"body":{"tag_name":"v99.0.0","html_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v99.0.0","draft":false,"prerelease":false,"assets":[{"name":"package-v99.0.0-setup.exe","browser_download_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/download/v99.0.0/package-setup.exe"},{"name":"package-v99.0.0-win-x64.zip","browser_download_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/download/v99.0.0/package-win-x64.zip"}]}},
+  {"status":200,"body":{"tag_name":"v100.0.0","html_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v100.0.0","draft":false,"prerelease":false,"assets":[{"name":"package-v100.0.0-win-x64.zip","browser_download_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/download/v100.0.0/package-win-x64.zip"}]}},
+  {"status":200,"body":{"tag_name":"v1.0.0","html_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v1.0.0","draft":false,"prerelease":false,"assets":[]}},
+  {"status":503,"body":{}},
+  {"status":200,"body":{"tag_name":"v101.0.0","html_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/tag/v101.0.0","draft":false,"prerelease":false,"assets":[{"name":"package-v101.0.0-setup.exe","browser_download_url":"https://github.com/gzy31007/TJDesktopTimetable/releases/download/v101.0.0/package-setup.exe"}]}},
+  {"status":503,"body":{}}
+]

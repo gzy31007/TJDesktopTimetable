@@ -239,13 +239,12 @@ install -Dm644 <发布目录>/Assets/app-256.png ~/.local/icons/tjt-linux.png
 # 平台无关的核心库 + 挂件视觉层（Linux / WSL 直接跑）
 DOTNET_CLI_HOME=$PWD/.tools/dotnet-home ./.tools/dotnet/dotnet test dotnet/TjtTimetable.slnx
 
-# WinUI 外壳：只能在 Windows 构建（脚本会 robocopy 到 C:\tjt-tools\work 再编译）
-PS=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
-$PS -NoProfile -ExecutionPolicy Bypass -File '\\wsl.localhost\Ubuntu-24.04\root\TJDesktopTimetable\.tools\build-winui.ps1' -RunSmoke
+# WinUI 外壳：在 Windows PowerShell 中，从检出根目录运行入库入口。
+# 每轮使用新的本机隔离目录，构建后跑冒烟、整表及更新会话。
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\acceptance\Invoke-Acceptance.ps1 -Today 2026-09-21
 ```
 
-> ⚠️ 开关（`-RunSmoke` / `-NoBackdrop` / `-DesktopLayer`）**必须**配合 `-File` 用；
-> `-EncodedCommand "$B64"` 那种形式后面再跟开关会被 PowerShell 当成非法参数（实测）。
+运行环境、WSL 调用、单项模式、缓存和失败日志见[安全验收运行器](docs/acceptance-runner.md)。仅安全回归不需 WinUI；GitHub Actions 跑同一套入库测试。历史 `.tools` 本机脚本不再作为正式入口。
 
 改代码前请先读 [`AGENTS.md`](AGENTS.md)：那里有分层硬约束、以及这几年踩过的坑（层级层、材质、DPI、Win32 层级、验证脚本）。
 

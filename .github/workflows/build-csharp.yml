@@ -8,7 +8,7 @@
 # - `dotnet/TjtTimetable.Linux.slnx`：Avalonia Linux 外壳（Tjt.Linux，fork 新增），
 #   只在 Linux 上构建；Windows runner 上不跑。
 #
-# WinUI 外壳在这里做两件事：编译 + 跑一次 `--smoke` 自检（建窗口、渲染课表、校验布局）。
+# WinUI 外壳只编译；独立 Windows job 跑验收运行器的合成安全回归，不启动 WinUI。
 name: csharp
 
 on:
@@ -16,15 +16,45 @@ on:
     paths:
       - 'dotnet/**'
       - 'dotnet/fixtures/**'
+      - 'scripts/acceptance/**'
       - '.github/workflows/build-csharp.yml'
   pull_request:
     paths:
       - 'dotnet/**'
       - 'dotnet/fixtures/**'
+      - 'scripts/acceptance/**'
       - '.github/workflows/build-csharp.yml'
   workflow_dispatch:
 
 jobs:
+  acceptance-runner:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner safety（真实子进程、超时、中断与清理；不启动 WinUI）
+        shell: powershell
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass
+          -File scripts/acceptance/Test-Runner.ps1
+          -RunRoot "${{ github.workspace }}\.artifacts\runner-safety"
+      - name: Acceptance entry guards（危险缓存路径在写入前拒绝）
+        shell: powershell
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass
+          -File scripts/acceptance/Test-EntryGuards.ps1
+          -RunRoot "${{ github.workspace }}\.artifacts\entry-guards"
+      - name: Upload（仅合成安全回归日志）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-runner-safety
+          path: |
+            .artifacts/runner-safety/
+            .artifacts/entry-guards/
+          if-no-files-found: warn
+          retention-days: 7
+
   test:
     strategy:
       fail-fast: false
@@ -62,7 +92,7 @@ jobs:
       # App 构造函数第一行的文件日志都没落盘），说明卡点在 WASDK 引导路径内部，不在我们的代码里。
       # 反过来，本机（RTX 5070 + 1.8 运行时）两条路径都是实测通过的：
       # 带材质 `[backdrop] mode=mica-controller`、不带材质 `[backdrop] skipped`，
-      # 两种都 `[smoke] ok blocks=19 canvas=977x600`。运行时验证走 .tools/build-winui.ps1 -RunSmoke。
+      # 两种都 `[smoke] ok blocks=19 canvas=977x600`。运行时验证走 scripts/acceptance/Invoke-Acceptance.ps1。
 
       - name: Upload（WinUI 外壳产物）
         uses: actions/upload-artifact@v4

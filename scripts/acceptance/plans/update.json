@@ -1,0 +1,13 @@
+[
+  {"Action":"update-snapshot"},
+  {"Action":"update-check"},
+  {"Action":"update-download"},
+  {"Action":"update-skip"},
+  {"Action":"update-check"},
+  {"Action":"update-check"},
+  {"Action":"update-download"},
+  {"Action":"update-check"},
+  {"Action":"update-check"},
+  {"Action":"update-check"},
+  {"Action":"update-check"}
+]

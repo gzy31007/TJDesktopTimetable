@@ -23,8 +23,9 @@ apps/desktop/release/
 .win-*.bat
 deploy-win.ps1
 
-# 本地视觉验收产物（截图/探针），不参与版本控制
+# 本地工具与验收产物不入库；正式参数化入口在 scripts/acceptance/
 .shots/
+.artifacts/
 .tools/
 *.local.json
 
