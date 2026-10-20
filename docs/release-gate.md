@@ -9,7 +9,7 @@
 1. 从固定提交解析 `dotnet/Directory.Build.props` 的唯一版本，要求标签严格等于 `v<Version>`，标签解引用必须指向该提交。
 2. 调用同提交的 `build-csharp.yml`，复用双系统核心测试、验收运行器安全回归与两外壳编译。不是查询另一次“同 SHA 最近成功”的运行，也不依赖 push 的路径过滤。发布门禁 Python 回归也必须成功。
 3. 同时调用两个平台构建工作流。它们只有 `contents:read`，只上传本次运行的 Actions artifacts，不创建或更新 Release。
-4. 所有前置 job 明确成功后，统一 `draft` job 校验本地三资产，再创建草稿、上传和重新枚举服务端资产，核对名称、非空大小与 SHA256。缺少 API digest 时下载校验，不能把缺少 digest 当成功。任何错误都不转正式。
+4. 所有前置 job 明确成功后，统一 `draft` job 校验本地三资产，分页枚举 Release 拒绝同标签的既有草稿或公开版本，再创建草稿、按新建 `release_id` 上传和重新枚举服务端资产，核对名称、非空大小与 SHA256。不能用只按 tag 的查询证明草稿不存在。缺少 API digest 时下载校验，不能把缺少 digest 当成功。任何错误都不转正式。
 5. 成功的完整快照写入 `release-manifest` Actions artifact。`publish` job 使用 GitHub 原生 `release` 环境，等待人工审批。
 6. 人工批准后，从固定 SHA 检出，再次检查当前运行的成功 job、环境审批规则、标签、草稿身份和资产快照。只在所有检查仍成立时将同一草稿转为正式；不重建、不补传、不覆盖资产。
 

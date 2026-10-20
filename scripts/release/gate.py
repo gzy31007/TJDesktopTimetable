@@ -81,6 +81,7 @@ REHEARSAL_BRANCH_PREFIX = "release-gate-test/"
 REHEARSAL_TAG_PREFIX = "gate-test-"
 
 API_HOSTNAME = "github.com"
+UPLOADS_HOSTNAME = "uploads.github.com"
 DEFAULT_TIMEOUT_SECONDS = 120
 RUN_ATTEMPT_ENV = "GITHUB_RUN_ATTEMPT"
 
@@ -449,6 +450,7 @@ class GhCli:
         *,
         stdin_text: str | None,
         what: str,
+        env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
@@ -456,7 +458,7 @@ class GhCli:
                 input=stdin_text,
                 capture_output=True,
                 text=True,
-                env=self.environment(),
+                env=dict(env) if env is not None else self.environment(),
                 timeout=self.timeout,
                 check=False,
             )
@@ -524,22 +526,72 @@ class GhCli:
             dest.unlink(missing_ok=True)
             raise GateError(f"下载资产 {path} 得到空文件，拒绝")
 
-    def upload(self, tag: str, files: Sequence[Path | str]) -> None:
-        if not files:
-            raise GateError("没有要上传的资产")
+    def upload_asset(self, release_id: int, name: str, path: Path | str) -> Mapping[str, Any]:
+        """按 release id 上传单个资产：绝对 uploads 主机 URL + `--input` 文件。
+
+        为什么不用 `gh release upload <tag>`：它按 tag 反查 release，而 draft 在 REST 的
+        tag 端点上不可见（实测 404），只有 GraphQL 才有兜底。这里直接用创建响应里的 id，
+        与 tag 彻底解耦，并且绝对 URL 天然不会落到 api.github.com。
+
+        认证注意：gh 按**请求 URL 的主机**解析 token（go-gh 的 tokenForHost：
+        `github.com`/企业租户/localhost 才认 `GH_TOKEN`，其它主机只认
+        `GH_ENTERPRISE_TOKEN`），`uploads.github.com` 不在前者里，所以这里把同一个 token
+        镜像到 `GH_ENTERPRISE_TOKEN`/`GITHUB_ENTERPRISE_TOKEN`，token 只走环境、不进 argv。
+        """
+        if not isinstance(release_id, int) or release_id <= 0:
+            raise GateError(f"上传资产需要合法的 release id，实际 {release_id!r}")
+        if not isinstance(name, str) or not name:
+            raise GateError("上传资产需要文件名")
+        source = Path(path)
+        size = source.stat().st_size
+        endpoint = (
+            f"https://{UPLOADS_HOSTNAME}/repos/{self.repo}/releases/{release_id}"
+            f"/assets?name={quote(name, safe='')}"
+        )
         command = [
             self._binary,
-            "release",
-            "upload",
-            tag,
-            *[str(item) for item in files],
-            "--repo",
-            f"{API_HOSTNAME}/{self.repo}",
+            "api",
+            "--hostname",
+            API_HOSTNAME,
+            "-X",
+            "POST",
+            endpoint,
+            "-H",
+            "Content-Type: application/octet-stream",
+            "-H",
+            "Accept: application/vnd.github+json",
+            "--input",
+            str(source),
         ]
-        proc = self._call(command, stdin_text=None, what=f"gh release upload {tag}")
+        env = self.environment()
+        token = env["GH_TOKEN"]
+        env.setdefault("GH_ENTERPRISE_TOKEN", token)
+        env.setdefault("GITHUB_ENTERPRISE_TOKEN", token)
+        proc = self._call(
+            command, stdin_text=None, what=f"上传资产 {name}", env=env
+        )
         if proc.returncode != 0:
             detail = f"{proc.stderr or ''}{proc.stdout or ''}".strip()
-            raise GateError(f"gh release upload 失败（exit {proc.returncode}）：{detail}")
+            raise GateError(f"上传资产 {name} 失败（exit {proc.returncode}）：{detail}")
+        out = (proc.stdout or "").strip()
+        try:
+            body = json.loads(out)
+        except json.JSONDecodeError as exc:
+            raise GateError(f"上传资产 {name} 返回非 JSON：{out[:200]!r}") from exc
+        if not isinstance(body, Mapping):
+            raise GateError(f"上传资产 {name} 的响应不是对象")
+        if not isinstance(body.get("id"), int):
+            raise GateError(f"上传资产 {name} 的响应缺少 id")
+        if body.get("name") != name:
+            raise GateError(f"上传资产 {name} 的响应名字不符：{body.get('name')!r}")
+        if body.get("size") != size:
+            raise GateError(
+                f"上传资产 {name} 的响应大小不符：{body.get('size')!r} != 本地 {size}"
+            )
+        state = body.get("state")
+        if state is not None and state != "uploaded":
+            raise GateError(f"上传资产 {name} 的状态不是 uploaded：{state!r}")
+        return body
 
 
 # --------------------------------------------------------------------------- 远端事实
@@ -547,6 +599,36 @@ class GhCli:
 
 def _repo_path(ctx: GateContext, suffix: str) -> str:
     return f"repos/{ensure_repo(ctx)}{suffix}"
+
+
+def list_releases(gh: Any, ctx: GateContext) -> list[Mapping[str, Any]]:
+    """分页列 Release；REST 的 tag 端点看不到 draft，只有清单能拿到。"""
+    collected: list[Mapping[str, Any]] = []
+    for page in range(1, 101):
+        body = gh.api("GET", _repo_path(ctx, f"/releases?per_page=100&page={page}"))
+        if body is None:
+            break
+        if not isinstance(body, list):
+            raise GateError(f"Release 清单第 {page} 页不是数组")
+        collected.extend(body)
+        if len(body) < 100:
+            break
+    else:
+        raise GateError("Release 清单分页超过 100 页，拒绝继续")
+    for release in collected:
+        if not isinstance(release, Mapping):
+            raise GateError("Release 清单里有非对象条目")
+    return collected
+
+
+def find_release_by_tag(gh: Any, ctx: GateContext) -> Mapping[str, Any] | None:
+    """按 tag 精确查 Release（含 draft）；同 tag 多份也拒绝，绝不静默挑一个。"""
+    matches = [r for r in list_releases(gh, ctx) if r.get("tag_name") == ctx.tag]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise GateError(f"同 tag 存在多个 Release（{len(matches)} 个），拒绝覆写：{ctx.tag}")
+    return matches[0]
 
 
 def list_run_jobs(gh: Any, ctx: GateContext) -> list[Mapping[str, Any]]:
@@ -981,8 +1063,14 @@ def create_draft_release(gh: Any, ctx: GateContext, body: str) -> Mapping[str, A
     return release
 
 
-def upload_assets(gh: Any, ctx: GateContext, assets: Sequence[LocalAsset]) -> None:
-    gh.upload(ctx.tag, [str(asset.path) for asset in assets])
+def upload_assets(
+    gh: Any, ctx: GateContext, release_id: int, assets: Sequence[LocalAsset]
+) -> list[Mapping[str, Any]]:
+    """逐个按 release id 上传；回包逐个核对名字与大小，任何偏差立即中止。"""
+    uploaded: list[Mapping[str, Any]] = []
+    for asset in assets:
+        uploaded.append(gh.upload_asset(release_id, asset.name, asset.path))
+    return uploaded
 
 
 def fetch_release(gh: Any, ctx: GateContext, release_id: int) -> Mapping[str, Any]:
@@ -1184,14 +1272,19 @@ def draft(
     verify_run(gh, ctx)
     verify_environment(gh, ctx)
     ensure_tag_ref(gh, ctx)
-    existing = gh.api("GET", _repo_path(ctx, f"/releases/tags/{quote(ctx.tag, safe='')}"))
+    existing = find_release_by_tag(gh, ctx)
     if existing is not None:
-        state = "已公开" if isinstance(existing, Mapping) and existing.get("draft") is False else "draft"
+        if existing.get("draft") is True:
+            state = "draft"
+        elif existing.get("draft") is False:
+            state = "已公开"
+        else:
+            state = "状态不明的"
         raise GateError(f"同 tag 已存在 Release（{state}），拒绝覆写：{ctx.tag}")
     notes = release_notes(repo_root, ctx.version)
     release = create_draft_release(gh, ctx, release_body(ctx, notes))
     release_id = int(release["id"])
-    upload_assets(gh, ctx, assets)
+    upload_assets(gh, ctx, release_id, assets)
     snapshot_release = fetch_release(gh, ctx, release_id)
     verify_release_metadata(snapshot_release, ctx, require_draft=True)
     remote = verify_remote_assets(

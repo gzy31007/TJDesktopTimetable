@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`scripts/release/gate.py` 的单测。
 
-全部在本地跑：GitHub 一侧用 `FakeGh` 注入（同名方法：api / upload / download_to_file），
+全部在本地跑：GitHub 一侧用 `FakeGh` 注入（同名方法：api / upload_asset / download_to_file），
 `gh` 子进程用 `unittest.mock` 打桩。命令：
 
     python3 scripts/release/test_gate.py
@@ -167,11 +167,15 @@ class FakeGh:
         self.releases_by_tag = copy.deepcopy(dict(releases_by_tag or {}))
         self.releases: dict[int, dict[str, Any]] = {}
         self.assets: dict[int, list[dict[str, Any]]] = {}
+        for release in self.releases_by_tag.values():
+            if isinstance(release, Mapping) and isinstance(release.get("id"), int):
+                self.releases[release["id"]] = copy.deepcopy(release)
+                self.assets.setdefault(release["id"], [])
         self.downloads: dict[int, bytes] = {}
         self.patch_effect = patch_effect
         self.on_upload = on_upload
         self.requests: list[tuple[str, str, Any]] = []
-        self.uploads: list[tuple[str, list[str]]] = []
+        self.uploads: list[tuple[int, list[str]]] = []
         self.download_calls: list[str] = []
         self._next_id = 9000
 
@@ -228,10 +232,18 @@ class FakeGh:
             if match:
                 obj = self.tag_objects.get(match.group(1))
                 return copy.deepcopy(obj) if obj is not None else None
+            match = re.fullmatch(r"/releases\?per_page=(\d+)&page=(\d+)", rest)
+            if match:
+                per, page = int(match.group(1)), int(match.group(2))
+                ordered = [self.releases[key] for key in sorted(self.releases)]
+                return copy.deepcopy(ordered[(page - 1) * per: page * per])
             match = re.fullmatch(r"/releases/tags/(.+)", rest)
             if match:
+                # 真实 GitHub：draft Release 在 REST 的 tag 端点上看不到，只能靠清单/id。
                 release = self.releases_by_tag.get(match.group(1))
-                return copy.deepcopy(release) if release is not None else None
+                if release is None or release.get("draft") is True:
+                    return None
+                return copy.deepcopy(release)
             match = re.fullmatch(r"/releases/(\d+)", rest)
             if match:
                 release = self.releases.get(int(match.group(1)))
@@ -280,27 +292,25 @@ class FakeGh:
                 return copy.deepcopy(release)
         raise AssertionError(f"未处理的 API 调用：{method} {rest}")
 
-    def upload(self, tag: str, files: list[Any]) -> None:
-        self.uploads.append((tag, [str(item) for item in files]))
-        release = next((item for item in self.releases.values() if item["tag_name"] == tag), None)
-        if release is None:
-            raise gate.GateError(f"upload 时 Release 不存在：{tag}")
-        for item in files:
-            data = Path(item).read_bytes()
-            asset_id = self._next_id
-            self._next_id += 1
-            self.assets[release["id"]].append(
-                {
-                    "id": asset_id,
-                    "name": Path(item).name,
-                    "size": len(data),
-                    "state": "uploaded",
-                    "digest": f"sha256:{hashlib.sha256(data).hexdigest()}",
-                }
-            )
-            self.downloads[asset_id] = data
+    def upload_asset(self, release_id: int, name: str, path: Any) -> dict[str, Any]:
+        if release_id not in self.releases:
+            raise gate.GateError(f"upload 时 Release 不存在：{release_id}")
+        self.uploads.append((release_id, [str(path)]))
+        data = Path(path).read_bytes()
+        asset_id = self._next_id
+        self._next_id += 1
+        asset = {
+            "id": asset_id,
+            "name": name,
+            "size": len(data),
+            "state": "uploaded",
+            "digest": f"sha256:{hashlib.sha256(data).hexdigest()}",
+        }
+        self.assets[release_id].append(asset)
+        self.downloads[asset_id] = data
         if callable(self.on_upload):
-            self.on_upload(release)
+            self.on_upload(self.releases[release_id])
+        return copy.deepcopy(asset)
 
     def download_to_file(self, path: str, dest: Path) -> None:
         self.download_calls.append(path)
@@ -730,24 +740,80 @@ class GhCliTests(unittest.TestCase):
         self.assertIn("GH_TOKEN", str(caught.exception))
         self.assertFalse(run.called)
 
-    def test_upload_uses_argument_array_without_clobber(self) -> None:
-        files = ["a.bin", "b.bin"]
-        with mock.patch("subprocess.run", return_value=self._proc(0, "")) as run:
-            gate.GhCli(REPO, token="tok").upload(TAG, files)
+    def test_upload_asset_contract_absolute_uploads_url_and_input_file(self) -> None:
+        body = {"id": 77, "name": "a.bin", "size": 5, "state": "uploaded"}
+        source = self.tmp / "a.bin"
+        source.write_bytes(b"hello")
+        with mock.patch("subprocess.run", return_value=self._proc(0, json.dumps(body))) as run:
+            result = gate.GhCli(REPO, token="tok-secret").upload_asset(7000, "a.bin", source)
+        self.assertEqual(result["id"], 77)
         command = run.call_args.args[0]
         self.assertEqual(
-            command, ["gh", "release", "upload", TAG, "a.bin", "b.bin", "--repo", f"github.com/{REPO}"]
+            command[:7],
+            ["gh", "api", "--hostname", "github.com", "-X", "POST",
+             f"https://uploads.github.com/repos/{REPO}/releases/7000/assets?name=a.bin"],
         )
+        self.assertIn("Content-Type: application/octet-stream", command)
+        self.assertIn("Accept: application/vnd.github+json", command)
+        self.assertEqual(command[command.index("--input") + 1], str(source))
         self.assertNotIn("--clobber", command)
-        self.assertNotIn("shell", run.call_args.kwargs)
-        self.assertEqual(run.call_args.kwargs["env"]["GH_HOST"], "github.com")
+        self.assertNotIn("gh", command[1:2] + [])  # 不是 release 子命令
+        self.assertNotIn("release", command)
+        kwargs = run.call_args.kwargs
+        self.assertNotIn("shell", kwargs)
+        self.assertEqual(kwargs["timeout"], gate.DEFAULT_TIMEOUT_SECONDS)
+        env = kwargs["env"]
+        self.assertEqual(env["GH_HOST"], "github.com")
+        self.assertEqual(env["GH_ENTERPRISE_TOKEN"], "tok-secret")
+        self.assertEqual(env["GITHUB_ENTERPRISE_TOKEN"], "tok-secret")
+        self.assertNotIn("tok-secret", " ".join(command))
 
-    def test_upload_failure_raises(self) -> None:
-        with mock.patch("subprocess.run", return_value=self._proc(1, "", "already exists")):
+    def test_upload_asset_quotes_name_in_query(self) -> None:
+        body = {"id": 1, "name": "a b.exe", "size": 5, "state": "uploaded"}
+        source = self.tmp / "a b.exe"
+        source.write_bytes(b"hello")
+        with mock.patch("subprocess.run", return_value=self._proc(0, json.dumps(body))) as run:
+            gate.GhCli(REPO, token="tok").upload_asset(7000, "a b.exe", source)
+        endpoint = run.call_args.args[0][6]
+        self.assertIn("name=a%20b.exe", endpoint)
+
+    def test_upload_asset_rejects_mismatched_response(self) -> None:
+        source = self.tmp / "a.bin"
+        source.write_bytes(b"hello")
+        for payload in (
+            {"id": 1, "name": "b.bin", "size": 5, "state": "uploaded"},
+            {"id": 1, "name": "a.bin", "size": 999, "state": "uploaded"},
+            {"name": "a.bin", "size": 5, "state": "uploaded"},
+            {"id": 1, "name": "a.bin", "size": 5, "state": "starter"},
+        ):
+            with self.subTest(payload=payload):
+                with mock.patch("subprocess.run", return_value=self._proc(0, json.dumps(payload))):
+                    with self.assertRaises(gate.GateError):
+                        gate.GhCli(REPO, token="tok").upload_asset(7000, "a.bin", source)
+
+    def test_upload_asset_accepts_valid_response(self) -> None:
+        source = self.tmp / "a.bin"
+        source.write_bytes(b"hello")
+        payload = {"id": 1, "name": "a.bin", "size": 5, "state": "uploaded"}
+        with mock.patch("subprocess.run", return_value=self._proc(0, json.dumps(payload))):
+            result = gate.GhCli(REPO, token="tok").upload_asset(7000, "a.bin", source)
+        self.assertEqual(result["id"], 1)
+
+    def test_upload_asset_fails_closed(self) -> None:
+        source = self.tmp / "a.bin"
+        source.write_bytes(b"hello")
+        with mock.patch("subprocess.run", return_value=self._proc(1, "", "HTTP 422 asset exists")):
+            with self.assertRaises(gate.GateError) as caught:
+                gate.GhCli(REPO, token="tok").upload_asset(7000, "a.bin", source)
+        self.assertIn("422", str(caught.exception))
+        with mock.patch("subprocess.run", return_value=self._proc(0, "not json")):
             with self.assertRaises(gate.GateError):
-                gate.GhCli(REPO, token="tok").upload(TAG, ["a.bin"])
+                gate.GhCli(REPO, token="tok").upload_asset(7000, "a.bin", source)
+        with mock.patch("subprocess.run", return_value=self._proc(0, "[]")):
+            with self.assertRaises(gate.GateError):
+                gate.GhCli(REPO, token="tok").upload_asset(7000, "a.bin", source)
         with self.assertRaises(gate.GateError):
-            gate.GhCli(REPO, token="tok").upload(TAG, [])
+            gate.GhCli(REPO, token="tok").upload_asset(0, "a.bin", source)
 
     def test_download_to_file_streams_stdout_without_output_flag(self) -> None:
         # 契约：gh api 没有 --output（gh api --help 已确认），必须把 stdout 绑到文件句柄，
@@ -1150,7 +1216,8 @@ class RemoteAssetTests(GateTestCase):
         gh.releases[7000] = seeded_release(TAG)
         gh.assets[7000] = []
         assets = gate.collect_assets(self.assets_dir(), VERSION)
-        gh.upload(TAG, [str(item.path) for item in assets])
+        for item in assets:
+            gh.upload_asset(7000, item.name, item.path)
         return gh
 
     def _expected(self) -> list[gate.ExpectedAsset]:
@@ -1362,14 +1429,15 @@ class ReleaseContentTests(GateTestCase):
         with self.assertRaises(gate.GateError):
             gate.create_draft_release(NoIdGh(), make_ctx(), "body")
 
-    def test_upload_assets_passes_three_paths(self) -> None:
+    def test_upload_assets_binds_release_id_and_passes_three_paths(self) -> None:
         gh = FakeGh()
         gh.releases[7000] = seeded_release(TAG)
         gh.assets[7000] = []
         assets = gate.collect_assets(self.assets_dir(), VERSION)
-        gate.upload_assets(gh, make_ctx(), assets)
-        self.assertEqual(gh.uploads[0][0], TAG)
-        self.assertEqual(len(gh.uploads[0][1]), 3)
+        uploaded = gate.upload_assets(gh, make_ctx(), 7000, assets)
+        self.assertEqual([item["name"] for item in uploaded], [a.name for a in assets])
+        self.assertEqual([item[0] for item in gh.uploads], [7000, 7000, 7000])
+        self.assertEqual(len(gh.assets[7000]), 3)
 
 
 # --------------------------------------------------------------------------- manifest
@@ -1483,6 +1551,58 @@ class ManifestTests(GateTestCase):
         self.assertIn("三件资产", str(caught.exception))
 
 
+# --------------------------------------------------------------------------- Release 清单
+
+
+class ReleaseLookupTests(GateTestCase):
+    def test_list_releases_paginates_to_the_end(self) -> None:
+        gh = FakeGh()
+        for index in range(205):
+            release_id = 10000 + index
+            gh.releases[release_id] = seeded_release(f"v0.0.{index}", release_id=release_id)
+            gh.assets[release_id] = []
+        releases = gate.list_releases(gh, make_ctx())
+        self.assertEqual(len(releases), 205)
+        pages = [path for method, path, _ in gh.requests if "page=" in path]
+        self.assertEqual(len(pages), 3)
+
+    def test_find_release_by_tag_matches_exact_tag_only(self) -> None:
+        gh = FakeGh()
+        gh.releases[1] = seeded_release(f"{TAG}-other", release_id=1)
+        gh.assets[1] = []
+        gh.releases[2] = seeded_release(TAG, release_id=2)
+        gh.assets[2] = []
+        found = gate.find_release_by_tag(gh, make_ctx())
+        self.assertEqual(found["id"], 2)
+        self.assertIsNone(gate.find_release_by_tag(FakeGh(), make_ctx()))
+
+    def test_find_release_by_tag_rejects_duplicates(self) -> None:
+        gh = FakeGh()
+        gh.releases[1] = seeded_release(TAG, release_id=1)
+        gh.assets[1] = []
+        gh.releases[2] = seeded_release(TAG, release_id=2)
+        gh.assets[2] = []
+        with self.assertRaises(gate.GateError) as caught:
+            gate.find_release_by_tag(gh, make_ctx())
+        self.assertIn("多个 Release", str(caught.exception))
+
+    def test_list_releases_rejects_non_list_payload(self) -> None:
+        class BadGh(FakeGh):
+            def api(self, method: str, path: str, payload: Any = None) -> Any:
+                return {"message": "nope"}
+
+        with self.assertRaises(gate.GateError):
+            gate.list_releases(BadGh(), make_ctx())
+
+    def test_list_releases_rejects_non_object_entries(self) -> None:
+        class BadGh(FakeGh):
+            def api(self, method: str, path: str, payload: Any = None) -> Any:
+                return ["oops"]
+
+        with self.assertRaises(gate.GateError):
+            gate.list_releases(BadGh(), make_ctx())
+
+
 # --------------------------------------------------------------------------- draft
 
 
@@ -1497,8 +1617,11 @@ class DraftTests(GateTestCase):
         self.assertTrue(release["draft"])
         self.assertEqual(release["target_commitish"], SHA)
         self.assertFalse(release["prerelease"])
-        self.assertEqual(len(gh.uploads), 1)
-        self.assertEqual(len(gh.uploads[0][1]), 3)
+        self.assertEqual(len(gh.uploads), 3)
+        self.assertEqual({item[0] for item in gh.uploads}, {release["id"]})
+        self.assertEqual(
+            sorted(Path(item[1][0]).name for item in gh.uploads), sorted(standard_assets())
+        )
         self.assertEqual(len(gh.release_posts()), 1)
         self.assertIs(gh.release_posts()[0][2]["draft"], True)
         manifest = gate.read_manifest(self.manifest_path())
@@ -1523,9 +1646,26 @@ class DraftTests(GateTestCase):
         gh = FakeGh(tags={TAG: SHA}, releases_by_tag={TAG: seeded_release(TAG, draft=True)})
         with self.assertRaises(gate.GateError) as caught:
             self.draft(make_ctx(), gh)
+        self.assertIn("draft", str(caught.exception))
+        self.assertEqual(gh.release_posts(), [])
+        self.assertFalse(self.manifest_path().exists())
+
+    def test_draft_rejects_existing_draft_invisible_to_tag_endpoint(self) -> None:
+        # 实机证据：draft Release 在 REST 的 /releases/tags/<tag> 上是 404，
+        # 只有分页清单能看到。既存判定绝不能只信 tag 端点。
+        gh = FakeGh(tags={TAG: SHA})
+        gh.releases[7000] = seeded_release(TAG, draft=True)
+        gh.assets[7000] = []
+        self.assertIsNone(gh.api("GET", f"repos/{REPO}/releases/tags/{TAG}"))
+        gh.requests.clear()  # 上面的探针请求不算 gate 的行为
+        with self.assertRaises(gate.GateError) as caught:
+            self.draft(make_ctx(), gh)
         self.assertIn("拒绝覆写", str(caught.exception))
         self.assertEqual(gh.release_posts(), [])
         self.assertFalse(self.manifest_path().exists())
+        self.assertFalse(
+            any("/releases/tags/" in path for method, path, _ in gh.requests if method == "GET")
+        )
 
     def test_draft_rejects_existing_public_release(self) -> None:
         gh = FakeGh(tags={TAG: SHA}, releases_by_tag={TAG: seeded_release(TAG, draft=False)})
