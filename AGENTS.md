@@ -2,6 +2,10 @@
 
 > 系统环境、WSL 网络与代理、工具链、字体等**通用**信息见全局 `~/.dsh/AGENTS.md`，本文件只写本项目相关内容。
 
+## Git 协作入口
+
+开工、建分支、提 PR、关票或涉及发布晋级前读 [Git 工作流](docs/git-workflow.md)。版本线和发布权限以该文为准，以下发版描述仅说明现有技术入口，不代表发布授权。
+
 ## Windows 验收入口（现行）
 
 构建、冒烟、整表与更新会话统一使用入库的 `scripts/acceptance/Invoke-Acceptance.ps1`，修改或运行前先读 [安全验收运行器](docs/acceptance-runner.md)。Actions 另跑运行器安全回归，WinUI 仍只做编译门禁。下文 `.tools/` 验收脚本与本机路径是历史记录，不再作为复跑入口。
