@@ -1,30 +1,47 @@
 name: Release (Linux)
 
-# v* tag → 发布自包含的 Avalonia Linux 挂件（解压即用，不需要预装 .NET）。
+# 统一发布入口调用 → 产出自包含的 Avalonia Linux 资产，不操作 Release。
 #
-# 与 release-winui.yml 平行：两个工作流都由同一个 tag 触发、都往同一个 Release 挂资产
-# （Windows 版 zip / Linux 版 tar.gz），所以两边都有"Release 不存在就创建"的逻辑 ——
-# 谁先跑完谁创建，后到的那个只上传，`gh release create` 撞车时容忍"已存在"。
+# 与 release-winui.yml 平行，仅构建 Actions 资产，由 release.yml 统一草稿收尾；本中间版本冻结公开。
 #
 # 只做构建与打包，**不跑 GUI 运行时验收**：runner 上没有 X11 会话，
 # 贴桌面层 / 显示桌面可见性 / 拖缩这些行为只能在真机（KDE X11 / XWayland）上看，
 # 见 README「Linux 版」一节的验收口径。
 
+# 仅由统一 release.yml 调用；本平台无 Release 写权限。
 on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      fail-build:
+        default: false
+        type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - name: Verify source and isolated fault
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+          FAIL_BUILD: ${{ inputs.fail-build }}
+        run: |
+          if ((git rev-parse HEAD) -ne $env:EXPECTED_SHA) { throw 'Source SHA mismatch' }
+          if ($env:FAIL_BUILD -eq 'true') {
+            if ($env:GITHUB_REF -notlike 'refs/heads/release-gate-test/*') { throw 'Faults are rehearsal-only' }
+            throw 'Intentional isolated platform failure'
+          }
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -48,7 +65,7 @@ jobs:
             ls -la publish
             exit 1
           fi
-          # 版本号取自 Directory.Build.props（Release tag 与它应当一致；不一致时以产物为准并提示）
+          # 版本号取自 Directory.Build.props（Release tag 与它应当一致；由调用方硬门禁校验一致）
           version=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' dotnet/Directory.Build.props | head -1)
           name="TJDesktopTimetable-v${version}-linux-x64"
           cat > publish/使用说明.txt <<EOF
@@ -75,30 +92,60 @@ jobs:
           tar -czf "${name}.tar.gz" -C publish .
           echo "打包完成：${name}.tar.gz"
           ls -l "${name}.tar.gz"
-          tar -tzf "${name}.tar.gz" | head -20
+          tar -tzf "${name}.tar.gz" > /tmp/tjt-package-list.txt
+          head -20 /tmp/tjt-package-list.txt
 
-      - name: 创建/更新 Release 并上传资产
+      - name: build-proof.json（本平台产物证明，随包同一 artifact）
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          EXPECTED_SHA: ${{ inputs.sha }}
         run: |
           set -euo pipefail
-          if [ "${TAG#v}" = "$TAG" ]; then
-            echo "不是 v* tag 触发（ref=$TAG），跳过发布"
-            exit 0
-          fi
-          version=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' dotnet/Directory.Build.props | head -1)
-          asset=$(ls TJDesktopTimetable-v*-linux-x64.tar.gz | head -1)
-          notes="docs/releases/${TAG}.md"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG 已存在（win 工作流先建的），直接上传 Linux 资产"
-          else
-            ghArgs=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "TJDesktopTimetable $TAG" --verify-tag)
-            # 预发布 tag 显式标 prerelease，别再让 beta 出现在 /releases/latest 里（同 win 工作流）
-            if [[ "$TAG" == *-* ]]; then ghArgs+=(--prerelease); fi
-            if [ -f "$notes" ]; then ghArgs+=(--notes-file "$notes"); else ghArgs+=(--generate-notes); fi
-            # 与 win 工作流并发时可能撞车：创建失败但 Release 已存在，就当成功继续上传
-            gh "${ghArgs[@]}" || gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
-          fi
-          gh release upload "$TAG" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          expected = os.environ.get("EXPECTED_SHA", "").strip()
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+          if expected and head != expected:
+              raise SystemExit("checkout HEAD 与期望 SHA 不一致：%s != %s" % (head, expected))
+
+          def digest(path):
+              sha256 = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1 << 20), b""):
+                      sha256.update(chunk)
+              return sha256.hexdigest()
+
+          packages = sorted(Path(".").glob("TJDesktopTimetable-v*-linux-x64.tar.gz"))
+          if len(packages) != 1:
+              raise SystemExit("Linux 必须恰好一个包，实际 %d 个" % len(packages))
+
+          proof = {
+              "schema": 1,
+              "repo": os.environ["GITHUB_REPOSITORY"],
+              "sha": head,
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "platform": "linux",
+              "assets": [
+                  {"name": path.name, "size": path.stat().st_size, "sha256": digest(path)}
+                  for path in packages
+              ],
+          }
+          Path("build-proof.json").write_text(json.dumps(proof, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(proof, indent=2))
+          PY
+
+      - name: Upload Linux release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          # 包与证明进同一个 artifact；协调侧只按精确名字下到 downloaded/linux。
+          path: |
+            TJDesktopTimetable-v*-linux-x64.tar.gz
+            build-proof.json
+          if-no-files-found: error
+          retention-days: 7

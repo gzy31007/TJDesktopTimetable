@@ -1,0 +1,148 @@
+name: Release gate
+
+# 唯一发布协调入口：只构建、只创建 draft Release，公开动作不在这条链里。
+#
+# 触发只有两种 ref：
+# - refs/heads/stable：维护者用受信凭据真实晋级后的候选提交，构建并创建 draft；
+# - refs/heads/release-gate-test/<批次>/<场景>：隔离演练，同样只建 draft。
+# 不使用标签触发、workflow_dispatch，也不靠 GITHUB_TOKEN 推送串联另一条工作流。
+#
+# 全链路固定 event 的 github.sha（不读 stable 的 tip），平台与 CI 都显式接收这个 SHA。
+# 生产候选的来源（晋级记录里的 source SHA）由 gate.py prepare --fetch-source 只读核验。
+on:
+  push:
+    branches:
+      - stable
+      - 'release-gate-test/**'
+
+permissions:
+  contents: read
+
+# 全仓发布协调：同一时刻只允许一条发布链在跑，别的 stable/演练 push 排队而不是并发写 Release。
+concurrency:
+  group: release-coordination
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      tag: ${{ steps.prepare.outputs.tag }}
+      sha: ${{ steps.prepare.outputs.sha }}
+      rehearsal: ${{ steps.prepare.outputs.rehearsal }}
+      fault: ${{ steps.prepare.outputs.fault }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Gate regression
+        run: python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
+      - name: Prepare immutable candidate
+        id: prepare
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import xml.etree.ElementTree as ET; values=[(e.text or "").strip() for e in ET.parse("dotnet/Directory.Build.props").getroot().iter() if e.tag.split("}")[-1] == "Version"]; assert len(values) == 1, "Directory.Build.props 必须恰好有一个 Version"; print(values[0])')
+          case "${GITHUB_REF:-}" in
+            refs/heads/stable)
+              rehearsal=false
+              fault=none
+              tag="v${version}"
+              ;;
+            refs/heads/release-gate-test/*)
+              rehearsal=true
+              scenario="${GITHUB_REF#refs/heads/release-gate-test/}"
+              scenario="${scenario##*/}"
+              case "${scenario}" in
+                success) fault=none ;;
+                version-mismatch|missing-asset|platform-failure) fault="${scenario}" ;;
+                *)
+                  echo "未知的隔离演练场景：${scenario}" >&2
+                  exit 1
+                  ;;
+              esac
+              tag="gate-test-${GITHUB_RUN_ID}-v${version}"
+              if [ "${fault}" = version-mismatch ]; then
+                # 故意给错版本，让 gate.py 的 tag 严格校验在 preflight 就失败。
+                tag="gate-test-${GITHUB_RUN_ID}-v0.0.0"
+              fi
+              ;;
+            *)
+              echo "只接受 stable 或 release-gate-test/** 的 push，实际 GITHUB_REF=${GITHUB_REF:-}" >&2
+              exit 1
+              ;;
+          esac
+          python3 scripts/release/gate.py prepare --fetch-source \
+            --sha "$SOURCE_SHA" --tag "$tag" --run-id "$GITHUB_RUN_ID" \
+            --rehearsal "$rehearsal" --fault "$fault"
+
+  ci:
+    needs: preflight
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-csharp.yml
+    with:
+      sha: ${{ needs.preflight.outputs.sha }}
+
+  windows:
+    needs: preflight
+    uses: ./.github/workflows/release-winui.yml
+    with:
+      sha: ${{ needs.preflight.outputs.sha }}
+
+  linux:
+    needs: preflight
+    uses: ./.github/workflows/release-linux.yml
+    with:
+      sha: ${{ needs.preflight.outputs.sha }}
+      fail-build: ${{ needs.preflight.outputs.fault == 'platform-failure' }}
+
+  # 唯一有写权限的 job：只创建 draft Release 并上传三件已核验的资产，没有公开步骤。
+  draft:
+    needs: [preflight, ci, windows, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # 两个平台的 artifact 名带 run id 与 attempt，只按精确名字取，绝不 merge，
+      # 免得重跑时把上一次 attempt 的包混进这一次。
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: downloaded/windows
+      - if: ${{ needs.preflight.outputs.fault != 'missing-asset' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: downloaded/linux
+      - name: Create draft and read back verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.sha }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          REHEARSAL: ${{ needs.preflight.outputs.rehearsal }}
+          FAULT: ${{ needs.preflight.outputs.fault }}
+        run: >-
+          python3 scripts/release/gate.py draft
+          --sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --run-id "$GITHUB_RUN_ID"
+          --rehearsal "$REHEARSAL" --fault "$FAULT"
+          --assets downloaded --manifest release-manifest.json
+      - name: Immutable handoff record
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-manifest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-manifest.json
+          if-no-files-found: error
+          retention-days: 7
