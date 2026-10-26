@@ -6,7 +6,7 @@
 
 维护者先验收一个固定的 release 提交，在该提交中准备统一版本号和非空发布说明。批准必须绑定源 SHA、旧 stable SHA、版本、说明路径与验收证据。release 分支后来前移就重新验收、重新批准，不把旧批准套到新 tip。
 
-脚本读取源提交的完整 tree，创建唯一父提交为旧 stable 的新提交。它不是开发分支 merge，不挑文件，不读 index 或工作区内容。源提交中的删除、点文件和二进制与其他已跟踪内容一起复制；开发中未提交内容保持原样。版本从源提交的 dotnet/Directory.Build.props 读取，版本 major.minor 必须对应 release 分支。提交消息保存批准与来源记录，目标 SHA 在命令回执中返回，避免自引用。
+脚本读取源提交的完整 tree，创建唯一父提交为旧 stable 的新提交。它不是开发分支 merge，不挑文件，不读 index 或工作区内容。源提交中的删除、点文件和二进制与其他已跟踪内容一起复制；开发中未提交内容保持原样。版本从源提交的 [Directory.Build.props](../dotnet/Directory.Build.props) 读取，版本 major.minor 必须对应 release 分支。提交消息保存批准与来源记录，目标 SHA 在命令回执中返回，避免自引用。
 
 批准 JSON 是维护者声明，不是签名或权限认证。脚本只验证声明的结构和仓库事实，不验证证据结论是否通过、链接是否可信，也不替代维护者批准。批准文件使用公开身份与证据引用，不放凭据或个人数据。approved_by_email 用于确定性 Git 作者和提交者身份，可使用公开 noreply 地址。
 
@@ -24,7 +24,7 @@ schema 为整数 1，evidence 为非空字符串数组。仅允许以下键。�
 	python3 scripts/git/promote.py --approval /path/to/approval.json
 
 4. **只有另行获准真实晋级时**，追加 --apply 创建对象并推进本地 stable，或追加 --apply --push 同时推送。写入使用同一 update-ref 事务验证本地 release 并对 stable 做 CAS；推送只更新 stable，使用精确旧 SHA lease、原子推送且不附带标签。目标经验证只有旧 stable 一个父提交，虽使用 lease 选项，也不能把远端改成无关历史。
-5. 保存完整 JSON 回执，再从实际目标提交复核。该模式核验来源记录、唯一父提交、源与目标 tree、版本及说明，不依赖旧回执，也不鉴定批准真实性或发布结果：
+5. 保存完整 JSON 回执，再从实际目标提交复核。该模式核验来源记录、原始提交头的唯一父提交、源与目标 tree、版本及说明，不依赖旧回执，也不鉴定批准真实性或发布结果。对象读取禁用 refs/replace，父链直接读取原始 commit，不采信 grafts 的历史视图：
 
 	python3 scripts/git/promote.py --verify-target <完整目标SHA>
 

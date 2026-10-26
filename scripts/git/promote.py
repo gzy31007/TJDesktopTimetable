@@ -55,13 +55,36 @@ class PromoteError(Exception):
 
 
 def git(repo, *args, input=None, env=None):
+  # 始终禁用 replace refs：source/target 的 tree、父链与消息必须是真实对象，而不是可被 git replace 换掉的内容。
+  environment = {**os.environ, **(env or {}), "GIT_NO_REPLACE_OBJECTS": "1"}
   result = subprocess.run(["git", "-C", str(repo), *args], input=input, text=True,
-                          capture_output=True, env=env or os.environ.copy())
+                          capture_output=True, env=environment)
   if result.returncode:
     raise PromoteError(f"git {' '.join(str(arg) for arg in args)} failed: "
                        f"{result.stderr.strip()}")
 
   return result.stdout.strip()
+
+
+def read_commit(repo, sha):
+  """读原始 commit 对象头，取 tree/parent/message。
+
+  grafts 会改写 rev-list 一类遍历视图，replace refs 还会换掉 cat-file 看到的内容，
+  所以父链只能从关闭 replace 后的 cat-file -p 原始头部解析，不能走 rev-list。
+  """
+  raw = git(repo, "cat-file", "-p", sha)
+  headers, _, message = raw.partition("\n\n")
+  tree = None
+  parents = []
+  for line in headers.splitlines():
+    key, _, value = line.partition(" ")
+    if key == "tree":
+      tree = value
+    elif key == "parent":
+      parents.append(value)
+  if tree is None or not SHA_RE.fullmatch(tree):
+    raise PromoteError(f"{sha} does not expose a regular commit header")
+  return {"tree": tree, "parents": parents, "message": message}
 
 
 def remote_refs(repo):
@@ -277,26 +300,25 @@ def verify_target(args):
     raise PromoteError("--verify-target must be a full immutable 40-char commit SHA")
   if git(repo, "cat-file", "-t", target) != "commit":
     raise PromoteError("--verify-target is not a commit object in this repository")
-  parents = git(repo, "rev-list", "--parents", "-n", "1", target).split()
-  if len(parents) != 2:
+  commit = read_commit(repo, target)
+  if len(commit["parents"]) != 1:
     raise PromoteError("target commit must have exactly one parent: the approved baseline")
-  record = parse_record(git(repo, "log", "-1", "--format=%B", target))
+  record = parse_record(commit["message"])
   if record["origin"] != args.expected_origin:
     raise PromoteError("record origin differs from the explicitly audited origin")
-  tree = git(repo, "rev-parse", f"{target}^{{tree}}")
-  if record["tree"] != tree:
+  if record["tree"] != commit["tree"]:
     raise PromoteError("target tree differs from the tree recorded in the commit message")
   source = record["source_sha"]
   if git(repo, "cat-file", "-t", source) != "commit":
     raise PromoteError("recorded source_sha is not a commit object in this repository")
-  if git(repo, "rev-parse", f"{source}^{{tree}}") != record["tree"]:
+  if read_commit(repo, source)["tree"] != record["tree"]:
     raise PromoteError("recorded source tree differs from the target tree; "
                        "the commit does not carry the complete source tree")
   version = read_version(repo, source)
   if version != record["version"]:
     raise PromoteError("recorded version differs from the source Version")
   notes_size = read_notes(repo, source, record["release_notes_path"])
-  if record["stable_base_sha"] != parents[1]:
+  if record["stable_base_sha"] != commit["parents"][0]:
     raise PromoteError("target parent is not the recorded stable baseline")
   return {
       "mode": "verify",
@@ -328,7 +350,7 @@ def promote(args):
   source, base = approval["source_sha"], approval["stable_base_sha"]
   if git(repo, "cat-file", "-t", source) != "commit":
     raise PromoteError("approval source_sha is not a commit object in this repository")
-  tree = git(repo, "rev-parse", f"{source}^{{tree}}")
+  tree = read_commit(repo, source)["tree"]
   version = read_version(repo, source)
   if version != approval["version"]:
     raise PromoteError(f"source {PROPS_PATH} Version {version} "
@@ -392,9 +414,10 @@ def promote(args):
         raise PromoteError("Local stable changed concurrently; stop and inspect")
     elif git(repo, "cat-file", "-t", f"{target}^{{commit}}") != "commit":
       raise PromoteError("Local stable points at a missing object; stop and inspect")
-    parents = git(repo, "rev-list", "--parents", "-n", "1", target).split()
-    if parents != [target, base]:
-      raise PromoteError("Created candidate must have exactly one parent: the approved baseline")
+    created = read_commit(repo, target)
+    if created["parents"] != [base] or created["tree"] != tree:
+      raise PromoteError("Created candidate must carry the source tree with exactly one parent: "
+                         "the approved baseline")
     mode = "apply"
   receipt = {
       "mode": mode,
@@ -428,6 +451,8 @@ def publish(repo, approval, base, target, receipt):
                        f"{target}: keep state and inspect, do not roll back")
   remote_stable = observed.get(STABLE_REF) or None
   if remote_stable == target:
+    # 另一同名批准已推进到同一目标：no-op，但回执必须反映刚刚读回的远端，而不是初读基线。
+    receipt["remote"] = {"stable": target}
     return
   if remote_stable != base:
     raise PromoteError("Remote stable moved before push; local stable retained at "

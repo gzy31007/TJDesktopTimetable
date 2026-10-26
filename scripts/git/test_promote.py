@@ -560,5 +560,77 @@ class PromoteTests(unittest.TestCase):
                      "apply")
 
 
+  def test_concurrent_same_candidate_push_is_reported_without_event(self):
+    self.approval()
+    target = self.run_cli("--approval", str(self.approval_file))["stable"]["target_sha"]
+    self.install_git_shim("ls-remote", 3, ["git", "-C", str(self.repo), "push", "origin",
+                                            f"{target}:refs/heads/stable"])
+    result = self.run_cli("--approval", str(self.approval_file), "--apply", "--push")
+    self.assertEqual(result["stable"]["target_sha"], target)
+    self.assertEqual(result["local"], {"stable": target})
+    self.assertEqual(result["remote"], {"stable": target})
+    self.assertNotIn("event", result)
+    self.assertEqual(self.remote_map()["refs/heads/stable"], target)
+
+
+  # ---- 切片 H：replace / grafts 不能伪装父链 ----
+
+  def disguised_record(self):
+    target = self.run_cli("--approval", str(self.approval_file), "--apply")["stable"]["target_sha"]
+    record = json.loads(self.git("log", "-1", "--format=%B", target).splitlines()[-1])
+    message = "release: disguised\n\n" + json.dumps(record, sort_keys=True, separators=(",", ":"))
+    return record, message
+
+  def test_verify_rejects_replace_that_hides_a_second_parent(self):
+    self.approval()
+    record, message = self.disguised_record()
+    two_parents = self.git("commit-tree", self.tree, "-p", self.base, "-p", self.source,
+                           "-m", message)
+    twin = self.git("commit-tree", self.tree, "-p", self.base, "-m", message)
+    self.assertEqual(self.git("rev-list", "--parents", "-n", "1", two_parents).split(),
+                     [two_parents, self.base, self.source])
+    error = self.run_cli("--verify-target", two_parents, success=False)
+    self.assertIn("parent", error.stderr)
+
+    self.git("replace", two_parents, twin)
+    self.assertEqual(self.git("rev-list", "--parents", "-n", "1", two_parents).split(),
+                     [two_parents, self.base])
+    error = self.run_cli("--verify-target", two_parents, success=False)
+    self.assertIn("parent", error.stderr)
+
+  def test_verify_rejects_grafts_that_hide_a_second_parent(self):
+    self.approval()
+    record, message = self.disguised_record()
+    two_parents = self.git("commit-tree", self.tree, "-p", self.base, "-p", self.source,
+                           "-m", message)
+    grafts = self.repo / ".git/info/grafts"
+    grafts.parent.mkdir(parents=True, exist_ok=True)
+    grafts.write_text(f"{two_parents} {self.base}\n", encoding="utf-8")
+    self.assertEqual(self.git("rev-list", "--parents", "-n", "1", two_parents).split(),
+                     [two_parents, self.base])
+    error = self.run_cli("--verify-target", two_parents, success=False)
+    self.assertIn("parent", error.stderr)
+
+  def test_source_replace_cannot_change_the_copied_tree(self):
+    self.approval()
+    self.write_props("9.9.9")
+    (self.repo / "fake-only").write_text("fake\n", encoding="utf-8")
+    self.git("add", ".")
+    fake = self.git("commit-tree", self.git("write-tree"), "-p", self.source,
+                    "-m", "fake source tree")
+    self.git("replace", self.source, fake)
+    self.assertIn("9.9.9", self.git("show", f"{self.source}:dotnet/Directory.Build.props"))
+
+    result = self.run_cli("--approval", str(self.approval_file), "--apply")
+
+    self.assertEqual(result["version"], "1.6.2")
+    self.assertEqual(result["release"]["tree"], self.tree)
+    target = result["stable"]["target_sha"]
+    self.assertIn("<Version>1.6.2</Version>",
+                  self.git("show", f"{target}:dotnet/Directory.Build.props"))
+    self.assertNotIn("fake-only", self.git("ls-tree", "-r", "--name-only", target))
+    self.assertTrue(self.run_cli("--verify-target", target)["verified"])
+
+
 if __name__ == "__main__":
   unittest.main()
