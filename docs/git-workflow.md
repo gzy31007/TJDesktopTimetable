@@ -82,6 +82,10 @@ python3 scripts/git/bootstrap.py \
 
 最小 Git 合约 7 项通过，覆盖脏内容、错误 fetch/push origin、基线或标签变化、同名本地/远端冲突、相同来源及重复执行、工作流审计身份。核心测试 559 项通过。核心测试使用原工作区，包含既有未提交业务改动，不冒称干净候选验证；NuGet 漏洞缓存写权限产生 NU1900 警告，未影响测试退出 0。未执行本票无关的 WinUI 真机矩阵，也不以这些测试替代平台保护。[工单 #40](https://github.com/gzy31007/TJDesktopTimetable/issues/40) 保留审查与交付结论。
 
+## release 到 stable 的候选晋级
+
+首次初始化、日常 PR 合并与发布复制是三个不同操作。候选晋级使用 [逐候选批准与操作说明](stable-promotion.md)：固定已验收源 SHA，以完整 tree 创建 stable 的单父追加提交，保留来源、版本与验收记录；默认只读计划。#41 交付脚本与合成验证，不推进真实 stable，也未接通生产 Actions；触发契约及并发失败边界见该说明。
+
 ## 发布边界
 
 - 版本号与发布说明在 release 线准备，流水线不自动递增版本。
