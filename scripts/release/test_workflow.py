@@ -754,6 +754,11 @@ class DraftContract(unittest.TestCase):
             },
         )
 
+    def test_missing_asset_rehearsal_omits_linux_download_not_a_fake_gate_error(self) -> None:
+        windows, linux = download_steps(self.workflow, "draft")
+        self.assertNotIn("if", windows)
+        self.assertEqual(linux.get("if"), "${{ needs.preflight.outputs.fault != 'missing-asset' }}")
+
     def test_draft_uses_same_context_and_fault(self) -> None:
         step = find_step(self.workflow, "draft", "Create draft")
         script = step_run(step)

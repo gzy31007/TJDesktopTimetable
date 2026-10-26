@@ -51,7 +51,7 @@ contents:write 不是“只能建草稿”的平台权限。管理员、外部�
 
 ## 隔离演练与验证边界
 
-专用分支 release-gate-test/<批次>/<场景> 仍走同一编排，支持 version-mismatch、missing-asset、platform-failure、success；分别验证版本拒绝、缺资产拒绝、单平台失败、完整受检草稿。演练不要求生产晋级记录，但要求固定 SHA、干净版本和非空发布说明。使用 gate-test-<run_id>-v<Version> 标签，永远是 draft，不是“公开 prerelease”。YAML 不含公开 job，Python CLI 同时冻结所有公开，包括误批后的演练。重跑 attempt 不能拼接旧构建证明；新 push 才得到新 run_id。真实运行只可隔离演练，不能推真实 stable 或触发旧生产入口。
+专用分支 release-gate-test/<批次>/<场景> 仍走同一编排，支持 version-mismatch、missing-asset、platform-failure、success；分别验证版本拒绝、缺资产拒绝、单平台失败、完整受检草稿。missing-asset 场景不下载 Linux artifact，让同一个公共资产校验因实际缺件拒绝，而不是专用开关假失败。演练不要求生产晋级记录，但要求固定 SHA、干净版本和非空发布说明。使用 gate-test-<run_id>-v<Version> 标签，永远是 draft，不是“公开 prerelease”。YAML 不含公开 job，Python CLI 同时冻结所有公开，包括误批后的演练。重跑 attempt 不能拼接旧构建证明；新 push 才得到新 run_id。真实运行只可隔离演练，不能推真实 stable 或触发旧生产入口。
 
 本地检查：
 

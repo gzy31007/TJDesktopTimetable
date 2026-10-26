@@ -2,7 +2,7 @@ name: Release (Linux)
 
 # 统一发布入口调用 → 产出自包含的 Avalonia Linux 资产，不操作 Release。
 #
-# 与 release-winui.yml 平行，仅构建 Actions 资产，由 release.yml 统一草稿收尾与审批发布。
+# 与 release-winui.yml 平行，仅构建 Actions 资产，由 release.yml 统一草稿收尾；本中间版本冻结公开。
 #
 # 只做构建与打包，**不跑 GUI 运行时验收**：runner 上没有 X11 会话，
 # 贴桌面层 / 显示桌面可见性 / 拖缩这些行为只能在真机（KDE X11 / XWayland）上看，

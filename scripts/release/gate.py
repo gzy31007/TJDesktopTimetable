@@ -1409,8 +1409,6 @@ def draft(ctx: GateContext, gh: Any, *, assets_dir: Path, manifest_path: Path,
           repo_root: Path, env: Mapping[str, str]) -> dict[str, Any]:
     candidate = prepare(ctx, repo_root=repo_root, env=env, fetch_source=True)
     assets, builds = verify_build_outputs(ctx, assets_dir)
-    if ctx.fault == "missing-asset":
-        raise GateError("隔离演练：缺少资产，拒绝创建草稿")
     run = verify_run(gh, ctx)
     branch = env["GITHUB_REF"].removeprefix("refs/heads/")
     if (run.get("head_branch") != branch or str(run.get("id")) != ctx.run_id

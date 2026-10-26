@@ -132,6 +132,23 @@ class CandidateCliTests(unittest.TestCase):
         self.assertIsNone(result["release_ref"])
         self.assertEqual(self.gh.publish_patches(), [])
 
+    def test_missing_asset_rehearsal_hits_the_same_real_package_validator(self):
+        self.sha = self.source
+        self.git("checkout", "--detach", self.sha)
+        self.env.update(GITHUB_SHA=self.sha, GITHUB_REF="refs/heads/release-gate-test/missing-asset")
+        self.tag, self.rehearsal = f"gate-test-{RUN_ID}-v{VERSION}", "true"
+        self.gh.run.update(head_sha=self.sha, head_branch="release-gate-test/missing-asset")
+        self.build_outputs()
+        linux = self.assets / "linux"
+        held = self.root / "withheld-linux"
+        self.assertEqual(linux.resolve().parent, self.assets.resolve())
+        self.assertEqual(held.resolve().parent, self.root.resolve())
+        linux.rename(held)
+        error = self.cli("draft", success=False, extra=("--fault", "missing-asset"))
+        self.assertIn("windows/linux", error)
+        self.assertEqual(self.gh.requests, [])
+        self.assertFalse(self.manifest.exists())
+
     def test_corrupt_build_proof_fails_closed_before_any_github_request(self):
         self.build_outputs()
         (self.assets / "linux" / "build-proof.json").write_text("{")
